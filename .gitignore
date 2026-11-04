@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Builds
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+# Engine bundled into release builds (pnpm bundle:engine)
+apps/desktop/src-tauri/resources/backend/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Local data (projects, uploads, generated models, SQLite)
+.data/
+data/
+*.sqlite3
+*.sqlite3-*
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Test output
+test-results/
+playwright-report/
+blob-report/
+coverage/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log

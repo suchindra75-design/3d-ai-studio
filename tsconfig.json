@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "e2e",
+    "playwright.config.ts",
+    "playwright.desktop.config.ts",
+    "playwright.workflows.config.ts",
+    "vitest.config.ts",
+    "vitest.setup.ts"
+  ]
+}

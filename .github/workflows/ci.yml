@@ -1,0 +1,231 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  backend:
+    name: Backend (ruff, mypy, pytest, COLMAP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      # COLMAP 4 (CPU) so the real reconstruction tests run instead of skipping.
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: colmap
+          create-args: -c conda-forge colmap=4.2.1=cpu*
+          cache-environment: true
+          init-shell: none
+      - run: echo "AI3D_COLMAP_PATH=$MAMBA_ROOT_PREFIX/envs/colmap/bin/colmap" >> "$GITHUB_ENV"
+      # Optional extras whose tests would otherwise be skipped (not Open3D: large).
+      - run: uv sync --all-packages --frozen --python 3.11 --extra usdz --extra errors --extra s3
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run mypy --strict infrastructure/scripts/bundle_engine.py
+      - run: uv run pytest
+
+  backend-postgres:
+    name: Backend on PostgreSQL
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ai3d
+          POSTGRES_PASSWORD: ai3d
+          POSTGRES_DB: ai3d_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ai3d" --health-interval 5s --health-retries 10
+    env:
+      AI3D_TEST_DATABASE_URL: postgresql+psycopg://ai3d:ai3d@localhost:5432/ai3d_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages --extra postgres --frozen --python 3.11
+      - run: uv run pytest
+
+  backend-s3:
+    name: Backend on S3-compatible storage
+    runs-on: ubuntu-latest
+    env:
+      AI3D_TEST_S3_ENDPOINT: http://127.0.0.1:8333
+      AI3D_TEST_S3_ACCESS_KEY_ID: ai3d-test-key
+      AI3D_TEST_S3_SECRET_ACCESS_KEY: ai3d-test-secret-only-for-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: SeaweedFS S3 gateway (test credentials)
+        run: |
+          echo '{"identities": [{"name": "test", "credentials": [{"accessKey": "ai3d-test-key", "secretKey": "ai3d-test-secret-only-for-tests"}], "actions": ["Admin", "Read", "Write", "List", "Tagging"]}]}' > "$RUNNER_TEMP/s3.json"
+          docker run -d --name s3 -p 127.0.0.1:8333:8333 \
+            -v "$RUNNER_TEMP/s3.json:/etc/seaweedfs/s3.json:ro" chrislusf/seaweedfs:latest \
+            server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data
+          timeout 60 sh -c 'until curl -s -o /dev/null http://127.0.0.1:8333/; do sleep 1; done'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages --extra s3 --frozen --python 3.11
+      - run: uv run pytest
+
+  frontend:
+    name: Frontend (lint, types, unit tests, builds)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --all-packages --frozen --python 3.11
+      - name: Generated API types are up to date
+        run: pnpm gen:api --check
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --all-packages --frozen --python 3.11
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - run: pnpm test:e2e:desktop
+      - run: pnpm test:e2e:workflows
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+
+  desktop:
+    name: Desktop shell (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  docker:
+    name: Docker images (build + compose smoke test)
+    runs-on: ubuntu-latest
+    env:
+      # Compose names images <project>-<service>; the builds below use those tags.
+      COMPOSE_PROJECT_NAME: ai3d
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/backend.Dockerfile
+          target: backend
+          tags: ai3d-backend:latest
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/web.Dockerfile
+          tags: ai3d-web:latest
+          load: true
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - name: Start the stack
+        run: docker compose up -d --no-build --wait --wait-timeout 180
+      - name: Smoke test (health, web proxy, upload, thumbnail)
+        run: |
+          set -euo pipefail
+          API=http://127.0.0.1:8000; WEB=http://127.0.0.1:3000
+          curl -fsS "$API/api/v1/health"; echo
+          # The web container proxies /api/v1 to the backend.
+          curl -fsS "$WEB/api/v1/health"; echo
+          curl -fsS -o /dev/null "$WEB/"
+          # A 640x480 PNG made with the standard library only.
+          python3 - <<'PY'
+          import random, struct, zlib
+          w, h = 640, 480
+          rnd = random.Random(1)
+          rows = b"".join(b"\0" + bytes(rnd.randrange(256) for _ in range(w * 3)) for _ in range(h))
+          chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+          png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+          png += chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+          open("smoke.png", "wb").write(png)
+          PY
+          project=$(curl -fsS -X POST "$WEB/api/v1/projects" -H 'content-type: application/json' \
+            -d '{"name":"CI smoke","input_mode":"single_image"}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          image=$(curl -fsS -F "files=@smoke.png;type=image/png" "$WEB/api/v1/projects/$project/images" \
+            | python3 -c 'import json,sys; r=json.load(sys.stdin)["results"][0]; assert r["status"]=="created", r; print(r["image"]["id"])')
+          curl -fsS -o /dev/null -w 'thumbnail %{http_code} %{content_type}\n' \
+            "$WEB/api/v1/images/$image/thumbnail"
+      - name: Data survives a restart
+        run: |
+          docker compose down
+          docker compose up -d --no-build --wait --wait-timeout 180
+          curl -fsS http://127.0.0.1:3000/api/v1/projects \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); assert any(p["name"]=="CI smoke" for p in d["items"]), d'
+      - name: Container logs
+        if: failure()
+        run: docker compose logs
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
+      # The opt-in COLMAP image is large and slow to build: main branch only.
+      - name: Build backend image with COLMAP
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/backend.Dockerfile
+          target: backend-colmap
+          push: false
+          cache-from: type=gha,scope=backend-colmap
+          cache-to: type=gha,mode=max,scope=backend-colmap

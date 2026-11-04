@@ -1,0 +1,355 @@
+# AI 3D Studio — Implementation Roadmap
+
+Each phase ends with a working application, green checks (lint, types, unit,
+integration, e2e, builds) and updated docs. "Done" below means implemented
+**and** covered by tests that were executed.
+
+## Phase 0 — Foundation ✅
+
+- Monorepo: pnpm workspace (apps, packages) + uv workspace (backend, local-engine).
+- Docs: product spec, architecture, AI pipeline, database schema, roadmap,
+  contributing guide, installation, providers, local GPU setup, troubleshooting.
+- Tooling: ESLint 10 + typescript-eslint, Prettier, TypeScript (strict), ruff,
+  mypy (strict), Vitest + RTL, Pytest, Playwright, rustfmt + clippy.
+- Generated TS API types from the backend OpenAPI schema (`pnpm gen:api`, CI check).
+- Docker images (backend, web) + Compose; GitHub Actions CI (6 jobs).
+- Desktop: Tauri 2 shell with Vite entry, strict CSP, minimal capabilities.
+
+## Phase 1 — Shell, backend, database, projects, uploads ✅
+
+- FastAPI app factory, structured logging (JSON/console), request IDs, uniform
+  errors, body-size limit, CORS for web + desktop origins.
+- SQLAlchemy 2 models + Alembic migration for all 15 tables; SQLite (WAL) and
+  PostgreSQL verified.
+- Local file storage (atomic writes, traversal-safe keys).
+- Projects: create, list (search, status filter, pagination), get, update,
+  archive/restore, delete (rows + files).
+- Images: multi-file upload with per-file results, content-based validation
+  (JPEG/PNG/WebP), size/pixel/count limits, SHA-256 dedupe, original bytes
+  preserved, EXIF subset (GPS excluded), orientation-aware thumbnails,
+  quality analysis (sharpness, exposure, clipping, contrast, alpha coverage).
+- Capture assistant: set-level checks (count, blur, lighting, resolution,
+  focal length, reflective/low-texture hints), shooting guide; overlap
+  honestly `not_assessed`.
+- Hardware/dependency detection (`/api/v1/devices/local`) with conservative
+  capability verdicts.
+- UI: landing, projects dashboard, new project, project workspace (upload,
+  queue with progress, grid, details, capture check), settings (backend +
+  machine), about/credits; responsive (phone top bar), keyboard accessible,
+  reduced motion.
+
+## Phase 2 — Provider interface, jobs and first real integration ✅ (real providers untested)
+
+- **Provider protocol** (`ai3d/providers/base.py`): capability discovery,
+  per-quality-mode option translation, cost estimates, normalised errors,
+  submit/poll/cancel/fetch. The pipeline never imports a concrete adapter.
+- **Tripo v3** and **Meshy** adapters, tested against fake servers that follow
+  the documented wire formats (upload, task, progress, failure, expired links,
+  rate limits). Results are downloaded as soon as a task succeeds.
+- **Mock provider** (test-only): registered only with `AI3D_ENVIRONMENT=test`,
+  returns a labelled placeholder sphere.
+- **Persistent job runner** (`ai3d/workers/`): compare-and-set claiming, leases
+  with heartbeats, cooperative cancel, restart recovery that resumes the
+  existing provider task (no double charge), retries linked by `parent_job_id`.
+- **Job API**: plan preview, create (Idempotency-Key), list, get, cancel, retry,
+  consent, event timeline, and a Server-Sent Events stream with
+  `Last-Event-ID` resume (`no-transform`, so proxies don't buffer it); the UI
+  falls back to polling.
+- **Consent flow**: `waiting_for_consent`; nothing is uploaded until the
+  project allows cloud use *and* the job is approved.
+- **Provider preprocessing**: upright, sRGB, resized copies with all metadata
+  stripped; originals untouched.
+- **Provider keys**: environment, or stored encrypted (`AI3D_SECRET_KEY` or a
+  generated `secret.key`); only a 4-character hint is ever returned; key check
+  via the provider's balance endpoint.
+- **Mesh validation** (trimesh): re-opens the stored file, checks finite
+  geometry, counts, bounds, components, watertightness; models and versions
+  recorded with an "AI-generated: unseen surfaces invented" label.
+- **UI**: generation panel (photo/views, quality, processing mode, provider,
+  options preview with estimated cost and warnings, consent), live job cards
+  (progress, timeline, cancel, retry, permission prompt), model list (preview,
+  GLB download, delete), provider keys in Settings.
+
+Exit criteria: mock pipeline e2e ✅; adapters unit-tested ✅; **real generation
+with Tripo or Meshy not yet verified** — it needs a paid API key.
+
+Verified on 2026-11-03 (all executed): 161 backend tests; 45 frontend unit
+tests; 12 Playwright e2e tests (6 desktop + 6 mobile); ruff, mypy (strict),
+ESLint, Prettier, tsc; generated API types up to date; web and desktop builds;
+cargo fmt, clippy and test. CI on GitHub has not been run.
+
+## Phase 3 — 3D workspace ✅
+
+- **`packages/viewer`** (React Three Fiber + drei): GLB loading (Draco and
+  meshopt decoders are wired in and bundled, but no compressed file has been
+  tested yet), orbit/pan/zoom, camera presets
+  (fit, front, back, left, right, top, bottom), image-based lighting generated
+  locally, key light with shadows, grid, axes, bounding box, Material / Solid /
+  Wireframe display, click-to-select with a selection box. Scene facts are
+  computed from the real geometry: parts, vertices, triangles, materials,
+  textures and exact world-space dimensions (shown with the file's units and,
+  for AI output, a "no real-world scale" note).
+- **`packages/editor`**: undo/redo history (limit 200, folded change list),
+  commands for move/rotate/scale (gizmo or numeric fields) and material colour,
+  roughness, metalness and opacity (live preview, one undo step per change),
+  GLB export with the model's own materials.
+- **Versions**: `POST /models/{id}/versions` stores an edited GLB as a new
+  `edited` version (parent kept, provenance inherited, file re-opened and
+  checked, change list in the notes); `GET /models/{id}/versions`;
+  `PATCH /models/{id}` renames or switches the current version (nothing is
+  deleted). Version panel with view, make current, download.
+- **Workspace screen** (`/projects/{id}/models/{id}`, web and desktop):
+  hierarchy (with view-only hide/show), inspector (model facts, selection,
+  transform, materials, quality report), keyboard shortcuts, unsaved-edit
+  guards, WebGL-unavailable fallback, responsive phone layout. three.js loads
+  only when a model is opened (separate chunk).
+
+Not in Phase 3 (and not shown as if it were): vertex-level mesh editing,
+texture settings (filtering, replacing images), KTX2/Basis compressed
+textures, editing glTF animations (they are preserved on save).
+
+Verified on 2026-11-03 (all executed): 170 backend tests; 75 frontend unit
+tests; 16 Playwright e2e tests (8 desktop + 8 mobile, real WebGL in local
+Chrome); the workspace also checked by hand in the browser (select, gizmo
+drag, save, wireframe, phone layout); ruff, mypy (strict), ESLint, Prettier,
+tsc; web and desktop builds; cargo fmt, clippy and test. CI has not been run.
+
+## Phase 4 — Multi-image photogrammetry ✅ (dense/CUDA path untested)
+
+- **`ai3d_engine.reconstruction`**: COLMAP 4 runner (allow-listed subcommands,
+  arguments built in code, no shell, live progress from the log, cancellation
+  and timeouts that always stop the process, version check ≥ 4.0); text-model
+  reader; upright alignment from camera axes; pipeline features → matching →
+  mapping → Open3D point filtering → Delaunay surface (sparse without CUDA,
+  dense with it) → texture (`mesh_texturer`, CPU).
+- **Job integration**: `photogrammetry` jobs run in the backend's job runner
+  on this computer (one at a time), with stage progress, cancel, restart after
+  an interruption, meaningful failures (no starting pair, too few photos
+  placed, unused photos, separate groups, weak photos).
+- **Models**: saved as `reconstructed` versions with `measured` provenance,
+  the filtered point cloud as a second file, reconstruction facts in the
+  quality report, and "scale unknown" in the notes and inspector.
+- **Routing**: Local processing or the *Photogrammetry* method sends a capture
+  set here; Automatic mode prefers it for 20+ photos when COLMAP is available;
+  a single photo is never sent to it. No consent step: nothing is uploaded.
+- **Capture check**: *Measure overlap* (OpenCV SIFT + RANSAC) reports isolated
+  photos and disconnected groups; cached per photo set.
+- **UI**: method choice (Photogrammetry / AI multi-view), photo selection,
+  COLMAP status in Settings, stage labels.
+- **Fix found on the way**: the shared file check counted UV-seam vertex splits
+  as separate pieces and holes; topology is now judged on the merged shape
+  (affects provider output too).
+
+Verified on this Intel Mac with COLMAP 4.2.1 (CPU, conda-forge) and Open3D
+0.19.0: 30 synthetic photos → all 30 placed, ≈ 7,500 points, 0.31 px mean
+reprojection error, textured 11k-triangle surface standing upright, in ≈ 50 s.
+Not verified: real camera photos, dense reconstruction (needs CUDA), Windows
+and Linux.
+
+Checks run on 2026-11-03 with `AI3D_COLMAP_PATH` set: 198 Python tests
+(including real COLMAP runs: success, non-overlapping photos, cancellation);
+78 frontend unit tests; 17 Playwright e2e tests plus 1 skipped by design (the
+full reconstruction runs on desktop only); ruff, mypy (strict), ESLint,
+Prettier, tsc, web and desktop builds, cargo fmt/clippy/test. One frontend
+unit run showed 4 failures that did not reproduce in 5 later runs (including
+under full CPU load); cause not identified. CI has not been run.
+
+## Phase 5 — Geometry & texture processing, quality reports, export ✅
+
+- **Processing chain** (`processing/geometry.py`, trimesh + fast-simplification):
+  clean-up (degenerate/duplicate triangles), loose-fragment removal,
+  consistent normals, hole filling (untextured meshes only), texture size
+  limits, decimation (untextured only), ground/table removal (RANSAC plane +
+  anything under it + largest piece), real-world scale from one measurement.
+  Topology is computed on a seam-merged copy so textured meshes keep their UVs.
+- **Quality profiles**: Fast (clean-up, fragments, 2048 px textures), High
+  (+ normals, holes, 4096 px), Professional (+ 300k-triangle budget, 8192 px,
+  texture baking with Blender; retopology listed as unavailable).
+- **Enhance workflow**: `POST /models/{id}/enhance(/plan)` → background job on
+  this computer → new `enhanced` version (source kept, provenance inherited,
+  steps recorded); retry and restart supported; no new version when nothing
+  changed. Known scale is inherited by later edits and enhancements.
+- **Quality report v2**: boundary and non-manifold edges, duplicate faces,
+  winding consistency, volume (closed meshes), UV range, texture sizes; new
+  Quality tab with geometry / surface / size / reconstruction / steps.
+- **Export center**: GLB, glTF (zip), OBJ+MTL (zip), STL and 3MF (millimetres),
+  USDZ (Pixar USD, optional `usdz` extra) — each re-opened with an independent
+  reader and compared (triangles, size, texture); mismatches are never offered.
+  FBX via Blender when installed (see *Blender* below), otherwise unavailable.
+- **Sizes**: shown in metres once a measurement sets the scale, otherwise in
+  the model's own units.
+
+Measured on the synthetic photogrammetry scans: after ground removal the box's
+proportions were 7–25% off (coarse sparse surfaces), so the measurement fixes
+one dimension exactly and the others carry that error. Not verified: real
+photos.
+
+**Blender follow-up (2026-11-04, Blender 4.5.15 LTS):** FBX export (textures
+embedded, metres, Y-up; re-opened in a separate Blender run and compared) and
+texture baking for textured models over the Professional budget (reduced copy,
+new UVs, base colour baked with Cycles on the CPU; median colour error 1/255
+on the test sphere). Two exporter problems were found and fixed: tinted
+textures were dropped, and only the first of several textures was embedded.
+Retopology stays unavailable (QuadriFlow moved open surfaces; GLB holds only
+triangles). Only base colour is baked.
+
+Checks run on 2026-11-03: 222 Python tests passed in the full run (the 3
+real-COLMAP tests were skipped there for an unidentified reason and passed in
+a separate run with `AI3D_COLMAP_PATH`); 82 frontend unit tests; 19 Playwright
+e2e tests plus 1 skipped by design; ruff, mypy (strict), ESLint, Prettier, tsc,
+web and desktop builds, cargo clippy/test. The Enhance and Export tabs were
+also checked by hand on a photogrammetry model. CI has not been run.
+
+## Phase 6 — Desktop app & local agent ✅ (release bundling of the engine in Phase 7)
+
+- **Private local engine (sidecar)**: the Tauri app starts `ai3d-server`
+  itself on `127.0.0.1`, on a random free port, with a fresh 256-bit token per
+  launch and the app's own data folder (`~/Library/Application
+  Support/org.ai3dstudio.desktop` on macOS). It waits for `/api/v1/health`,
+  restarts a crashed engine (3 times, with back-off), and on quit sends
+  SIGTERM so running jobs are handed back for recovery. Output goes to
+  `logs/backend.log` in the data folder (truncated above 5 MB).
+- **Per-launch token** (`AI3D_API_TOKEN`): every `/api/*` call except
+  `/api/v1/health` needs `Authorization: Bearer …` (or `?access_token=` for
+  `<img>`, downloads and live progress). Other programs and web pages on the
+  machine reach the port but get 401. The token is never logged.
+- **Watchdog** (`AI3D_PARENT_PID`): the engine exits by itself when the app
+  disappears without a clean quit (crash, force quit, `tauri dev` rebuilds).
+- **Restricted Rust commands**: app info, engine status, restart engine, save
+  a backend download, open the data folder. Saving accepts only model-version,
+  export and image download paths; the destination comes from the native Save
+  dialog, and the file name is reduced to a bare, safe name. The window has no
+  shell, file-system, HTTP, dialog or opener permissions of its own.
+- **Desktop UI**: start-up screen while the engine starts; on failure the
+  reason, the last log lines and *Try again*. Downloads and exports open the
+  native Save dialog; Settings has *Open* for the data folder; About shows the
+  engine's port and log path.
+- **Tests**: Rust unit tests (token, ports, log tail, download allow-list,
+  file names) and an integration test that starts the real engine, checks the
+  token (401 without, 200 with), the data folder, the log, saving a download,
+  restart after `SIGKILL` and a clean stop. Backend token/watchdog tests.
+  A Playwright suite (`pnpm test:e2e:desktop`) drives the desktop UI against a
+  token-protected engine: create, upload, thumbnail, 3D model and download all
+  work through the token, with no 401s.
+
+Verified by hand in `pnpm dev:desktop`: engine on a random port with the app's
+data folder, migrations, token-authenticated requests from the window, and the
+watchdog (engine exited about 1 s after the app was force-killed).
+
+Not done or not verified: release builds do not contain the engine yet (a
+`tauri build` app shows "The local engine is not included in this build"
+unless `AI3D_DESKTOP_BACKEND` points to one; bundling is Phase 7). The Tauri
+window itself is not automated (Tauri's WebDriver does not support macOS);
+the native Save dialog and *Open data folder* were not clicked through by hand.
+The normal Quit path is covered only by the integration test's `stop()`.
+No local AI provider: this machine has no suitable GPU, so none was added.
+
+Checks run on 2026-11-04 (with COLMAP 4.2.1 and Blender 4.5.15 installed):
+250 Python tests (none skipped); 85 frontend unit tests; 19 web e2e tests plus
+1 skipped by design (FBX exported and verified through the UI); 2 desktop UI
+e2e tests; 11 Rust unit tests and 1 engine integration test; ruff, mypy
+(strict), ESLint, Prettier, tsc, web and desktop builds, cargo fmt/clippy.
+CI has not been run.
+
+## Phase 7 — Testing, documentation & release packaging ✅ (Windows/Linux builds and signing unverified)
+
+- **Desktop release builds bundle the engine** (`pnpm build:desktop-app`):
+  - **What's inside:** a relocatable CPython 3.11 with the backend installed
+    from `uv.lock` (hash-checked), byte-compiled, with a licence list and a
+    smoke test (D24).
+  - **How the app runs it:** `python -I -m ai3d.cli` from its data folder, so
+    `<data folder>/.env` configures it.
+  - **Finding tools:** COLMAP is also looked for in Homebrew's folders and in
+    the self-contained install from LOCAL_GPU_SETUP, because apps started from
+    Finder don't see the shell's PATH.
+  - **Verified on macOS Intel:**
+    - The `.app` (670 MB) started its bundled engine and listed projects
+      through the token.
+    - A normal Quit shut the engine down cleanly. That was the Phase 6 gap;
+      relaunching also worked.
+    - The `.dmg` (184 MB) passes `hdiutil verify`, and the engine imports from
+      the mounted image.
+- **Restart and recovery, end to end** (`test_restart_recovery.py`):
+  - The real server process is killed with SIGKILL in the middle of a
+    generation, then restarted on the same data folder.
+  - The project, photo, thumbnail, finished model and job history are all
+    there.
+  - The interrupted job resumes the same provider task. Its photo was sent
+    once, before the restart, and never again.
+- **Job workflows in the browser** (`pnpm test:e2e:workflows`):
+  - A provider error is shown, and retrying succeeds.
+  - A running job is cancelled, then retried.
+  - The history survives a reload.
+  - These use two test-only settings of the mock provider:
+    `AI3D_MOCK_POLLS_UNTIL_DONE` and `AI3D_MOCK_FAIL_FIRST_TASK`.
+- **S3-compatible storage** (`s3` extra, D25):
+  - Tested against SeaweedFS: the storage contract tests (24) and the whole
+    backend suite with every file stored in a bucket.
+- **Optional error reporting** (`errors` extra, `AI3D_SENTRY_DSN`, D26):
+  - Errors only. No request data, local variables, host name or user is sent.
+  - Tokens, keys and the home path are scrubbed.
+  - Tested with a captured event.
+- **Release workflow** (`.github/workflows/release.yml`):
+  - Desktop builds for macOS (Apple Silicon and Intel), Linux and Windows go
+    to a draft GitHub release, with licence lists.
+  - Container images go to GHCR.
+  - Optional macOS signing and notarization from secrets.
+- **Docs:**
+  - New: [TESTING.md](TESTING.md) (every workflow mapped to its tests),
+    [RELEASING.md](RELEASING.md), [ERROR_REPORTING.md](ERROR_REPORTING.md) and
+    `CHANGELOG.md`.
+  - Updated: architecture decisions D24–D27, installation, troubleshooting,
+    README and `.env.example`.
+- **Container images** (verified on Docker 29.8):
+  - Measured sizes: backend 259 MB compressed (1.19 GB on disk), with
+    PostgreSQL and USDZ support; web 94 MB.
+  - Both images run as non-root, with a read-only root filesystem and no
+    Linux capabilities.
+  - Compose smoke test passed: health, upload and thumbnail through the web
+    proxy; data survived `down`/`up`. The PostgreSQL profile passed too.
+  - The opt-in `backend-colmap` target (COLMAP 4.2.1, CPU, 414 MB compressed)
+    ran a real 10-photo reconstruction inside a read-only container.
+- **CI:**
+  - Installs COLMAP and the optional extras, so the real reconstruction, USDZ,
+    S3 and error-reporting tests run.
+  - New S3 job (SeaweedFS), the two new browser suites, and a compose smoke
+    test with a persistence check.
+- **No Celery/Redis** (D27): nothing needs distributed workers yet.
+
+Checks run on 2026-11-04 (COLMAP 4.2.1 and Blender 4.5.15 installed):
+
+- **Python:** 262 tests passed. The 7 skips are the S3 variants, which were
+  run separately against SeaweedFS: 25 storage tests, and the whole backend
+  suite on S3 (266 passed).
+- **Frontend:** 85 unit tests.
+- **Browser tests:** 19 web e2e tests plus 1 skipped by design; 2 desktop UI
+  tests; 2 job-workflow tests.
+- **Rust:** 12 unit tests and 1 engine integration test.
+- **Static checks:** ruff, mypy (strict, including the bundle script),
+  ESLint, Prettier, tsc, web and desktop builds, and cargo fmt/clippy.
+- **Packaging:** `pnpm bundle:engine` with its smoke test, and the compose
+  smoke tests.
+
+GitHub Actions has not been run. The hand-checked `.app`/`.dmg` was built
+before the last backend changes (S3, error reporting, test knobs); the engine
+bundle was rebuilt and smoke-tested after them, but the app was not rebuilt.
+
+## Known gaps carried forward
+
+| Gap | Status |
+|---|---|
+| Tripo/Meshy never run against the real services | Needs a paid key; smoke test whenever one is available |
+| GitHub Actions (CI and release) have never run; Windows and Linux desktop builds, and the bundle script on those systems, are untested | First push to GitHub |
+| Desktop builds are unsigned; notarization probably needs the engine's `.so`/`.dylib` files signed too (untested) | When a signing certificate is available |
+| Desktop app is large (670 MB, 184 MB DMG), mostly Pixar USD, OpenCV and SciPy | `--without-usdz` saves ~250 MB; trimming further is future work |
+| No local AI generation (Automatic mode chooses photogrammetry or cloud) | Needs a capable NVIDIA GPU to develop and test |
+| Photogrammetry tested only on synthetic photos; dense (CUDA) path never run | Needs real captures and an NVIDIA machine |
+| Baking transfers base colour only (no normal/roughness/emissive maps); no retopology; without Blender, textured models over budget are not reduced | Later |
+| Provider keys stored encrypted on disk, not in the OS keychain | Later |
+| Several backend processes sharing one PostgreSQL queue: designed for, not tested | When a multi-worker deployment needs it |
+| Tauri window not automated (no WebDriver on macOS); native Save dialog not clicked through by hand | Linux/Windows CI with tauri-driver |
+| Draco-compressed GLBs: untested end to end. trimesh (the backend's file check) has no glTF Draco support, so such provider output would likely be rejected | Later |
+| Main JS bundle ≈580 KB (three.js already split out) | Not done |
+| Vertex-level editing, texture settings, KTX2 textures | Later |
+| Viewer e2e runs in local Chrome; WebGL in CI's headless Chromium is unverified | First CI run |
+| Light theme | Not planned |

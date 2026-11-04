@@ -1,0 +1,13 @@
+@import 'tailwindcss';
+@import '@ai3d/ui/styles.css';
+
+@source '../../../packages/ui/src';
+@source '../../../packages/studio/src';
+@source '../../../packages/viewer/src';
+@source '../../../packages/editor/src';
+
+/* Desktop: no rubber-band scrolling or text selection on chrome elements. */
+html,
+body {
+  overscroll-behavior: none;
+}

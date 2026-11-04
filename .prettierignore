@@ -1,0 +1,11 @@
+pnpm-lock.yaml
+uv.lock
+**/.next
+**/dist
+**/src-tauri/target
+**/src-tauri/gen
+packages/shared-types/src/openapi.gen.ts
+docs/
+packages/shared-types/openapi.json
+.claude/
+apps/web/next-env.d.ts

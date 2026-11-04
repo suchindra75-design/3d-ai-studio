@@ -1,0 +1,8 @@
+AI 3D Studio
+Copyright 2026 The AI 3D Studio contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party software used by this project is listed with its licence in the
+application's About screen and in each package manifest. No third-party AI
+model weights are distributed with this project.

@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+@import '@ai3d/ui/styles.css';
+
+/* Shared packages are source-only; let Tailwind see their class names. */
+@source '../../../packages/ui/src';
+@source '../../../packages/studio/src';
+@source '../../../packages/viewer/src';
+@source '../../../packages/editor/src';

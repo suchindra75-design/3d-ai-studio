@@ -1,0 +1,33 @@
+{
+  "name": "@ai3d/studio",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@ai3d/api-client": "workspace:*",
+    "@ai3d/editor": "workspace:*",
+    "@ai3d/shared-types": "workspace:*",
+    "@ai3d/ui": "workspace:*",
+    "@ai3d/utilities": "workspace:*",
+    "@ai3d/viewer": "workspace:*",
+    "@tanstack/react-query": "^5.105.1",
+    "lucide-react": "^1.66.0",
+    "three": "^0.187.0",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "react": "^19.3.1"
+  },
+  "peerDependencies": {
+    "react": "^19.3.1"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@ai3d/web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@ai3d/api-client": "workspace:*",
+    "@ai3d/editor": "workspace:*",
+    "@ai3d/shared-types": "workspace:*",
+    "@ai3d/studio": "workspace:*",
+    "@ai3d/ui": "workspace:*",
+    "@ai3d/utilities": "workspace:*",
+    "@ai3d/viewer": "workspace:*",
+    "@tanstack/react-query": "^5.105.1",
+    "lucide-react": "^1.66.0",
+    "next": "^16.4.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3"
+  }
+}

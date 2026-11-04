@@ -1,0 +1,36 @@
+[package]
+name = "ai3d-desktop"
+version = "0.1.0"
+description = "AI 3D Studio desktop shell"
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.77.2"
+publish = false
+
+[lib]
+# The _lib suffix avoids a name clash with the binary on Windows (cargo#8519).
+name = "ai3d_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+# Plain HTTP to the private backend on 127.0.0.1 only: no TLS stack needed.
+ureq = { version = "2", default-features = false }
+getrandom = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
+[target."cfg(unix)".dependencies]
+libc = "0.2"

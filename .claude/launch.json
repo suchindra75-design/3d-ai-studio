@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": ".venv/bin/ai3d-server",
+      "runtimeArgs": ["--reload"],
+      "port": 8000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@ai3d/web", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "desktop-ui",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@ai3d/desktop", "dev"],
+      "port": 1420
+    }
+  ]
+}

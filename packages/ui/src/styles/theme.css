@@ -1,0 +1,110 @@
+/*
+ * AI 3D Studio design tokens (shared by web and desktop).
+ * Dark-first: neutral greys, hairline borders, one restrained accent.
+ * Consumed by Tailwind v4 through @theme so utilities like bg-surface exist.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --background: #0b0b0c;
+  --surface: #121214;
+  --surface-raised: #18181b;
+  --surface-hover: #1f1f23;
+  --border: rgb(255 255 255 / 0.08);
+  --border-strong: rgb(255 255 255 / 0.14);
+
+  --foreground: #ededef;
+  --muted-foreground: #a1a1aa;
+  --subtle-foreground: #8b8b94;
+
+  --primary: #f4f4f5;
+  --primary-foreground: #0b0b0c;
+  --accent: #0a84ff;
+  --accent-soft: rgb(10 132 255 / 0.14);
+
+  --success: #30d158;
+  --success-soft: rgb(48 209 88 / 0.12);
+  --warning: #ffd60a;
+  --warning-soft: rgb(255 214 10 / 0.12);
+  --danger: #ff453a;
+  --danger-soft: rgb(255 69 58 / 0.12);
+
+  --ring: #0a84ff;
+  --radius: 10px;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+
+  --font-sans:
+    'Inter Variable', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui,
+    sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    min-height: 100dvh;
+    background: var(--background);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

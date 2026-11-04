@@ -1,0 +1,61 @@
+# uv workspace root (virtual: not itself a package).
+# Members: the FastAPI backend and the local processing engine.
+[tool.uv.workspace]
+members = ["backend", "local-engine"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "httpx2>=2.16",  # HTTPX successor; required by Starlette's TestClient
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-psutil>=6.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["backend/ai3d/database/migrations/versions", "docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "S", "SIM", "RUF", "PT", "C4", "TID", "PL"]
+ignore = [
+    "PLR0913",  # FastAPI dependencies make long signatures normal
+    "PLR2004",  # thresholds are named where they matter; tests use literals
+    "S101",     # assert is fine in tests (scoped below)
+    "B008",     # FastAPI Depends()/File() in defaults is idiomatic
+]
+# Typographic characters are intentional in user-facing copy.
+allowed-confusables = ["×", "–", "’"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**" = ["S", "PLR", "N802"]
+"local-engine/tests/**" = ["S", "PLR"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ai3d", "ai3d_engine", "tests"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+packages = ["ai3d", "ai3d_engine"]
+mypy_path = ["backend", "local-engine"]
+exclude = ["migrations/versions/"]
+
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "open3d", "open3d.*", "pxr", "pxr.*", "boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests", "local-engine/tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: tests that take more than a few seconds",
+]
+filterwarnings = ["error::DeprecationWarning:ai3d.*"]

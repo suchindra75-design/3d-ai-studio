@@ -1,0 +1,76 @@
+# Self-hosted AI 3D Studio: backend + web app.
+#   docker compose up --build            -> http://localhost:3000
+#   docker compose --profile postgres up --build   (PostgreSQL; see docs/INSTALLATION.md)
+# Ports bind to 127.0.0.1 only. Expose them deliberately if you need LAN access.
+# Compose reads variables such as AI3D_DATABASE_URL from your shell and from ./.env.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/backend.Dockerfile
+      # `--target backend-colmap` adds COLMAP for local photogrammetry (large).
+      target: ${AI3D_BACKEND_TARGET:-backend}
+    environment:
+      AI3D_CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
+      # "backend" is the hostname the web container uses to reach the API.
+      AI3D_ALLOWED_HOSTS: '["127.0.0.1","localhost","backend"]'
+      AI3D_DATABASE_URL: ${AI3D_DATABASE_URL:-}
+      # Optional: provider keys and the key that encrypts keys entered in the UI.
+      AI3D_TRIPO_API_KEY: ${AI3D_TRIPO_API_KEY:-}
+      AI3D_MESHY_API_KEY: ${AI3D_MESHY_API_KEY:-}
+      AI3D_SECRET_KEY: ${AI3D_SECRET_KEY:-}
+    volumes:
+      - ai3d-data:/data
+    ports:
+      - '127.0.0.1:8000:8000'
+    depends_on:
+      # Only used with the postgres profile; ignored otherwise.
+      postgres:
+        condition: service_healthy
+        required: false
+    # Everything is written to /data (volume) or /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/web.Dockerfile
+      args:
+        AI3D_API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:3000:3000'
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    restart: unless-stopped
+
+  postgres:
+    profiles: ['postgres']
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ai3d
+      # Required with this profile; there is deliberately no default.
+      POSTGRES_PASSWORD: ${AI3D_POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ai3d
+    volumes:
+      - ai3d-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ai3d -d ai3d']
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  ai3d-data:
+  ai3d-postgres:
