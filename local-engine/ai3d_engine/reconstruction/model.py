@@ -79,19 +79,34 @@ def read_text_model(directory: Path) -> SparseModel:
     return SparseModel(images, points, colors, errors, tracks)
 
 
-def estimate_up(images: list[RegisteredImage]) -> FloatArray:
-    """World "up", assuming the photos were taken upright (not rolled).
+# The x axes of upright photos lie in one (horizontal) plane: their smallest singular
+# value is ~0. Above this ratio of the two smallest, photos were rolled (e.g. portrait
+# shots, or shots from above at any angle) and the x axes say little about gravity.
+ROLL_CONDITIONING = 0.35
 
-    In an upright photo the camera's x axis is horizontal whatever the tilt, so
-    gravity is the direction most perpendicular to all x axes. The sign is
-    chosen so that the cameras' own "up" (-y) points the same way on average.
+
+def estimate_up(images: list[RegisteredImage], points: FloatArray | None = None) -> FloatArray:
+    """World "up" for a capture of an object.
+
+    Upright photos (not rolled): the camera's x axis is horizontal whatever the tilt,
+    so gravity is the direction most perpendicular to all x axes (exact when it holds).
+    Rolled photos (found on a real capture with many portrait and top-down shots, where
+    the x-axis rule was 92° off): the cameras surround the object from above, so the
+    average direction from the object to the cameras is up (5.6° from the table there).
     """
     if len(images) < 2:
         return np.array([0.0, 1.0, 0.0])
     x_axes = np.array([image.rotation[0] for image in images])
-    _, _, vt = np.linalg.svd(x_axes, full_matrices=True)
-    up = vt[-1]
+    _, singular, vt = np.linalg.svd(x_axes, full_matrices=True)
     camera_up = -np.array([image.rotation[1] for image in images]).mean(axis=0)
+    upright = len(singular) >= 3 and singular[2] < ROLL_CONDITIONING * singular[1]
+    if not upright and points is not None and len(points):
+        centres = np.array([image.center for image in images])
+        towards_cameras = (centres - np.median(points, axis=0)).mean(axis=0)
+        norm = float(np.linalg.norm(towards_cameras))
+        if norm > 1e-9:
+            return np.asarray(towards_cameras / norm, dtype=np.float64)
+    up = vt[-1]
     if float(up @ camera_up) < 0:
         up = -up
     return np.asarray(up / np.linalg.norm(up), dtype=np.float64)

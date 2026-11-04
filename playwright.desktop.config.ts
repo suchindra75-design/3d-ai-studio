@@ -33,6 +33,7 @@ export default defineConfig({
         AI3D_ENVIRONMENT: 'test', // mock provider: placeholder output, never real generation
         // The local AI engine only when configured (see e2e/local-ai.spec.ts).
         AI3D_LOCAL_AI_DIR: process.env.AI3D_LOCAL_AI_DIR ?? 'test-results/no-local-ai',
+        AI3D_OPENMVS_DIR: process.env.AI3D_OPENMVS_DIR ?? 'test-results/no-openmvs',
         AI3D_PROVIDER_POLL_INTERVAL: '0.3',
         AI3D_API_TOKEN: TEST_TOKEN,
         AI3D_CORS_ORIGINS: JSON.stringify([`http://localhost:${UI_PORT}`]),

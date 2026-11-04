@@ -10,15 +10,15 @@ Studio detected and why each capability is or isn't available. Use
 |---|---|---|---|---|---|
 | Upload, analysis, capture check | nothing extra | ✅ | ✅ | ✅ | ✅ |
 | Photogrammetry: camera poses (sparse) | COLMAP | ✅ | ✅ (COLMAP CLI) | ✅ | ✅ |
-| Photogrammetry: dense surfaces | COLMAP + **CUDA** | ❌ | ❌ | ✅ | ❌ |
+| Photogrammetry: dense surfaces | **OpenMVS** (CPU), or COLMAP + CUDA | ⚠️ OpenMVS (untested) | ✅ OpenMVS (verified) | ⚠️ OpenMVS or CUDA (both untested) | ⚠️ OpenMVS (untested) |
 | Local AI from one photo (TripoSR) | the local AI engine (below) | ⚠️ CPU (untested) | ✅ CPU, ~1.5 min (verified) | ⚠️ CUDA (untested) | ⚠️ CPU (untested) |
 
 Why: COLMAP's dense stereo is CUDA-only. **Without it, real photo captures
 do not give a usable surface:** on a real 67-photo capture every camera was
 placed correctly, but the surface built from the sparse points was spiky and
 reached into the background (the quality report now warns about this). The
-synthetic test scenes looked fine; real photos do not. A CPU dense step is
-being considered. TripoSR is small enough to run on a
+synthetic test scenes looked fine; real photos do not. **Install OpenMVS**
+(below) for a dense surface on the CPU. TripoSR is small enough to run on a
 CPU; it was measured on a 6-core Intel Mac (macOS 26): 82 s for a 12-megapixel
 phone photo at High quality, using at most 3.7 GB of memory (so 8 GB of RAM
 is the minimum). NVIDIA GPUs are used automatically when present
@@ -57,6 +57,35 @@ coarse surface built from those points, and a texture projected from the
 photos. With an NVIDIA GPU and a CUDA build of COLMAP, High quality and
 Professional add dense stereo (detailed surface) — **this path is implemented
 but has not been tested yet**.
+
+## OpenMVS (dense photogrammetry on the CPU)
+
+Optional, and strongly recommended without an NVIDIA GPU. After COLMAP has
+placed the cameras, OpenMVS computes depth maps for every photo, fuses them
+into a dense point cloud, builds a surface through it and textures it, all
+on the CPU. On a real 67-photo capture (6-core Intel Mac) the whole
+reconstruction took about 7 minutes (COLMAP ~2.5, OpenMVS ~4.5) and gave a
+detailed, textured, upright surface (face, curls, ears; about 400k triangles)
+instead of the coarse, spiky sparse one.
+
+```bash
+T=$HOME/.local/share/ai3d-studio/tools        # the micromamba from the COLMAP section
+MAMBA_ROOT_PREFIX=$T/mamba $T/bin/micromamba create -y -p $T/openmvs -c conda-forge "openmvs=2.4.0=cpu*"
+```
+
+The app finds it in `~/.local/share/ai3d-studio/tools/openmvs/bin` (or on
+`PATH`, `/usr/local/bin/OpenMVS`, `/opt/homebrew/bin`); elsewhere set
+`AI3D_OPENMVS_DIR` to the folder holding `DensifyPointCloud`. Settings →
+This computer then lists *Photogrammetry (dense surfaces)* as available, and
+photogrammetry jobs use it automatically. Quality: Fast computes depth maps at
+1/4 of the photo size and keeps half the triangles; High and Professional at
+1/2 with all triangles.
+
+**Licence:** OpenMVS is AGPL-3.0 (conda-forge build: AGPL-3.0 with
+BSL/MPL/BSD parts). AI 3D Studio only starts its programs as separate
+processes, through a fixed allow-list with arguments built in code; it never
+links, modifies or redistributes OpenMVS. If you redistribute OpenMVS
+yourself, the AGPL applies to that.
 
 ## Blender (FBX export, texture baking)
 

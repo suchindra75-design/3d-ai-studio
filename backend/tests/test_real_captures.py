@@ -110,12 +110,16 @@ def test_a_real_capture_becomes_a_measured_textured_model(
     )
     assert enhance.status_code == 201, enhance.text
     runner.run_until_idle()
+    enhance_job = client.get(f"/api/v1/jobs/{enhance.json()['id']}").json()
+    assert enhance_job["status"] == "succeeded", enhance_job.get("error")
     cleaned = client.get(f"/api/v1/models/{model['id']}").json()["current_version"]
-    assert cleaned["version_number"] == 2
-    enhancement = cleaned["quality_report"]["metrics"].get("enhancement", [])
-    steps = {s["code"]: s["status"] for s in enhancement}
-    print(f"enhance steps: {steps}")
-    _keep(client, cleaned, "cleaned.glb")
+    if cleaned["version_number"] == 2:
+        enhancement = cleaned["quality_report"]["metrics"].get("enhancement", [])
+        print(f"enhance steps: { ({s['code']: s['status'] for s in enhancement}) }")
+        _keep(client, cleaned, "cleaned.glb")
+    else:  # nothing to change (e.g. no ground plane found): no new version, by design
+        events = client.get(f"/api/v1/jobs/{enhance_job['id']}/events").json()["items"]
+        print("enhance: no changes:", events[-1]["message"])
 
     formats = client.get("/api/v1/exports/formats").json()["items"]
     for fmt in (f["format"] for f in formats if f["available"]):

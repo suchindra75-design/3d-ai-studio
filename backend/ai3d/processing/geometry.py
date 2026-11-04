@@ -426,12 +426,46 @@ def bake_reduce(
     )
 
 
+# Share of the height, from the bottom, searched for the supporting plane.
+GROUND_SEARCH_BAND = 0.2
+# The plane must be at least this wide relative to the model (horizontally), and at most
+# this share of the model may lie below it.
+GROUND_MIN_WIDTH = 0.5
+GROUND_MAX_BELOW = 0.03
+
+
+def _not_ground(
+    points: np.ndarray,
+    sample: np.ndarray,
+    normal: np.ndarray,
+    offset: float,
+    *,
+    threshold: float,
+    bounds: tuple[np.ndarray, np.ndarray],
+) -> str | None:
+    """Why the plane is not a table or board under the object, or None when it is."""
+    lo, hi = bounds
+    height = -offset / normal[1]  # y of the plane at x = z = 0 (normal is near-vertical)
+    if height > lo[1] + 0.25 * (hi[1] - lo[1]):
+        return "The largest flat area is not at the bottom."
+    # A table or board spreads under the object; a curved bottom only touches a small patch.
+    on_plane = sample[np.abs(sample @ normal + offset) < threshold]
+    footprint = float(np.linalg.norm(np.ptp(on_plane[:, [0, 2]], axis=0)))
+    if footprint < GROUND_MIN_WIDTH * float(np.linalg.norm((hi - lo)[[0, 2]])):
+        return "The flat area at the bottom is too small to be a table."
+    # Under a table there is only reconstruction noise, never part of the object.
+    below = float(((points @ normal + offset) < -2 * threshold).mean())
+    if below > GROUND_MAX_BELOW:
+        return f"{below:.0%} of the model lies under the flat area, so it is not a table."
+    return None
+
+
 def remove_ground(scene: trimesh.Scene, seed: int = 0) -> Step:
     """Remove a horizontal plane under the object (e.g. the table in a photogrammetry scan).
 
     RANSAC finds the dominant plane; it must be roughly horizontal, near the bottom
-    and large. Triangles lying on it are removed, then only the largest remaining
-    piece is kept (the object).
+    and large among the lowest points. Triangles lying on it are removed, then only the
+    largest remaining piece is kept (the object).
     """
     title = "Remove ground / table"
     instances = _world_vertices(scene)
@@ -442,7 +476,11 @@ def remove_ground(scene: trimesh.Scene, seed: int = 0) -> Step:
     diagonal = float(np.linalg.norm(hi - lo)) or 1.0
     threshold = diagonal * 0.01
     rng = np.random.default_rng(seed)
-    sample = points[rng.choice(len(points), min(len(points), 20_000), replace=False)]
+    # The ground is at the bottom: search among the lowest points, where a thin board or
+    # table top is the majority (on a dense scan of a whole object it is only a few %).
+    bottom = points[points[:, 1] <= lo[1] + GROUND_SEARCH_BAND * (hi[1] - lo[1])]
+    pool = bottom if len(bottom) >= 100 else points
+    sample = pool[rng.choice(len(pool), min(len(pool), 20_000), replace=False)]
     best: tuple[int, np.ndarray, float] | None = None
     for _ in range(300):
         a, b, c = sample[rng.choice(len(sample), 3, replace=False)]
@@ -462,9 +500,9 @@ def remove_ground(scene: trimesh.Scene, seed: int = 0) -> Step:
     _, normal, offset = best
     if normal[1] < 0:  # make "above the plane" positive
         normal, offset = -normal, -offset
-    height = -offset / normal[1]  # y of the plane at x = z = 0 (normal is near-vertical)
-    if height > lo[1] + 0.25 * (hi[1] - lo[1]):
-        return Step("ground", title, "skipped", "The largest flat area is not at the bottom.")
+    problem = _not_ground(points, sample, normal, offset, threshold=threshold, bounds=(lo, hi))
+    if problem is not None:
+        return Step("ground", title, "skipped", problem)
 
     removed = 0
     for name, mesh, world in instances:

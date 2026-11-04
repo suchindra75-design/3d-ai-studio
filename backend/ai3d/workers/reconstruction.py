@@ -17,7 +17,7 @@ from typing import Any
 from sqlalchemy.orm import selectinload
 
 from ai3d.models import GenerationJob, Image
-from ai3d.models.enums import JobEventType, JobStatus, QualityMode
+from ai3d.models.enums import JobEventType, JobStatus
 from ai3d.processing.mesh import validate_mesh_file
 from ai3d.processing.photogrammetry import mesh_to_glb, prepare_photo
 from ai3d.services.devices import cuda_available
@@ -33,6 +33,11 @@ from ai3d_engine.reconstruction import (
     ReconstructionOptions,
     Stage,
     reconstruct,
+)
+from ai3d_engine.reconstruction.openmvs import (
+    OpenMVSCancelledError,
+    OpenMVSNotFoundError,
+    check_openmvs,
 )
 
 log = logging.getLogger(__name__)
@@ -103,12 +108,21 @@ def _prepare_photos(ctx: JobContext, job: GenerationJob, images_dir: Path) -> No
 
 def _options(ctx: JobContext, job: GenerationJob) -> ReconstructionOptions:
     settings = dict(job.params.get("provider_settings") or {})
-    dense = bool(settings.get("dense_if_cuda")) and cuda_available(ctx.settings.data_dir)
+    # OpenMVS is preferred when installed: it is the dense path verified on real photos.
+    use_openmvs = check_openmvs() is None
+    dense = (
+        not use_openmvs
+        and bool(settings.get("dense_if_cuda"))
+        and cuda_available(ctx.settings.data_dir)
+    )
     return ReconstructionOptions(
         max_image_size=int(settings.get("max_image_size", 2400)),
         max_num_features=int(settings.get("max_num_features", 8192)),
         matcher="exhaustive" if len(job.inputs) <= 150 else "sequential",
         dense=dense,
+        openmvs=use_openmvs,
+        openmvs_resolution_level=int(settings.get("openmvs_resolution_level", 1)),
+        openmvs_decimate=float(settings.get("openmvs_decimate", 1.0)),
         texture=True,
         texture_scale=float(settings.get("texture_scale", 1.0)),
         step_timeout=float(ctx.settings.reconstruction_timeout_seconds),
@@ -178,10 +192,17 @@ def _run(ctx: JobContext, job: GenerationJob, workdir: Path) -> None:
     images_dir = workdir / "images"
     _prepare_photos(ctx, job, images_dir)
     options = _options(ctx, job)
-    if not options.dense and job.quality_mode != QualityMode.FAST:
+    if options.openmvs:
         ctx.event(
             JobEventType.LOG,
-            "No CUDA GPU: the surface will be built from sparse points (coarse).",
+            "The dense surface will be computed on the CPU with OpenMVS (several minutes).",
+            stage="preparing",
+        )
+    elif not options.dense:
+        ctx.event(
+            JobEventType.LOG,
+            "No OpenMVS and no CUDA GPU: the surface will be built from sparse points, which "
+            "is coarse on real photos.",
             stage="preparing",
         )
     deadline = monotonic() + ctx.settings.reconstruction_timeout_seconds
@@ -250,10 +271,10 @@ def run_reconstruction(ctx: JobContext) -> None:
         _wait_turn(ctx)
         acquired = True
         _run(ctx, job, workdir)
-    except (_CancelledError, ColmapCancelledError):
+    except (_CancelledError, ColmapCancelledError, OpenMVSCancelledError):
         if ctx.finish(JobStatus.CANCELLED, stage=None):
             ctx.event(JobEventType.STATUS, "Cancelled. The reconstruction was stopped.")
-    except ColmapNotFoundError as exc:
+    except (ColmapNotFoundError, OpenMVSNotFoundError) as exc:
         _fail(ctx, "engine_unavailable", str(exc))
     except ReconstructionError as exc:
         _fail(ctx, exc.code, exc.message, exc.details)

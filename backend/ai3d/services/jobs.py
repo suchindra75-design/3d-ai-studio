@@ -51,6 +51,7 @@ from ai3d.services.capture import PHOTOGRAMMETRY_MIN, PHOTOGRAMMETRY_RECOMMENDED
 from ai3d.services.devices import cuda_available
 from ai3d.services.projects import get_project
 from ai3d.services.providers import ProviderManager
+from ai3d_engine.reconstruction.openmvs import check_openmvs
 
 log = logging.getLogger(__name__)
 
@@ -226,10 +227,16 @@ def _plan_photogrammetry(manager: ProviderManager, plan: Plan) -> None:
             f"Only {count} photos. {PHOTOGRAMMETRY_MIN}+ photos ({PHOTOGRAMMETRY_RECOMMENDED}+ "
             "recommended) with 60–80% overlap give a far more complete result."
         )
-    if not cuda_available(manager.settings.data_dir):
+    if check_openmvs() is None:
         plan.warnings.append(
-            "No NVIDIA CUDA GPU detected, so the surface will be built from sparse points: "
-            "measured, but coarse."
+            "The dense surface is computed on the CPU with OpenMVS: expect several minutes "
+            "(about 7 for 67 photos on a 6-core computer)."
+        )
+    elif not cuda_available(manager.settings.data_dir):
+        plan.warnings.append(
+            "No OpenMVS and no NVIDIA CUDA GPU, so the surface will be built from sparse points: "
+            "the cameras are measured, but on real photos the surface is coarse and spiky. "
+            "Install OpenMVS (docs/LOCAL_GPU_SETUP.md) for a dense surface."
         )
     if plan.processing_mode == ProcessingMode.AUTO:
         plan.warnings.append(

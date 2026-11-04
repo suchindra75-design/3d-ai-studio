@@ -464,6 +464,53 @@ Checks run on 2026-11-04 (COLMAP, Blender and the TripoSR engine installed):
 - USDZ colours in Apple Quick Look.
 - Tripo/Meshy, which still need a key.
 
+## Phase 9b — Dense photogrammetry on the CPU (OpenMVS) ✅
+
+Fixes Phase 9's major finding.
+- **OpenMVS 2.4.0** (AGPL-3.0, conda-forge CPU build) is installed separately
+  and run as allow-listed programs (D35). It does dense depth maps, fusion,
+  meshing and texturing.
+- **Quality modes:** Fast uses depth maps at 1/4 of the photo size and keeps
+  half the triangles; High and Professional use 1/2 and keep them all.
+- **Engine choice:** OpenMVS is used when installed; otherwise COLMAP's CUDA
+  dense step (still untested); otherwise the sparse surface, which the plan
+  and the quality report now describe honestly.
+
+Two more real-data bugs were fixed on the way:
+- **The model came out lying on its side.** The capture had portrait and
+  top-down shots, so the "up" rule from Phase 4 was 92° off. Up now falls
+  back to the direction of the cameras from the object when their x axes are
+  not coplanar (D36).
+- **Ground removal missed the board under the statue.** It was a few % of a
+  dense scan. The plane is now searched for at the bottom of the model, with
+  extra checks so curved bottoms are kept (D37).
+
+**Result on the real 67-photo capture,** through the application (upload →
+overlap check → reconstruction → Enhance → exports):
+- Every camera placed.
+- Dense, textured surface: about 400k triangles in about 7 minutes on a
+  6-core Intel Mac (COLMAP about 2.5 min, OpenMVS about 4.5).
+- Upright; ground removal took off the board (11% of the triangles) and kept
+  the whole statue, with face, ears and curls.
+- The quality report is clean, and every export was re-opened and verified.
+
+Checks run on 2026-11-04:
+- **Python:** 305 tests passed. The 9 skips need settings; these ran
+  separately with them and passed:
+  - the real capture with OpenMVS (9.6 min);
+  - the 24 photogrammetry tests with OpenMVS;
+  - the OpenMVS runner tests (6) are part of the 305.
+- **Frontend:** 87 unit tests.
+- **Browser tests:** web 20, desktop UI 2, job workflows 2.
+- **Rust:** 13 tests.
+- **Static checks:** ruff, mypy, ESLint, Prettier, tsc and builds.
+
+**Not verified:**
+- Other real captures (only one dataset so far).
+- OpenMVS on Apple Silicon, Windows or Linux.
+- COLMAP's CUDA dense path.
+- RefineMesh, which is not used.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely

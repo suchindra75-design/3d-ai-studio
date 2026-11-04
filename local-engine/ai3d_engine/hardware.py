@@ -228,6 +228,13 @@ def _torch_accelerators() -> dict[str, Any]:
         return {"installed": True, "error": str(exc)[:200]}
 
 
+def _openmvs_dependency() -> dict[str, Any]:
+    from ai3d_engine.reconstruction.openmvs import find_openmvs  # noqa: PLC0415
+
+    folder = find_openmvs()
+    return {"installed": folder is not None, "path": str(folder) if folder else None}
+
+
 def _capabilities(report: HardwareReport) -> dict[str, Capability]:
     system = platform.system()
     arch = report.arch.lower()
@@ -272,13 +279,21 @@ def _capabilities(report: HardwareReport) -> dict[str, Capability]:
             False, "COLMAP is not installed. See docs/LOCAL_GPU_SETUP.md."
         )
 
-    if cuda and (colmap.get("installed") or pycolmap):
+    openmvs = report.dependencies.get("openmvs", {})
+    if openmvs.get("installed") and (colmap.get("installed") or pycolmap):
+        caps["photogrammetry_dense"] = Capability(
+            True,
+            "OpenMVS computes dense surfaces on the CPU (about 7 minutes for 67 photos on a "
+            "6-core computer).",
+        )
+    elif cuda and (colmap.get("installed") or pycolmap):
         caps["photogrammetry_dense"] = Capability(True, "COLMAP dense stereo can use the CUDA GPU.")
     else:
         caps["photogrammetry_dense"] = Capability(
             False,
-            "COLMAP dense stereo (PatchMatch) requires an NVIDIA GPU with CUDA. "
-            "Sparse reconstruction can still run on the CPU.",
+            "Dense surfaces need OpenMVS (CPU; see docs/LOCAL_GPU_SETUP.md) or an NVIDIA GPU "
+            "with CUDA. Without them the surface comes from sparse points, which is coarse on "
+            "real photos.",
         )
 
     if disk < MIN_FREE_DISK:
@@ -326,6 +341,7 @@ def detect_hardware(data_dir: Path | None = None) -> HardwareReport:
     dependencies: dict[str, Any] = {
         "colmap": _tool_version("colmap", ["-h"], r"COLMAP\s+([\d.]+\w*)"),
         "blender": _tool_version("blender", ["--version"], r"Blender\s+([\d.]+)"),
+        "openmvs": _openmvs_dependency(),
         "python": {name: _package_version(name) for name in _PY_PACKAGES},
     }
 

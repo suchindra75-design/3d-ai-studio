@@ -32,6 +32,7 @@ export default defineConfig({
         AI3D_ENVIRONMENT: 'test',
         // The local AI engine only when configured (see e2e/local-ai.spec.ts).
         AI3D_LOCAL_AI_DIR: process.env.AI3D_LOCAL_AI_DIR ?? 'test-results/no-local-ai',
+        AI3D_OPENMVS_DIR: process.env.AI3D_OPENMVS_DIR ?? 'test-results/no-openmvs',
         AI3D_PROVIDER_POLL_INTERVAL: '0.3',
         AI3D_MOCK_POLLS_UNTIL_DONE: '40',
         AI3D_MOCK_FAIL_FIRST_TASK: '1',

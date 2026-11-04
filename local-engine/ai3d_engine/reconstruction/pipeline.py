@@ -30,6 +30,7 @@ from ai3d_engine.reconstruction.model import (
     read_text_model,
     upright_transform,
 )
+from ai3d_engine.reconstruction.openmvs import OpenMVSFailedError, OpenMVSRunner
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,10 @@ class ReconstructionOptions:
     single_camera: bool = False
     matcher: Literal["exhaustive", "sequential"] = "exhaustive"
     dense: bool = False  # needs a CUDA build of COLMAP
+    # Dense surface on the CPU with OpenMVS (preferred when installed; see openmvs.py).
+    openmvs: bool = False
+    openmvs_resolution_level: int = 1  # 0 = full resolution, each step halves it
+    openmvs_decimate: float = 1.0
     texture: bool = True
     texture_scale: float = 1.0
     step_timeout: float | None = None
@@ -382,6 +387,66 @@ def _surface(run: _Run, images_dir: Path, model_dir: Path, dense_dir: Path) -> P
     return mesh_path
 
 
+def _openmvs_surface(
+    run: _Run, images_dir: Path, model_dir: Path, dense_dir: Path
+) -> tuple[Path, bool]:
+    """Dense points, surface and texture with OpenMVS on the CPU."""
+    options = run.options
+    run.progress("meshing", 0.0, "Preparing undistorted images.")
+    run.step(
+        "meshing",
+        "image_undistorter",
+        {
+            "image_path": images_dir,
+            "input_path": model_dir,
+            "output_path": dense_dir,
+            "max_image_size": options.max_image_size,
+        },
+        within=(0.0, 0.1),
+    )
+    mvs_dir = run.workspace / "mvs"
+    mvs_dir.mkdir(exist_ok=True)
+    timeout = options.step_timeout
+
+    def failed(exc: OpenMVSFailedError) -> ReconstructionError:
+        return ReconstructionError(
+            "openmvs_failed",
+            f"OpenMVS stopped ({exc.program}: {exc.message}). The cameras were placed; try "
+            "again with Fast quality, or without OpenMVS for a coarse surface.",
+            {"program": exc.program, "log_tail": exc.tail[-15:]},
+        )
+
+    try:
+        mvs = OpenMVSRunner(mvs_dir, log_path=run.log_path)
+        scene = mvs.import_colmap(dense_dir, cancelled=run.cancelled, timeout=timeout)
+        run.progress("meshing", 0.15, "Computing dense depth maps on the CPU (OpenMVS).")
+        dense_scene = mvs.densify(
+            scene,
+            resolution_level=options.openmvs_resolution_level,
+            cancelled=run.cancelled,
+            timeout=timeout,
+        )
+        run.progress("meshing", 0.7, "Building the surface through the dense points.")
+        mesh = mvs.mesh(
+            dense_scene, decimate=options.openmvs_decimate, cancelled=run.cancelled, timeout=timeout
+        )
+    except OpenMVSFailedError as exc:
+        raise failed(exc) from exc
+    run.notes.append(
+        "Dense surface computed on the CPU with OpenMVS (depth maps at "
+        f"1/{2**options.openmvs_resolution_level} of the photo resolution)."
+    )
+    if not options.texture:
+        return mesh, False
+    run.progress("texturing", 0.0, "Projecting the photos onto the surface (OpenMVS).")
+    try:
+        textured = mvs.texture(dense_scene, mesh, cancelled=run.cancelled, timeout=timeout)
+    except OpenMVSFailedError as exc:
+        run.warnings.append(f"Texturing failed, so the surface is untextured ({exc.message})")
+        return mesh, False
+    return textured, True
+
+
 def _texture(run: _Run, mesh_path: Path, dense_dir: Path) -> tuple[Path, bool]:
     """Texture the surface; a failure keeps the untextured surface."""
     if not run.options.texture:
@@ -436,13 +501,18 @@ def reconstruct(
     model_dir, model, registered = _map(run, images_dir, database, names)
 
     progress("filtering", 0.0, "Orienting the model and removing stray points.")
-    transform = upright_transform(estimate_up(model.images), model.points)
+    transform = upright_transform(estimate_up(model.images, model.points), model.points)
     points_path = workspace / "points.ply"
     kept, removed, method = _filter_points(model, transform, points_path)
     run.notes.append(f"Point filtering: {method}; {removed} of {len(model.points)} removed.")
 
     dense_dir = workspace / "dense"
-    mesh_path, textured = _texture(run, _surface(run, images_dir, model_dir, dense_dir), dense_dir)
+    if options.openmvs:
+        mesh_path, textured = _openmvs_surface(run, images_dir, model_dir, dense_dir)
+    else:
+        mesh_path, textured = _texture(
+            run, _surface(run, images_dir, model_dir, dense_dir), dense_dir
+        )
     progress("texturing", 1.0, None)
     shutil.rmtree(dense_dir / "stereo", ignore_errors=True)
 
@@ -457,7 +527,7 @@ def reconstruct(
         points_removed=removed,
         mean_reprojection_error=model.mean_reprojection_error,
         mean_track_length=model.mean_track_length,
-        dense=options.dense,
+        dense=options.dense or options.openmvs,
         features=features,
         notes=run.notes,
         warnings=run.warnings,

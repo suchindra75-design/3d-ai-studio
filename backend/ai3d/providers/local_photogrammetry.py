@@ -38,35 +38,42 @@ _SETTINGS: dict[QualityMode, dict[str, int | float | bool]] = {
         "max_num_features": 4096,
         "texture_scale": 0.5,
         "dense_if_cuda": False,
+        # OpenMVS (CPU dense): depth maps at 1/4 of the photo size, half the triangles.
+        "openmvs_resolution_level": 2,
+        "openmvs_decimate": 0.5,
     },
     QualityMode.HIGH_QUALITY: {
         "max_image_size": 2400,
         "max_num_features": 8192,
         "texture_scale": 1.0,
         "dense_if_cuda": True,
+        "openmvs_resolution_level": 1,
+        "openmvs_decimate": 1.0,
     },
     QualityMode.PROFESSIONAL: {
         "max_image_size": 3200,
         "max_num_features": 12000,
         "texture_scale": 1.0,
         "dense_if_cuda": True,
+        "openmvs_resolution_level": 1,
+        "openmvs_decimate": 1.0,
     },
 }
 
 _SUMMARY: dict[QualityMode, tuple[str, ...]] = {
     QualityMode.FAST: (
         "Photos analysed at up to 1600 px",
-        "Sparse surface",
+        "Dense surface with OpenMVS (CPU) or an NVIDIA GPU, otherwise sparse",
         "Half-resolution texture",
     ),
     QualityMode.HIGH_QUALITY: (
         "Photos analysed at up to 2400 px",
-        "Dense surface with a CUDA GPU, otherwise sparse",
+        "Dense surface with OpenMVS (CPU) or an NVIDIA GPU, otherwise sparse",
         "Full-resolution texture",
     ),
     QualityMode.PROFESSIONAL: (
         "Photos analysed at up to 3200 px, more features",
-        "Dense surface with a CUDA GPU, otherwise sparse",
+        "Dense surface with OpenMVS (CPU) or an NVIDIA GPU, otherwise sparse",
         "Full-resolution texture",
     ),
 }
@@ -105,8 +112,9 @@ class LocalPhotogrammetryProvider(Provider):
             notes=(
                 "Scale is unknown: photogrammetry recovers shape, not size, without a "
                 "reference object.",
-                "Dense reconstruction needs an NVIDIA GPU with CUDA; otherwise the surface is "
-                "built from sparse points and is coarse.",
+                "A dense surface needs OpenMVS (runs on the CPU, several minutes) or an NVIDIA GPU "
+                "with CUDA; otherwise it is built from sparse points, which is coarse on real "
+                "photos.",
             ),
         )
 

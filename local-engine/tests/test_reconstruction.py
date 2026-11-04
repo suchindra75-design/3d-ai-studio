@@ -244,6 +244,36 @@ def test_estimate_up_ignores_camera_tilt() -> None:
     assert estimate_up(images) == pytest.approx(up, abs=1e-6)
 
 
+def test_estimate_up_with_rolled_photos_uses_where_the_cameras_are() -> None:
+    """Portrait and top-down shots (camera rolled): the x-axis rule cannot work.
+
+    Found on a real capture (AliceVision Buddha) where it was 92° off.
+    """
+    up = np.array([0.0, 1.0, 0.0])
+    rng = np.random.default_rng(3)
+    images = []
+    for n in range(24):
+        az, elevation = 2 * math.pi * n / 24, math.radians(rng.uniform(15, 75))
+        eye = 3 * np.array(
+            [
+                math.cos(elevation) * math.sin(az),
+                math.sin(elevation),
+                math.cos(elevation) * math.cos(az),
+            ]
+        )
+        roll = rng.uniform(-math.pi, math.pi)  # any roll about the viewing axis
+        c, s = math.cos(roll), math.sin(roll)
+        rotation = np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]]) @ _look_at(eye, np.zeros(3))
+        images.append(RegisteredImage(f"{n}.jpg", rotation, eye))
+    points = rng.normal(scale=0.2, size=(500, 3))
+    estimated = estimate_up(images, points)
+    angle = math.degrees(math.acos(float(np.clip(estimated @ up, -1, 1))))
+    assert angle < 10
+    # Upright photos still use the exact rule (see the test above).
+    upright = _orbit(up, [math.radians(a) for a in (20, 35, 60, 25, 45, 30, 55, 40)])
+    assert estimate_up(upright, points) == pytest.approx(up, abs=1e-6)
+
+
 def test_upright_transform_puts_up_on_y_and_the_floor_at_zero() -> None:
     up = np.array([0.0, 0.0, 1.0])
     points = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (5.0, 6.0)])

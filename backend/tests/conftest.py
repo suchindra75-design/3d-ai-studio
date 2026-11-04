@@ -86,6 +86,8 @@ def make_settings(tmp_path: Path, database_url: str | None, **overrides: Any) ->
         # The local AI engine is used only when this points at an installed engine
         # (an engine in the default folder must not change other tests' routing).
         "local_ai_dir": os.environ.get("AI3D_LOCAL_AI_DIR") or tmp_path / "no-local-ai",
+        # Likewise OpenMVS (dense photogrammetry): only when this points at its programs.
+        "openmvs_dir": os.environ.get("AI3D_OPENMVS_DIR") or tmp_path / "no-openmvs",
         **(s3_test_settings() if TEST_S3_ENDPOINT else {}),
         **overrides,
     }

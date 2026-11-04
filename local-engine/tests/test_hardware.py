@@ -104,3 +104,16 @@ def test_too_little_ram_for_local_ai_is_explained() -> None:
 def test_low_disk_is_flagged() -> None:
     caps = hardware._capabilities(_report(disk_free_bytes=1024**3))
     assert not caps["disk_space"].supported
+
+
+def test_openmvs_makes_dense_photogrammetry_possible_without_a_gpu() -> None:
+    report = _report(
+        os_name="Darwin",
+        arch="x86_64",
+        dependencies={"colmap": {"installed": True}, "openmvs": {"installed": True}, "python": {}},
+    )
+    cap = hardware._capabilities(report)["photogrammetry_dense"]
+    assert cap.supported
+    assert "OpenMVS" in cap.reason
+    without = _report(dependencies={"colmap": {"installed": True}, "python": {}})
+    assert "OpenMVS" in hardware._capabilities(without)["photogrammetry_dense"].reason

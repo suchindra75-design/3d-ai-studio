@@ -29,7 +29,8 @@ stand-ins are for **paid external services**:
 | Desktop shell | `cd apps/desktop/src-tauri && cargo test` | Rust: token, ports, downloads allow-list, file names, the real engine's lifecycle |
 | Engine bundle | `pnpm bundle:engine` | builds the release engine and smoke-tests it (starts it with a token, lists exports) |
 
-Optional dependencies decide what runs: local AI tests need `AI3D_LOCAL_AI_DIR`
+Optional dependencies decide what runs: OpenMVS is used only when
+`AI3D_OPENMVS_DIR` points at its programs; local AI tests need `AI3D_LOCAL_AI_DIR`
 pointing at an installed engine (other tests ignore an installed engine unless
 it is set), COLMAP tests need `AI3D_COLMAP_PATH`
 (or COLMAP on `PATH`), Blender tests need Blender 4.2+, error-reporting tests

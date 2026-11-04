@@ -37,18 +37,35 @@ def prepare_photo(source: Path, dest_stem: Path) -> Path:
 
 
 def mesh_to_glb(mesh_path: Path, transform: list[list[float]], out_path: Path) -> dict[str, Any]:
-    """Convert COLMAP's PLY (textured or not) to GLB in the upright frame."""
+    """Convert a reconstructed surface to GLB in the upright frame.
+
+    COLMAP writes a PLY (textured or not); OpenMVS writes an OBJ whose texture can be
+    split into several atlases, which loads as one mesh per atlas.
+    """
     loaded = trimesh.load(mesh_path, process=False)
-    if not isinstance(loaded, trimesh.Trimesh):
+    if isinstance(loaded, trimesh.Trimesh):
+        parts = [loaded]
+    elif isinstance(loaded, trimesh.Scene):
+        parts = [g for g in loaded.dump() if isinstance(g, trimesh.Trimesh)]
+    else:
+        parts = []
+    if not parts:
         raise ValueError("The reconstructed surface is not a triangle mesh.")
-    loaded.apply_transform(np.asarray(transform, dtype=np.float64))
-    # COLMAP's Delaunay output can include unreferenced vertices and zero-area faces.
-    loaded.update_faces(loaded.nondegenerate_faces())
-    loaded.remove_unreferenced_vertices()
-    textured = loaded.visual is not None and loaded.visual.kind == "texture"
+    matrix = np.asarray(transform, dtype=np.float64)
     scene = trimesh.Scene()
-    scene.add_geometry(loaded, node_name="Reconstruction", geom_name="Reconstruction")
+    for index, part in enumerate(parts):
+        part.apply_transform(matrix)
+        # Delaunay output can include unreferenced vertices and zero-area faces.
+        part.update_faces(part.nondegenerate_faces())
+        part.remove_unreferenced_vertices()
+        name = "Reconstruction" if len(parts) == 1 else f"Reconstruction_{index}"
+        scene.add_geometry(part, node_name=name, geom_name=name)
+    textured = any(p.visual is not None and p.visual.kind == "texture" for p in parts)
     data = scene.export(file_type="glb")  # type: ignore[no-untyped-call]
     assert isinstance(data, bytes)
     out_path.write_bytes(data)
-    return {"textured": textured, "faces": len(loaded.faces), "vertices": len(loaded.vertices)}
+    return {
+        "textured": textured,
+        "faces": sum(len(p.faces) for p in parts),
+        "vertices": sum(len(p.vertices) for p in parts),
+    }

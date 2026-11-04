@@ -39,6 +39,7 @@ export default defineConfig({
         AI3D_ENVIRONMENT: 'test',
         // The local AI engine only when configured (see e2e/local-ai.spec.ts).
         AI3D_LOCAL_AI_DIR: process.env.AI3D_LOCAL_AI_DIR ?? 'test-results/no-local-ai',
+        AI3D_OPENMVS_DIR: process.env.AI3D_OPENMVS_DIR ?? 'test-results/no-openmvs',
         AI3D_PROVIDER_POLL_INTERVAL: '0.3',
         // Local photogrammetry e2e runs only when COLMAP 4 is configured.
         ...(process.env.AI3D_COLMAP_PATH ? { AI3D_COLMAP_PATH: process.env.AI3D_COLMAP_PATH } : {}),

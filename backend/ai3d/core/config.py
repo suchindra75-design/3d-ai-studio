@@ -116,6 +116,9 @@ class Settings(BaseSettings):
 
     # Local photogrammetry. COLMAP is found on PATH unless a path is given here.
     colmap_path: Path | None = None
+    # OpenMVS programs (dense photogrammetry on the CPU); found on PATH or in the usual
+    # install folders unless a folder is given here.
+    openmvs_dir: Path | None = None
     # The optional local AI engine (TripoSR), installed with `ai3d-local-ai install`.
     # Default: ~/.local/share/ai3d-studio/tools/local-ai
     local_ai_dir: Path | None = None

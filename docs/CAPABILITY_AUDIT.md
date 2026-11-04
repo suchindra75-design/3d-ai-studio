@@ -1,4 +1,4 @@
-# Capability audit (2026-11-04, updated after Phases 8 and 9)
+# Capability audit (2026-11-04, updated after Phases 8, 9 and 9b)
 
 An audit of the repository after phases 0–7 (commit `f8ec4af`), against the
 product vision in [PRODUCT_SPECIFICATION.md](PRODUCT_SPECIFICATION.md).
@@ -12,7 +12,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | # | Area | Status | One-line reason |
 |---|---|---|---|
 | 1 | Single-image → 3D | 🟡 | Local path verified on a real photo (Phase 8); Tripo/Meshy still never called for real |
-| 2 | Multi-image → 3D | 🟠 | Real 67-photo capture (Phase 9): every camera placed, but the CPU surface (sparse, no dense step) is not usable; dense CUDA path never run |
+| 2 | Multi-image → 3D | ✅ | With OpenMVS (Phase 9b): a real 67-photo capture became a detailed, upright, textured model on the CPU in ~7 min; without OpenMVS the sparse surface is coarse; CUDA path never run |
 | 3 | Tripo & Meshy | 🟡 | Full adapters tested against fakes built from the API docs; no paid key yet |
 | 4 | Local AI generation engine | ✅ | TripoSR (Phase 8), verified end to end on a real photo on a CPU; GPU and other OSes untested |
 | 5 | Hybrid local/cloud | 🟠 | Automatic now keeps single photos local when the engine is installed; no offered fallback, no resource checks |
