@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, PageContainer, PageHeader } from '../components
 import { useApi, useStudio } from '../context';
 import { inputModeLabel } from '../labels';
 import { routes } from '../routes';
+import { RestoreButton } from '../components/transfer';
 
 function ProjectCard({ project }: { project: ProjectRead }) {
   const api = useApi();
@@ -84,7 +85,12 @@ export function ProjectsScreen() {
       <PageHeader
         title="Projects"
         description="Each project holds the photos of one object and the 3D models made from them."
-        actions={newProjectButton}
+        actions={
+          <div className="flex flex-wrap items-start gap-2">
+            <RestoreButton />
+            {newProjectButton}
+          </div>
+        }
       />
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

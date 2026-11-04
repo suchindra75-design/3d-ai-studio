@@ -16,11 +16,19 @@ const ALLOWED_PREFIXES: [&str; 3] = [
     "/api/v1/images/",
 ];
 
+/// A project's backup ZIP: `/api/v1/projects/<id>/backup`, nothing else under projects.
+fn is_project_backup(path: &str) -> bool {
+    path.strip_prefix("/api/v1/projects/")
+        .and_then(|rest| rest.strip_suffix("/backup"))
+        .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-'))
+}
+
 /// True for backend download paths the window may save. No queries, no `..`.
 pub fn allowed_download_path(path: &str) -> bool {
-    ALLOWED_PREFIXES
+    (ALLOWED_PREFIXES
         .iter()
         .any(|prefix| path.starts_with(prefix))
+        || is_project_backup(path))
         && !path.contains("..")
         && path
             .chars()
@@ -122,6 +130,9 @@ mod tests {
         assert!(allowed_download_path("/api/v1/model-versions/0b7e/file"));
         assert!(allowed_download_path("/api/v1/exports/12ab-cd/file"));
         assert!(allowed_download_path("/api/v1/images/9f/file"));
+        assert!(allowed_download_path(
+            "/api/v1/projects/0b7e2c1a-1111-4a2b-9c3d-123456789abc/backup"
+        ));
         for bad in [
             "/api/v1/projects",
             "/api/v1/exports/../../etc/passwd",
@@ -130,6 +141,11 @@ mod tests {
             "/api/v1/exports/x/file#frag",
             "api/v1/exports/x/file",
             "/api/v1/exports/x y",
+            "/api/v1/projects",
+            "/api/v1/projects/abc/images",
+            "/api/v1/projects//backup",
+            "/api/v1/projects/../backup",
+            "/api/v1/projects/x_y/backup",
         ] {
             assert!(!allowed_download_path(bad), "{bad} should be refused");
         }

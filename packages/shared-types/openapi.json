@@ -37,6 +37,88 @@
         "title": "Body_create_version_api_v1_models__model_id__versions_post",
         "type": "object"
       },
+      "Body_import_model_api_v1_projects__project_id__models_import_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "The 3D file or ZIP",
+            "title": "File",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "real_scale": {
+            "default": false,
+            "description": "The file's size is the real object's size",
+            "title": "Real Scale",
+            "type": "boolean"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "enum": [
+                  "m",
+                  "cm",
+                  "mm",
+                  "in"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Units of STL/OBJ/PLY/3MF (glTF is always metres)",
+            "title": "Units"
+          },
+          "up_axis": {
+            "anyOf": [
+              {
+                "enum": [
+                  "y",
+                  "z"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which axis is up",
+            "title": "Up Axis"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_model_api_v1_projects__project_id__models_import_post",
+        "type": "object"
+      },
+      "Body_restore_project_api_v1_projects_restore_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "Backup ZIP made by this app",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_restore_project_api_v1_projects_restore_post",
+        "type": "object"
+      },
       "Body_upload_images_api_v1_projects__project_id__images_post": {
         "properties": {
           "files": {
@@ -4860,6 +4942,58 @@
         ]
       }
     },
+    "/api/v1/projects/restore": {
+      "post": {
+        "description": "Creates a new project (new IDs). Photos go through the normal upload checks and every model file is re-opened and checked; if anything fails, nothing is kept.",
+        "operationId": "restore_project_api_v1_projects_restore_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_restore_project_api_v1_projects_restore_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Restore a project from a backup ZIP",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/v1/projects/{project_id}": {
       "delete": {
         "operationId": "delete_project_api_v1_projects__project_id__delete",
@@ -5013,6 +5147,53 @@
           }
         },
         "summary": "Update a project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/backup": {
+      "get": {
+        "description": "manifest.json (settings, models, versions, notes, quality reports), the original photos and every version's GLB. Exports and job history are not included.",
+        "operationId": "backup_project_api_v1_projects__project_id__backup_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Download the project as a backup ZIP",
         "tags": [
           "projects"
         ]
@@ -5500,6 +5681,70 @@
           }
         },
         "summary": "List a project's 3D models",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/models/import": {
+      "post": {
+        "description": "GLB, OBJ, STL, PLY or 3MF, or a ZIP with an OBJ (plus MTL and textures) or a glTF (plus .bin and images). Converted to GLB, re-opened and checked; a file that fails the checks is rejected (422). The version's origin is recorded as imported and its accuracy as unknown.",
+        "operationId": "import_model_api_v1_projects__project_id__models_import_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_model_api_v1_projects__project_id__models_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Import an existing 3D file as a new model",
         "tags": [
           "models"
         ]

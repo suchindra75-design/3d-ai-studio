@@ -399,6 +399,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore a project from a backup ZIP
+         * @description Creates a new project (new IDs). Photos go through the normal upload checks and every model file is re-opened and checked; if anything fails, nothing is kept.
+         */
+        post: operations["restore_project_api_v1_projects_restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}": {
         parameters: {
             query?: never;
@@ -416,6 +436,26 @@ export interface paths {
         head?: never;
         /** Update a project */
         patch: operations["update_project_api_v1_projects__project_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the project as a backup ZIP
+         * @description manifest.json (settings, models, versions, notes, quality reports), the original photos and every version's GLB. Exports and job history are not included.
+         */
+        get: operations["backup_project_api_v1_projects__project_id__backup_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/projects/{project_id}/capture-assessment": {
@@ -550,6 +590,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/models/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import an existing 3D file as a new model
+         * @description GLB, OBJ, STL, PLY or 3MF, or a ZIP with an OBJ (plus MTL and textures) or a glTF (plus .bin and images). Converted to GLB, re-opened and checked; a file that fails the checks is rejected (422). The version's origin is recorded as imported and its accuracy as unknown.
+         */
+        post: operations["import_model_api_v1_projects__project_id__models_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers": {
         parameters: {
             query?: never;
@@ -640,6 +700,40 @@ export interface components {
              * Format: uuid
              */
             parent_version_id: string;
+        };
+        /** Body_import_model_api_v1_projects__project_id__models_import_post */
+        Body_import_model_api_v1_projects__project_id__models_import_post: {
+            /**
+             * File
+             * @description The 3D file or ZIP
+             */
+            file: string;
+            /** Name */
+            name?: string | null;
+            /**
+             * Real Scale
+             * @description The file's size is the real object's size
+             * @default false
+             */
+            real_scale?: boolean;
+            /**
+             * Units
+             * @description Units of STL/OBJ/PLY/3MF (glTF is always metres)
+             */
+            units?: ("m" | "cm" | "mm" | "in") | null;
+            /**
+             * Up Axis
+             * @description Which axis is up
+             */
+            up_axis?: ("y" | "z") | null;
+        };
+        /** Body_restore_project_api_v1_projects_restore_post */
+        Body_restore_project_api_v1_projects_restore_post: {
+            /**
+             * File
+             * @description Backup ZIP made by this app
+             */
+            file: string;
         };
         /** Body_upload_images_api_v1_projects__project_id__images_post */
         Body_upload_images_api_v1_projects__project_id__images_post: {
@@ -1767,6 +1861,8 @@ export interface components {
     pathItems: never;
 }
 export type BodyCreateVersionApiV1ModelsModelIdVersionsPost = components['schemas']['Body_create_version_api_v1_models__model_id__versions_post'];
+export type BodyImportModelApiV1ProjectsProjectIdModelsImportPost = components['schemas']['Body_import_model_api_v1_projects__project_id__models_import_post'];
+export type BodyRestoreProjectApiV1ProjectsRestorePost = components['schemas']['Body_restore_project_api_v1_projects_restore_post'];
 export type BodyUploadImagesApiV1ProjectsProjectIdImagesPost = components['schemas']['Body_upload_images_api_v1_projects__project_id__images_post'];
 export type CapabilityRead = components['schemas']['CapabilityRead'];
 export type CaptureAssessment = components['schemas']['CaptureAssessment'];
@@ -3003,6 +3099,48 @@ export interface operations {
             };
         };
     };
+    restore_project_api_v1_projects_restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_restore_project_api_v1_projects_restore_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_project_api_v1_projects__project_id__get: {
         parameters: {
             query?: never;
@@ -3104,6 +3242,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ProjectRead"];
                 };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    backup_project_api_v1_projects__project_id__backup_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Client error */
             "4XX": {
@@ -3440,6 +3616,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelList"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    import_model_api_v1_projects__project_id__models_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_model_api_v1_projects__project_id__models_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelRead"];
                 };
             };
             /** @description Client error */

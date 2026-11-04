@@ -1,5 +1,5 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, Header, Response, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
@@ -19,6 +19,7 @@ from ai3d.schemas.model3d import (
 from ai3d.services import enhance as enhance_service
 from ai3d.services import jobs as job_service
 from ai3d.services import models as model_service
+from ai3d.services import transfer as transfer_service
 
 router = APIRouter(tags=["models"])
 
@@ -34,6 +35,49 @@ def list_models(db: DbDep, providers: ProvidersDep, project_id: uuid.UUID) -> Mo
         items=[model_service.model_to_read(db, providers.registry, m) for m in models],
         total=len(models),
     )
+
+
+@router.post(
+    "/projects/{project_id}/models/import",
+    response_model=ModelRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Import an existing 3D file as a new model",
+    description="GLB, OBJ, STL, PLY or 3MF, or a ZIP with an OBJ (plus MTL and textures) "
+    "or a glTF (plus .bin and images). Converted to GLB, re-opened and checked; a file "
+    "that fails the checks is rejected (422). The version's origin is recorded as "
+    "imported and its accuracy as unknown.",
+)
+def import_model(
+    *,
+    db: DbDep,
+    storage: StorageDep,
+    settings: SettingsDep,
+    providers: ProvidersDep,
+    project_id: uuid.UUID,
+    file: Annotated[UploadFile, File(description="The 3D file or ZIP")],
+    units: Annotated[
+        Literal["m", "cm", "mm", "in"] | None,
+        Form(description="Units of STL/OBJ/PLY/3MF (glTF is always metres)"),
+    ] = None,
+    up_axis: Annotated[Literal["y", "z"] | None, Form(description="Which axis is up")] = None,
+    real_scale: Annotated[
+        bool, Form(description="The file's size is the real object's size")
+    ] = False,
+    name: Annotated[str | None, Form(max_length=200)] = None,
+) -> ModelRead:
+    model = transfer_service.import_model(
+        db,
+        storage,
+        settings,
+        project_id,
+        filename=file.filename or "model",
+        stream=file.file,
+        units=units,
+        up=up_axis,
+        real_scale=real_scale,
+        name=name,
+    )
+    return model_service.model_to_read(db, providers.registry, model)
 
 
 @router.get("/models/{model_id}", response_model=ModelRead, summary="Get a 3D model")

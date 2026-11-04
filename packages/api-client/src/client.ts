@@ -162,6 +162,14 @@ export function createApiClient({ baseUrl, token, fetch: fetchImpl }: ApiClientO
       /** Feature-matches the photos on the backend (seconds per 10 photos) and caches the result. */
       measureOverlap: (id: string) =>
         request<CaptureAssessment>('POST', `/api/v1/projects/${id}/capture-assessment/overlap`),
+      /** Backend path of the project's backup ZIP (photos, models, versions, reports). */
+      backupPath: (id: string) => `/api/v1/projects/${id}/backup`,
+      /** Creates a new project from a backup ZIP made by this app. */
+      restore: (file: Blob, fileName: string) => {
+        const form = new FormData();
+        form.append('file', file, fileName);
+        return request<ProjectRead>('POST', '/api/v1/projects/restore', { form });
+      },
     },
     images: {
       list: (projectId: string) =>
@@ -222,6 +230,26 @@ export function createApiClient({ baseUrl, token, fetch: fetchImpl }: ApiClientO
       delete: (id: string) => request<void>('DELETE', `/api/v1/models/${id}`),
       versions: (id: string) => request<ModelVersionList>('GET', `/api/v1/models/${id}/versions`),
       /** Saves an edited GLB as a new version; the parent version is kept. */
+      /** Imports an existing 3D file (GLB, OBJ, STL, PLY, 3MF or ZIP) as a new model. */
+      importFile: (
+        projectId: string,
+        file: Blob,
+        fileName: string,
+        options: {
+          units?: 'm' | 'cm' | 'mm' | 'in';
+          upAxis?: 'y' | 'z';
+          realScale?: boolean;
+          name?: string;
+        } = {},
+      ) => {
+        const form = new FormData();
+        form.append('file', file, fileName);
+        if (options.units) form.append('units', options.units);
+        if (options.upAxis) form.append('up_axis', options.upAxis);
+        if (options.realScale) form.append('real_scale', 'true');
+        if (options.name) form.append('name', options.name);
+        return request<ModelRead>('POST', `/api/v1/projects/${projectId}/models/import`, { form });
+      },
       saveVersion: (
         id: string,
         file: Blob,

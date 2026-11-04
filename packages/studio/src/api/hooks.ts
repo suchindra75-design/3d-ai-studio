@@ -384,6 +384,35 @@ export function useUpdateModel(projectId: string, modelId: string) {
   });
 }
 
+export function useImportModel(projectId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      file,
+      ...options
+    }: {
+      file: File;
+      units?: 'm' | 'cm' | 'mm' | 'in';
+      upAxis?: 'y' | 'z';
+      realScale?: boolean;
+    }) => api.models.importFile(projectId, file, file.name, options),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.models(projectId) });
+      void client.invalidateQueries({ queryKey: queryKeys.project(projectId) });
+    },
+  });
+}
+
+export function useRestoreProject() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => api.projects.restore(file, file.name),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.projects }),
+  });
+}
+
 export function useSaveModelVersion(projectId: string, modelId: string) {
   const api = useApi();
   const invalidate = useInvalidateModel(projectId, modelId);

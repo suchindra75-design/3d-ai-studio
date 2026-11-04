@@ -41,6 +41,7 @@ import { GenerationPanel } from '../components/generation-panel';
 import { ImageDetails } from '../components/image-details';
 import { ImageGrid } from '../components/image-grid';
 import { JobList } from '../components/job-list';
+import { BackupButton, ImportModelButton } from '../components/transfer';
 import { ModelList } from '../components/model-list';
 import { ErrorState, PageContainer, PageHeader } from '../components/page';
 import { UploadQueue } from '../components/upload-queue';
@@ -268,6 +269,10 @@ export function ProjectWorkspaceScreen({ projectId }: { projectId: string }) {
             </section>
           ) : null}
 
+          <div className="flex flex-wrap items-center gap-2">
+            <ImportModelButton projectId={projectId} />
+            <BackupButton projectId={projectId} projectName={p.name} />
+          </div>
           <ModelList models={models.data?.items ?? []} projectId={projectId} />
           <JobList jobs={jobs.data?.items ?? []} projectId={projectId} />
         </div>

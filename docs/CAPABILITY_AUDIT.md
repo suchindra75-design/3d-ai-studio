@@ -1,4 +1,4 @@
-# Capability audit (2026-11-04, updated after Phases 8–13)
+# Capability audit (2026-11-04, updated after Phases 8–13 and 15)
 
 An audit of the repository after phases 0–7 (commit `f8ec4af`), against the
 product vision in [PRODUCT_SPECIFICATION.md](PRODUCT_SPECIFICATION.md).
@@ -24,7 +24,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 11 | Model quality analysis | ✅ | Run on real AI output, a real photogrammetry scan and Draco files (Phase 9); now flags stray and shattered surfaces |
 | 12 | Version management | ✅ | Immutable versions with provenance, save edits, switch current; tested end to end |
 | 13 | Export | ✅ | Seven formats re-opened and compared, now including per-vertex colours; STL/3MF Z-up; verified on real AI output (Phase 9) |
-| 14 | Project management | ✅ | Create/edit/search/archive/delete, tested end to end; importing existing models is missing |
+| 14 | Project management | ✅ | Create/edit/search/archive/delete; importing 3D files, backup and restore (Phase 15), tested with real files and in the browser |
 | 15 | Desktop app | 🟡 | Private engine, token, Save dialog, bundled release build; verified on macOS Intel only |
 | 16 | Performance & resources | 🟡 | Memory and disk checks, one heavy job at a time (Phase 10); 3M-triangle models measured and sped up (Phase 12) |
 
@@ -162,10 +162,9 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 ### 14. Project management — ✅
 - **Have:** create, edit, search, filter, archive/restore and delete,
   persisted and tested end to end.
-- **Missing:**
-  - Importing existing 3D files: `ModelVersionSource.IMPORTED` exists but
-    nothing uses it.
-  - Duplicating a project; project backup/export.
+- **Added in Phase 15:** importing GLB/OBJ/STL/PLY/3MF files and ZIPs;
+  project backup and restore.
+- **Missing:** FBX import; duplicating a project directly.
 
 ### 15. Desktop functionality — 🟡
 - **Have:**

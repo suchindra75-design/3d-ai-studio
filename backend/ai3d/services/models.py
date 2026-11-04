@@ -433,6 +433,79 @@ def _edited_notes(parent: ModelVersion, changes: list[str]) -> str:
     return f"Edited in the workspace from version {parent.version_number}: {summary}.{caveat}"
 
 
+def store_checked_version(
+    db: Session,
+    storage: StorageBackend,
+    *,
+    model: Model3D,
+    path: Path,
+    size: int,
+    report: MeshReport,
+    parent_id: uuid.UUID | None,
+    source: ModelVersionSource,
+    quality_mode: QualityMode | None,
+    provider_key: str | None,
+    provenance: SurfaceProvenance,
+    stats_extra: dict[str, Any],
+    notes: str,
+    asset_meta: dict[str, Any],
+    metrics_extra: dict[str, Any] | None = None,
+    version_number: int | None = None,
+) -> ModelVersion:
+    """Store a checked GLB as the model's next (or given) version and make it current.
+
+    ``report`` must come from re-opening ``path`` (validate_mesh_file). On any
+    failure the stored file is removed again and nothing is committed.
+    """
+    number = version_number or _next_version_number(db, model.id)
+    key = model_asset_key(model.project_id, model.id, number, "model.glb")
+    storage.save_file(key, path)
+    try:
+        version = ModelVersion(
+            model_id=model.id,
+            version_number=number,
+            parent_version_id=parent_id,
+            source=source,
+            quality_mode=quality_mode,
+            provider_key=provider_key,
+            surface_provenance=provenance,
+            stats={**{k: report.metrics.get(k) for k in _STAT_KEYS}, **stats_extra},
+            notes=notes,
+        )
+        db.add(version)
+        db.flush()
+        mesh = Asset(
+            project_id=model.project_id,
+            model_version_id=version.id,
+            kind=AssetKind.MESH,
+            storage_key=key,
+            mime_type=GLB_MIME,
+            size_bytes=size,
+            sha256=_sha256(path),
+            meta=asset_meta,
+        )
+        db.add(mesh)
+        db.add(
+            QualityReport(
+                model_version_id=version.id,
+                status=report.status,
+                report_version=REPORT_VERSION,
+                metrics={**report.metrics, **(metrics_extra or {})},
+                issues=[issue.to_dict() for issue in report.issues],
+            )
+        )
+        db.flush()
+        version.primary_asset_id = mesh.id
+        model.current_version_id = version.id
+        touch_project(db, model.project_id)
+        db.commit()
+    except BaseException:
+        db.rollback()
+        storage.delete(key)
+        raise
+    return version
+
+
 def add_edited_version(
     db: Session,
     storage: StorageBackend,
@@ -469,66 +542,24 @@ def add_edited_version(
                 "The edited model failed the file checks and was not saved.",
                 details={"issues": [issue.to_dict() for issue in report.issues]},
             )
-        number = (
-            db.scalar(
-                select(func.max(ModelVersion.version_number)).where(
-                    ModelVersion.model_id == model.id
-                )
-            )
-            or 0
-        ) + 1
-        key = model_asset_key(model.project_id, model.id, number, "model.glb")
-        storage.save_file(key, path)
-        try:
-            version = ModelVersion(
-                model_id=model.id,
-                version_number=number,
-                parent_version_id=parent.id,
-                source=ModelVersionSource.EDITED,
-                quality_mode=parent.quality_mode,
-                provider_key=parent.provider_key,
-                surface_provenance=parent.surface_provenance,
-                stats={
-                    **{k: report.metrics.get(k) for k in _STAT_KEYS},
-                    **(
-                        {"scale": parent.stats["scale"]}
-                        if (parent.stats or {}).get("scale")
-                        else {}
-                    ),
-                },
-                notes=_edited_notes(parent, changes),
-            )
-            db.add(version)
-            db.flush()
-            mesh = Asset(
-                project_id=model.project_id,
-                model_version_id=version.id,
-                kind=AssetKind.MESH,
-                storage_key=key,
-                mime_type=GLB_MIME,
-                size_bytes=size,
-                sha256=_sha256(path),
-                meta={"format": "glb", "origin": "workspace_edit", "changes": changes},
-            )
-            db.add(mesh)
-            db.add(
-                QualityReport(
-                    model_version_id=version.id,
-                    status=report.status,
-                    report_version=REPORT_VERSION,
-                    metrics=report.metrics,
-                    issues=[issue.to_dict() for issue in report.issues],
-                )
-            )
-            db.flush()
-            version.primary_asset_id = mesh.id
-            model.current_version_id = version.id
-            touch_project(db, model.project_id)
-            db.commit()
-        except BaseException:
-            db.rollback()
-            storage.delete(key)
-            raise
+        version = store_checked_version(
+            db,
+            storage,
+            model=model,
+            path=path,
+            size=size,
+            report=report,
+            parent_id=parent.id,
+            source=ModelVersionSource.EDITED,
+            quality_mode=parent.quality_mode,
+            provider_key=parent.provider_key,
+            provenance=parent.surface_provenance,
+            stats_extra=(
+                {"scale": parent.stats["scale"]} if (parent.stats or {}).get("scale") else {}
+            ),
+            notes=_edited_notes(parent, changes),
+            asset_meta={"format": "glb", "origin": "workspace_edit", "changes": changes},
+        )
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     return version
