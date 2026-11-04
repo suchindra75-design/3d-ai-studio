@@ -133,12 +133,43 @@ it('plans, runs and links to the enhanced version', async () => {
     source_version_id: 'v1',
     remove_ground: true,
     scale: { axis: 'y', length_mm: 120 },
+    smoothing: 0,
+    remesh: null,
   });
   await userEvent.click(await screen.findByRole('button', { name: 'View the new version' }));
   expect(onView).toHaveBeenCalledWith(
     'v2',
     expect.stringContaining('version 1, which is unchanged'),
   );
+});
+
+it('asks for smoothing, retopology and baked maps', async () => {
+  const api = fakeApi({
+    models: {
+      enhancePlan: vi
+        .fn()
+        .mockResolvedValue({ quality_mode: 'high_quality', steps: [], notes: [] }),
+      enhance: vi.fn().mockResolvedValue(queued),
+    },
+    jobs: { get: vi.fn().mockResolvedValue(done) },
+  });
+  renderWithStudio(
+    <EnhancePanel projectId="p1" modelId="m1" version={version} dirty={false} onView={vi.fn()} />,
+    api,
+  );
+  await userEvent.selectOptions(screen.getByLabelText('Smoothing'), '10');
+  await userEvent.selectOptions(screen.getByLabelText('Retopology'), 'quadriflow');
+  expect(screen.getByText(/kept only if it stays within 1%/)).toBeInTheDocument();
+  const faces = screen.getByLabelText('About how many quads');
+  await userEvent.clear(faces);
+  await userEvent.type(faces, '5000');
+  await userEvent.click(screen.getByRole('checkbox', { name: /normal map/ }));
+  await userEvent.click(screen.getByRole('button', { name: /Enhance \(High quality\)/i }));
+  await waitFor(() => expect(api.models.enhance).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(api.models.enhance).mock.calls[0]![1]).toMatchObject({
+    smoothing: 10,
+    remesh: { method: 'quadriflow', target_faces: 5000, maps: ['normal'] },
+  });
 });
 
 const ready: ExportRead = {

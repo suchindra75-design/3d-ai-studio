@@ -44,7 +44,7 @@ def test_enhance_plan_lists_steps_and_tool_availability(
     ).json()
     steps = {s["code"]: s for s in plan["steps"]}
     assert steps["normals"]["status"] == "will_run"
-    assert steps["retopology"]["status"] == "unavailable"
+    assert "retopology" not in steps  # an option (remesh), not part of a profile
     assert steps["baking"]["status"] == ("will_run" if BLENDER else "unavailable")
     if not BLENDER:
         assert "Blender" in steps["baking"]["detail"]

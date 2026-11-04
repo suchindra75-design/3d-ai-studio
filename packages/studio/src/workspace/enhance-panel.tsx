@@ -1,7 +1,7 @@
 'use client';
 
 import type { EnhanceRequest, ModelVersionRead, QualityMode } from '@ai3d/shared-types';
-import { Button, Label, Progress, Spinner } from '@ai3d/ui';
+import { Button, Input, Label, Progress, Spinner } from '@ai3d/ui';
 import { CircleCheck, CircleX } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
 
@@ -22,6 +22,10 @@ const AXES: { value: Axis; label: string }[] = [
 ];
 
 /** Process the viewed version into a new version (the source is never changed). */
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(Math.round(value), min), max);
+}
+
 export function EnhancePanel({
   projectId,
   modelId,
@@ -35,12 +39,25 @@ export function EnhancePanel({
   dirty: boolean;
   onView: (versionId: string, notice?: string) => void;
 }) {
-  const ids = { quality: useId(), axis: useId(), length: useId() };
+  const ids = {
+    quality: useId(),
+    axis: useId(),
+    length: useId(),
+    smoothing: useId(),
+    remesh: useId(),
+    faces: useId(),
+    resolution: useId(),
+  };
   const [quality, setQuality] = useState<QualityMode>('high_quality');
   const [removeGround, setRemoveGround] = useState(version.source === 'reconstructed');
   const [useScale, setUseScale] = useState(false);
   const [axis, setAxis] = useState<Axis>('y');
   const [length, setLength] = useState('');
+  const [smoothing, setSmoothing] = useState(0);
+  const [remeshMethod, setRemeshMethod] = useState<'none' | 'quadriflow' | 'voxel'>('none');
+  const [targetFaces, setTargetFaces] = useState('20000');
+  const [resolution, setResolution] = useState('300');
+  const [maps, setMaps] = useState<('normal' | 'occlusion')[]>([]);
   const [jobId, setJobId] = useState<string | null>(null);
   const key = useRef(newIdempotencyKey());
 
@@ -52,6 +69,16 @@ export function EnhancePanel({
     source_version_id: version.id,
     remove_ground: removeGround,
     scale: useScale && scaleValid && length ? { axis, length_mm: lengthMm } : null,
+    smoothing,
+    remesh:
+      remeshMethod === 'none'
+        ? null
+        : {
+            method: remeshMethod,
+            target_faces: clamp(Number(targetFaces) || 20_000, 100, 2_000_000),
+            resolution: clamp(Number(resolution) || 300, 16, 2000),
+            maps,
+          },
   };
   const plan = useEnhancePlan(modelId, body);
   const enhance = useEnhance(projectId, modelId);
@@ -118,6 +145,106 @@ export function EnhancePanel({
           <span className="block text-subtle-foreground">For photogrammetry scans.</span>
         </span>
       </label>
+
+      <fieldset className="flex flex-col gap-2 rounded-md border border-border p-3">
+        <legend className="px-1 text-xs font-medium">Surface</legend>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={ids.smoothing} className="text-xs">
+            Smoothing
+          </Label>
+          <select
+            id={ids.smoothing}
+            className={selectClass}
+            value={smoothing}
+            onChange={(event) => setSmoothing(Number(event.target.value))}
+          >
+            <option value={0}>Off</option>
+            <option value={3}>Light (3 passes)</option>
+            <option value={10}>Medium (10 passes)</option>
+            <option value={30}>Strong (30 passes)</option>
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={ids.remesh} className="text-xs">
+            Retopology
+          </Label>
+          <select
+            id={ids.remesh}
+            className={selectClass}
+            value={remeshMethod}
+            onChange={(event) => setRemeshMethod(event.target.value as typeof remeshMethod)}
+          >
+            <option value="none">Off</option>
+            <option value="quadriflow">Even quad layout (QuadriFlow)</option>
+            <option value="voxel">Uniform closed surface (voxels)</option>
+          </select>
+          {remeshMethod !== 'none' ? (
+            <p className="text-[11px] leading-relaxed text-subtle-foreground">
+              Rebuilt in Blender and kept only if it stays within 1% of the model’s size of the
+              original. Colours are carried over; textures are baked onto new UVs. Each quad is
+              saved as two triangles (GLB holds triangles).
+            </p>
+          ) : null}
+        </div>
+        {remeshMethod === 'quadriflow' ? (
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={ids.faces} className="text-xs">
+              About how many quads
+            </Label>
+            <Input
+              id={ids.faces}
+              type="number"
+              inputMode="numeric"
+              min={100}
+              max={2_000_000}
+              value={targetFaces}
+              onChange={(event) => setTargetFaces(event.target.value)}
+            />
+          </div>
+        ) : null}
+        {remeshMethod === 'voxel' ? (
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={ids.resolution} className="text-xs">
+              Detail (voxels across the model)
+            </Label>
+            <Input
+              id={ids.resolution}
+              type="number"
+              inputMode="numeric"
+              min={16}
+              max={2000}
+              value={resolution}
+              onChange={(event) => setResolution(event.target.value)}
+            />
+          </div>
+        ) : null}
+        {remeshMethod !== 'none' ? (
+          <div className="flex flex-col gap-1.5 text-xs">
+            {(
+              [
+                ['normal', 'Bake a normal map (keeps fine detail on fewer faces)'],
+                ['occlusion', 'Bake ambient occlusion (soft shadows in creases)'],
+              ] as const
+            ).map(([value, label]) => (
+              <label key={value} className="flex items-start gap-2 leading-relaxed">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-3.5 accent-accent"
+                  checked={maps.includes(value)}
+                  onChange={(event) =>
+                    setMaps((current) =>
+                      event.target.checked
+                        ? [...current, value]
+                        : current.filter((m) => m !== value),
+                    )
+                  }
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        ) : null}
+      </fieldset>
 
       <fieldset className="flex flex-col gap-2">
         <label className="flex items-start gap-2 text-xs leading-relaxed">

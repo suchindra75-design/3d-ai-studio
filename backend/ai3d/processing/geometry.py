@@ -63,6 +63,16 @@ class Step:
 
 
 @dataclass(frozen=True, slots=True)
+class RemeshSettings:
+    """Rebuild the surface in Blender: an even quad layout (QuadriFlow) or voxels."""
+
+    method: Literal["quadriflow", "voxel"]
+    target_faces: int = 20_000  # QuadriFlow: about this many quads
+    resolution: int = 300  # voxel: cells across the model's diagonal
+    maps: tuple[str, ...] = ()  # extra maps to bake: "normal", "occlusion"
+
+
+@dataclass(frozen=True, slots=True)
 class ScaleReference:
     """A real measurement of the object, e.g. "its height (y) is 120 mm"."""
 
@@ -85,11 +95,11 @@ class Profile:
 BAKE_MIN_TEXTURE = 1024
 BAKE_MAX_TEXTURE = 4096
 BAKE_TIMEOUT = 3600.0  # seconds
-RETOPOLOGY_DETAIL = (
-    "Not included: versions are stored as GLB, which holds only triangles, so a quad layout "
-    "(e.g. Blender's QuadriFlow) would not survive, and on open or damaged surfaces it can "
-    "change the shape noticeably. Triangle reduction with texture baking is used instead."
-)
+# A remeshed surface is accepted only when it stays this close to the original
+# (distances both ways, as a fraction of the bounding-box diagonal).
+REMESH_MAX_MEAN = 0.003
+REMESH_MAX_P95 = 0.01
+REMESH_TIMEOUT = 3600.0
 
 
 PROFILES: dict[QualityMode, Profile] = {
@@ -559,6 +569,138 @@ def apply_scale(scene: trimesh.Scene, reference: ScaleReference) -> tuple[Step, 
     return step, info
 
 
+def smooth(scene: trimesh.Scene, iterations: int) -> Step:
+    """Taubin smoothing (alternating shrink and inflate, so the volume is kept).
+
+    Runs on the shape with texture seams merged, then moves every original vertex
+    with its merged position, so UVs, colours and seams are untouched.
+    """
+    title = "Smoothing"
+    if iterations <= 0:
+        return Step("smoothing", title, "skipped", "Not requested.")
+    diagonal = float(np.linalg.norm(scene.extents)) or 1.0
+    moved: list[np.ndarray] = []
+    for _, mesh in _meshes(scene):
+        unique, inverse = trimesh.grouping.unique_rows(mesh.vertices)  # type: ignore[no-untyped-call]
+        shape = trimesh.Trimesh(
+            vertices=mesh.vertices[unique], faces=inverse[mesh.faces], process=False
+        )
+        trimesh.smoothing.filter_taubin(shape, lamb=0.5, nu=0.53, iterations=iterations)  # type: ignore[no-untyped-call]
+        new = np.asarray(shape.vertices)[inverse]
+        moved.append(np.linalg.norm(new - mesh.vertices, axis=1) / diagonal)
+        mesh.vertices = new
+    if not moved:
+        return Step("smoothing", title, "skipped", "No triangle meshes to smooth.")
+    distance = np.concatenate(moved)
+    return Step(
+        "smoothing",
+        title,
+        "applied",
+        f"{iterations} passes (Taubin, which keeps the volume): vertices moved "
+        f"{distance.mean():.2%} of the model's size on average, at most {distance.max():.2%}.",
+    )
+
+
+def _remesh_title(settings: RemeshSettings) -> str:
+    return (
+        f"Retopology (QuadriFlow, about {settings.target_faces:,} quads)"
+        if settings.method == "quadriflow"
+        else f"Remesh (voxels, {settings.resolution} across)"
+    )
+
+
+def remesh(
+    scene: trimesh.Scene,
+    settings: RemeshSettings,
+    *,
+    texture_size: int,
+    workdir: Path | None = None,
+    cancel: CancelCheck | None = None,
+) -> tuple[trimesh.Scene | None, list[Step]]:
+    """Rebuild the surface in Blender; keep it only if it stays close to the original.
+
+    Vertex colours are carried over from the nearest point of the original; a
+    texture (and any requested normal / occlusion map) is baked onto new UVs.
+    Raises BlenderCancelledError when ``cancel`` asks to stop.
+    """
+    title = _remesh_title(settings)
+    maps_title = "Normal / occlusion maps"
+    problem = check_blender()
+    if problem is not None:
+        return None, [Step("retopology", title, "unavailable", problem)]
+    with tempfile.TemporaryDirectory(prefix="remesh-", dir=workdir) as tmp:
+        root = Path(tmp)
+        source, output = root / "source.glb", root / "remeshed.glb"
+        source.write_bytes(scene.export(file_type="glb"))  # type: ignore[no-untyped-call]
+        request: dict[str, Any] = {
+            "input": str(source),
+            "output": str(output),
+            "method": settings.method,
+            "target_faces": settings.target_faces,
+            "resolution": settings.resolution,
+            "maps": list(settings.maps),
+            "texture_size": texture_size,
+        }
+        try:
+            info = run_blender(
+                "remesh", request, workdir=root, timeout=REMESH_TIMEOUT, cancel=cancel
+            )
+            result = load_model_scene(output)
+        except (BlenderFailedError, BlenderNotFoundError) as exc:
+            reason = exc.message if isinstance(exc, BlenderFailedError) else str(exc)
+            log.warning("remesh failed", extra={"reason": reason})
+            return None, [
+                Step("retopology", title, "skipped", f"{reason} The model was kept as it was.")
+            ]
+    fidelity = info["fidelity"]
+    distances = (
+        f"the new surface is within {fidelity['p95']:.2%} of the model's size of the original "
+        f"for 95% of points (mean {fidelity['mean']:.2%}, worst {fidelity['max']:.2%})"
+    )
+    if fidelity["p95"] > REMESH_MAX_P95 or fidelity["mean"] > REMESH_MAX_MEAN:
+        return None, [
+            Step(
+                "retopology",
+                title,
+                "skipped",
+                f"Not kept: {distances}, more than the {REMESH_MAX_P95:.0%} allowed. The model "
+                "was kept as it was; a higher face count or resolution follows it more closely.",
+            )
+        ]
+    faces = (
+        f"{info['quads_after']:,} quads ({info['triangles_after']:,} triangles in the file)"
+        if info["quads_after"] == info["faces_after"]
+        else f"{info['faces_after']:,} faces ({info['triangles_after']:,} triangles)"
+    )
+    detail = f"{info['triangles_before']:,} triangles → {faces}; {distances}."
+    if info["colours_transferred"]:
+        detail += " Colours were carried over from the nearest point of the original."
+    steps = [Step("retopology", title, "applied", detail)]
+    baked = [m for m in info["maps"] if m != "base"]
+    if "base" in info["maps"]:
+        steps.append(
+            Step(
+                "baking",
+                "Texture baking",
+                "applied",
+                f"The base colour was baked onto the new surface's UVs ({texture_size} px).",
+            )
+        )
+    if settings.maps:
+        names = {"normal": "normal map (keeps fine detail)", "occlusion": "ambient occlusion"}
+        steps.append(
+            Step(
+                "maps",
+                maps_title,
+                "applied" if baked else "skipped",
+                f"Baked in Blender ({texture_size} px): " + ", ".join(names[m] for m in baked) + "."
+                if baked
+                else "Nothing was baked.",
+            )
+        )
+    return result, steps
+
+
 def _reduce_steps(
     result: ProcessingResult,
     profile: Profile,
@@ -607,7 +749,6 @@ def _reduce_steps(
                 "kept as they are.",
             )
     if profile.report_tools:
-        result.steps.append(Step("retopology", "Retopology", "unavailable", RETOPOLOGY_DETAIL))
         result.steps.append(bake_step)
 
 
@@ -620,6 +761,8 @@ def process(
     workdir: Path | None = None,
     cancel: CancelCheck | None = None,
     heavy_turn: HeavyTurn | None = None,
+    smoothing: int = 0,
+    remesh_settings: RemeshSettings | None = None,
 ) -> ProcessingResult:
     """Run the profile's steps. ``result.scene`` is the processed scene: usually
     ``scene`` changed in place, but a new scene when the model was baked.
@@ -636,8 +779,22 @@ def process(
         result.steps.append(fix_normals(scene))
     if profile.fill_holes:
         result.steps.append(fill_holes(scene))
+    if smoothing:
+        result.steps.append(smooth(scene, smoothing))
+    remeshed = False
+    if remesh_settings is not None:
+        size = bake_texture_size(scene, profile.max_texture)
+        with (heavy_turn or nullcontext)():
+            rebuilt, steps = remesh(
+                scene, remesh_settings, texture_size=size, workdir=workdir, cancel=cancel
+            )
+        result.steps.extend(steps)
+        if rebuilt is not None:
+            result.scene = scene = rebuilt
+            remeshed = True
     result.steps.append(limit_textures(scene, profile.max_texture))
-    _reduce_steps(result, profile, workdir=workdir, cancel=cancel, heavy_turn=heavy_turn)
+    if not remeshed:  # a rebuilt surface already has the face count asked for
+        _reduce_steps(result, profile, workdir=workdir, cancel=cancel, heavy_turn=heavy_turn)
     if scale is not None:
         step, result.scale = apply_scale(result.scene, scale)
         result.steps.append(step)

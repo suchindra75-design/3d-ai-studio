@@ -7,12 +7,14 @@ colour, a dark (linear) OBJ colour or a lying-down STL/3MF all show up.
 
 import importlib.util
 import io
+import json
 import zipfile
 from pathlib import Path
 
 import numpy as np
 import pytest
 import trimesh
+from PIL import Image
 
 from ai3d.models.enums import ExportFormat
 from ai3d.processing import exporters
@@ -203,3 +205,74 @@ def test_a_mirrored_part_exports_with_outward_faces(tmp_path: Path, fmt: ExportF
     assert mesh.is_watertight
     assert mesh.volume > 0  # faces point outwards
     assert mesh.bounds[:, 0].mean() < 0  # and the part really moved to -X
+
+
+def _widen_colours(glb: bytes) -> bytes:
+    """The same GLB with COLOR_0 stored as normalised 16-bit values (as Blender writes)."""
+    length = int.from_bytes(glb[12:16], "little")
+    doc = json.loads(glb[20 : 20 + length])
+    bin_at = 20 + length
+    binary = bytearray(
+        glb[bin_at + 8 : bin_at + 8 + int.from_bytes(glb[bin_at : bin_at + 4], "little")]
+    )
+    accessor = doc["accessors"][doc["meshes"][0]["primitives"][0]["attributes"]["COLOR_0"]]
+    view = doc["bufferViews"][accessor["bufferView"]]
+    start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+    values = np.frombuffer(bytes(binary), np.uint8, accessor["count"] * 4, start)
+    # v * 257 + 100 still scales back to v, but wraps to (v + 100) % 256 if truncated.
+    wide = values.astype(np.uint16) * 257 + 100
+    binary.extend(b"\x00" * (-len(binary) % 4))
+    doc["bufferViews"].append({"buffer": 0, "byteOffset": len(binary), "byteLength": wide.nbytes})
+    binary.extend(wide.tobytes())
+    accessor.update(bufferView=len(doc["bufferViews"]) - 1, byteOffset=0, componentType=5123)
+    doc["buffers"][0]["byteLength"] = len(binary)
+    text = json.dumps(doc).encode()
+    text += b" " * (-len(text) % 4)
+    total = 28 + len(text) + len(binary)
+    return (
+        b"glTF"
+        + (2).to_bytes(4, "little")
+        + total.to_bytes(4, "little")
+        + len(text).to_bytes(4, "little")
+        + b"JSON"
+        + text
+        + len(binary).to_bytes(4, "little")
+        + b"BIN\x00"
+        + bytes(binary)
+    )
+
+
+def test_sixteen_bit_vertex_colours_are_read_correctly(tmp_path: Path) -> None:
+    scene = _coloured_box()
+    expected = np.asarray(next(iter(scene.geometry.values())).visual.vertex_colors)[:, :3]
+    path = tmp_path / "wide.glb"
+    path.write_bytes(_widen_colours(scene.export(file_type="glb")))
+    plain = trimesh.load(path, file_type="glb", force="mesh")
+    assert not np.array_equal(np.asarray(plain.visual.vertex_colors)[:, :3], expected)  # trimesh
+    (mesh,) = load_model_scene(path).geometry.values()
+    colours = np.asarray(mesh.visual.vertex_colors)[:, :3].astype(int)
+    assert np.abs(colours - expected.astype(int)).max() <= 1
+    assert validate_mesh_file(path).status != "fail"
+
+
+def test_colours_next_to_a_texture_survive_saving_again(tmp_path: Path) -> None:
+    """Enhance re-saves models through trimesh; colours used to come back black."""
+    box = trimesh.creation.box(extents=(0.2, 0.5, 0.1))
+    rng = np.random.default_rng(4)
+    colours = rng.integers(0, 256, (len(box.vertices), 4), dtype=np.uint8)
+    colours[:, 3] = 255
+    box.visual = trimesh.visual.TextureVisuals(
+        uv=rng.random((len(box.vertices), 2)),
+        material=trimesh.visual.material.PBRMaterial(
+            normalTexture=Image.fromarray(np.full((8, 8, 3), 128, np.uint8))
+        ),
+    )
+    box.visual.vertex_attributes["color"] = colours
+    first = tmp_path / "first.glb"
+    first.write_bytes(trimesh.Scene(box).export(file_type="glb"))
+    second = tmp_path / "second.glb"
+    second.write_bytes(load_model_scene(first).export(file_type="glb"))
+    (mesh,) = load_model_scene(second).geometry.values()
+    assert mesh.visual.material.normalTexture is not None
+    again = np.asarray(mesh.visual.vertex_attributes["color"]).astype(int)
+    assert np.abs(again - colours.astype(int)).max() <= 1

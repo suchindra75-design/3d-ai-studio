@@ -16,6 +16,24 @@ class ScaleReferenceIn(Schema):
     length_mm: float = Field(gt=0, le=100_000, description="The measured length in millimetres.")
 
 
+class RemeshIn(Schema):
+    """Rebuild the surface in Blender (kept only if it stays close to the original)."""
+
+    method: Literal["quadriflow", "voxel"] = Field(
+        description="quadriflow: an even quad layout; voxel: a uniform, closed surface."
+    )
+    target_faces: int = Field(
+        default=20_000, ge=100, le=2_000_000, description="QuadriFlow: about this many quads."
+    )
+    resolution: int = Field(
+        default=300, ge=16, le=2000, description="Voxel: cells across the model's diagonal."
+    )
+    maps: list[Literal["normal", "occlusion"]] = Field(
+        default_factory=list,
+        description="Extra maps to bake from the original onto the new surface.",
+    )
+
+
 class EnhanceRequest(Schema):
     quality_mode: QualityMode
     # Omitted = the model's current version. The source version is never changed.
@@ -25,6 +43,8 @@ class EnhanceRequest(Schema):
         description="Remove a supporting surface under the object (photogrammetry scans).",
     )
     scale: ScaleReferenceIn | None = None
+    smoothing: int = Field(default=0, ge=0, le=50, description="Taubin smoothing passes (0 = off).")
+    remesh: RemeshIn | None = None
 
 
 class EnhanceStepPlan(Schema):

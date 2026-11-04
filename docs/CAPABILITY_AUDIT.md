@@ -1,4 +1,4 @@
-# Capability audit (2026-11-04, updated after Phases 8–12)
+# Capability audit (2026-11-04, updated after Phases 8–13)
 
 An audit of the repository after phases 0–7 (commit `f8ec4af`), against the
 product vision in [PRODUCT_SPECIFICATION.md](PRODUCT_SPECIFICATION.md).
@@ -18,8 +18,8 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 5 | Hybrid local/cloud | 🟡 | Automatic keeps photos local when it can and checks the machine first; failed jobs offer the other route with consent (Phase 10). Cloud side tested only with the mock provider |
 | 6 | Professional viewer | 🟡 | Measuring, lighting presets, normals/UV views, section, screenshots and version comparison (Phase 12); 3M-triangle models usable; no level of detail |
 | 7 | 3D editing | 🟡 | Transforms, delete, mirror, pivot, ground/centre and plane cuts with filled caps (Phase 11), tested on real models; no merge/split or vertex editing |
-| 8 | Geometry refinement & retopology | 🟠 | Clean-up, decimation and baking work; retopology, smoothing and remeshing missing |
-| 9 | Texture & material editing | 🟠 | Material values, texture replace and a UV layout view (Phase 11); no texture adjustments, map baking or painting |
+| 8 | Geometry refinement & retopology | 🟡 | Clean-up, decimation, smoothing, QuadriFlow/voxel retopology with a measured fidelity check (Phase 13), verified on real models |
+| 9 | Texture & material editing | 🟡 | Material values, texture replace, UV layout (Phase 11); normal and occlusion map baking (Phase 13); no texture adjustments or painting |
 | 10 | AI model enhancement | ❌ | "Enhance" is geometric processing; no AI refinement or texture enhancement |
 | 11 | Model quality analysis | ✅ | Run on real AI output, a real photogrammetry scan and Draco files (Phase 9); now flags stray and shattered surfaces |
 | 12 | Version management | ✅ | Immutable versions with provenance, save edits, switch current; tested end to end |
@@ -106,27 +106,28 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
   - Cutting a single part, or skinned/instanced parts.
   - Any mesh-level (vertex/face) editing. The app does not claim to offer it.
 
-### 8. Geometry refinement and retopology — 🟠
+### 8. Geometry refinement and retopology — 🟡
 - **Have:**
   - Clean-up, loose-fragment removal, consistent normals, hole filling
     (untextured meshes only) and decimation.
   - Ground removal and real-world scale.
   - Blender texture baking for textured models over budget.
   - All verified with real tools.
+- **Added in Phase 13:** Taubin smoothing; QuadriFlow and voxel remeshing
+  kept only when a measured fidelity check passes; colours carried over and
+  textures rebaked; normal and ambient-occlusion maps.
 - **Missing:**
-  - Retopology: QuadriFlow moved open surfaces in tests, and GLB stores
-    triangles only, so it is not offered.
-  - Smoothing and remeshing.
-  - Normal-map baking: baking carries base colour only.
+  - Quads are not kept in the stored files (GLB holds triangles).
+  - Sharp-edge-preserving smoothing; Instant Meshes.
 
-### 9. Texture and material editing — 🟠
+### 9. Texture and material editing — 🟡
 - **Have:** material values (above); texture size limits in Enhance;
   base-colour baking.
 - **Added in Phase 11:** replace or add a base-colour texture; a UV layout
   view.
 - **Missing:**
   - Adjusting a texture (brightness, tiling), other maps.
-  - Generating normal, roughness or ambient-occlusion maps.
+  - Generating roughness maps (normal and occlusion maps: Phase 13).
   - Texture painting.
 
 ### 10. AI model enhancement — ❌

@@ -319,6 +319,16 @@
           "quality_mode": {
             "$ref": "#/components/schemas/QualityMode"
           },
+          "remesh": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RemeshIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "remove_ground": {
             "default": false,
             "description": "Remove a supporting surface under the object (photogrammetry scans).",
@@ -334,6 +344,14 @@
                 "type": "null"
               }
             ]
+          },
+          "smoothing": {
+            "default": 0,
+            "description": "Taubin smoothing passes (0 = off).",
+            "maximum": 50.0,
+            "minimum": 0.0,
+            "title": "Smoothing",
+            "type": "integer"
           },
           "source_version_id": {
             "anyOf": [
@@ -2935,6 +2953,53 @@
           "message"
         ],
         "title": "QualityWarningRead",
+        "type": "object"
+      },
+      "RemeshIn": {
+        "description": "Rebuild the surface in Blender (kept only if it stays close to the original).",
+        "properties": {
+          "maps": {
+            "description": "Extra maps to bake from the original onto the new surface.",
+            "items": {
+              "enum": [
+                "normal",
+                "occlusion"
+              ],
+              "type": "string"
+            },
+            "title": "Maps",
+            "type": "array"
+          },
+          "method": {
+            "description": "quadriflow: an even quad layout; voxel: a uniform, closed surface.",
+            "enum": [
+              "quadriflow",
+              "voxel"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "resolution": {
+            "default": 300,
+            "description": "Voxel: cells across the model's diagonal.",
+            "maximum": 2000.0,
+            "minimum": 16.0,
+            "title": "Resolution",
+            "type": "integer"
+          },
+          "target_faces": {
+            "default": 20000,
+            "description": "QuadriFlow: about this many quads.",
+            "maximum": 2000000.0,
+            "minimum": 100.0,
+            "title": "Target Faces",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "RemeshIn",
         "type": "object"
       },
       "ReportStatus": {

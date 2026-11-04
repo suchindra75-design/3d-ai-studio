@@ -6,6 +6,7 @@ facts about the file (counts, bounds, watertightness); none of them says the
 shape matches the real object.
 """
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -251,21 +252,44 @@ def normalise_vertex_colours(scene: trimesh.Scene) -> trimesh.Scene:
             continue
         if not attributes or "color" not in attributes:
             continue
-        colours = np.asarray(attributes["color"], dtype=np.float64)
-        if colours.ndim != 2 or len(colours) != len(geometry.vertices):
+        raw = np.asarray(attributes["color"])
+        if raw.ndim != 2 or len(raw) != len(geometry.vertices):
             attributes.pop("color")
             continue
-        if colours.max(initial=0.0) > 1.0:  # stored as bytes
-            colours = colours / 255.0
+        # glTF stores colours as floats or as normalised 8- or 16-bit integers
+        # (Blender writes 16-bit); trimesh hands over the raw values.
+        if np.issubdtype(raw.dtype, np.integer):
+            colours = raw.astype(np.float64) / float(np.iinfo(raw.dtype).max)
+        else:
+            colours = raw.astype(np.float64)
+            if colours.max(initial=0.0) > 1.0:  # floats holding byte values
+                colours = colours / 255.0
         if colours.shape[1] == 3:
             colours = np.hstack([colours, np.ones((len(colours), 1))])
         material = getattr(visual, "material", None)
-        image = getattr(material, "baseColorTexture", None) or getattr(material, "image", None)
-        has_texture = image is not None and getattr(visual, "uv", None) is not None
+        # Any texture (base colour, normal, occlusion...) needs the UVs and the
+        # material kept, so the colours stay a vertex attribute next to them.
+        textures = [
+            getattr(material, name, None)
+            for name in (
+                "baseColorTexture",
+                "image",
+                "normalTexture",
+                "occlusionTexture",
+                "emissiveTexture",
+                "metallicRoughnessTexture",
+            )
+        ]
+        has_texture = (
+            any(t is not None for t in textures) and getattr(visual, "uv", None) is not None
+        )
         if has_texture:
-            attributes["color"] = colours.astype(np.float32)
+            # Bytes: trimesh writes this attribute as normalised bytes by truncating, which
+            # turned float colours (0-1) into black.
+            attributes["color"] = np.round(colours * 255.0).astype(np.uint8)
             continue
-        factor = np.asarray(getattr(material, "baseColorFactor", None) or [255] * 4, float)
+        base_factor = getattr(material, "baseColorFactor", None)
+        factor = np.asarray([255] * 4 if base_factor is None else base_factor, float)
         rgba = np.clip(colours * (factor[:4] / 255.0), 0.0, 1.0)
         geometry.visual = trimesh.visual.ColorVisuals(
             geometry, vertex_colors=np.round(rgba * 255.0).astype(np.uint8)
@@ -273,8 +297,90 @@ def normalise_vertex_colours(scene: trimesh.Scene) -> trimesh.Scene:
     return scene
 
 
+_UNSIGNED_SHORT = 5123
+_UNSIGNED_BYTE = 5121
+
+
+def narrow_glb_colours(data: bytes) -> bytes | None:
+    """Rewrites 16-bit COLOR_0 data in a GLB as 8-bit; None when there is none.
+
+    glTF allows normalised 16-bit colours (Blender writes them), but for meshes
+    without a material trimesh turns them into bytes by wrapping around (7666 →
+    242) instead of scaling, so the colours came out as noise. Each 16-bit
+    accessor is copied, scaled to 8 bits, to the end of the binary chunk.
+    """
+    if data[:4] != b"glTF" or len(data) < 20:
+        return None
+    json_length = int.from_bytes(data[12:16], "little")
+    doc = json.loads(data[20 : 20 + json_length])
+    bin_at = 20 + json_length
+    if len(data) < bin_at + 8 or data[bin_at + 4 : bin_at + 8] != b"BIN\x00":
+        return None
+    size = int.from_bytes(data[bin_at : bin_at + 4], "little")
+    binary = bytearray(data[bin_at + 8 : bin_at + 8 + size])
+    accessors = {
+        primitive["attributes"]["COLOR_0"]
+        for mesh in doc.get("meshes", [])
+        for primitive in mesh.get("primitives", [])
+        if "COLOR_0" in primitive.get("attributes", {})
+    }
+    changed = False
+    for index in sorted(accessors):
+        accessor = doc["accessors"][index]
+        if accessor.get("componentType") != _UNSIGNED_SHORT or "bufferView" not in accessor:
+            continue
+        components = {"VEC3": 3, "VEC4": 4}.get(accessor.get("type", ""))
+        view = doc["bufferViews"][accessor["bufferView"]]
+        if components is None or "sparse" in accessor or view.get("buffer", 0) != 0:
+            continue
+        if view.get("byteStride", components * 2) != components * 2:
+            continue  # interleaved: left to trimesh
+        start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+        count = int(accessor["count"])
+        values = np.frombuffer(bytes(binary), np.uint16, count * components, start)
+        narrowed = np.round(values / 257.0).astype(np.uint8)
+        binary.extend(b"\x00" * (-len(binary) % 4))
+        doc["bufferViews"].append(
+            {"buffer": 0, "byteOffset": len(binary), "byteLength": int(narrowed.nbytes)}
+        )
+        binary.extend(narrowed.tobytes())
+        accessor.update(
+            bufferView=len(doc["bufferViews"]) - 1,
+            byteOffset=0,
+            componentType=_UNSIGNED_BYTE,
+            normalized=True,
+        )
+        changed = True
+    if not changed:
+        return None
+    binary.extend(b"\x00" * (-len(binary) % 4))
+    doc["buffers"][0]["byteLength"] = len(binary)
+    text = json.dumps(doc, separators=(",", ":")).encode()
+    text += b" " * (-len(text) % 4)
+    total = 12 + 8 + len(text) + 8 + len(binary)
+    return b"".join(
+        [
+            b"glTF",
+            (2).to_bytes(4, "little"),
+            total.to_bytes(4, "little"),
+            len(text).to_bytes(4, "little"),
+            b"JSON",
+            text,
+            len(binary).to_bytes(4, "little"),
+            b"BIN\x00",
+            bytes(binary),
+        ]
+    )
+
+
 def load_model_scene(path: Path, *, file_type: str = "glb") -> trimesh.Scene:
     """Loads a model file for processing, with vertex colours normalised."""
+    if file_type == "glb":
+        narrowed = narrow_glb_colours(path.read_bytes())
+        if narrowed is not None:
+            stream = trimesh.util.wrap_as_stream(narrowed)
+            scene = trimesh.load_scene(stream, file_type="glb", process=False)
+            return normalise_vertex_colours(scene)
     return normalise_vertex_colours(trimesh.load_scene(path, file_type=file_type, process=False))
 
 

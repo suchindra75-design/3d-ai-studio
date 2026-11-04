@@ -14,7 +14,7 @@ from typing import Any
 
 from ai3d.models import GenerationJob, ModelVersion
 from ai3d.models.enums import AssetKind, JobEventType, JobStatus
-from ai3d.processing.geometry import HeavyTurn, ScaleReference, process
+from ai3d.processing.geometry import HeavyTurn, RemeshSettings, ScaleReference, process
 from ai3d.processing.mesh import load_model_scene, validate_mesh_file
 from ai3d.services.models import save_enhanced_version, version_file
 from ai3d.workers import heavy
@@ -40,6 +40,17 @@ def _load(ctx: JobContext) -> tuple[GenerationJob, ModelVersion, str]:
         db.expunge(job)
         db.expunge(version)
         return job, version, asset.storage_key
+
+
+def _remesh_settings(raw: dict[str, Any] | None) -> RemeshSettings | None:
+    if not raw:
+        return None
+    return RemeshSettings(
+        method=raw["method"],
+        target_faces=int(raw.get("target_faces") or 20_000),
+        resolution=int(raw.get("resolution") or 300),
+        maps=tuple(raw.get("maps") or ()),
+    )
 
 
 def _heavy_turn(ctx: JobContext) -> HeavyTurn:
@@ -81,6 +92,8 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             workdir=workdir,
             cancel=ctx.heartbeat,  # polled while Blender runs (texture baking)
             heavy_turn=_heavy_turn(ctx),
+            smoothing=int(job.params.get("smoothing") or 0),
+            remesh_settings=_remesh_settings(job.params.get("remesh")),
         )
     except ValueError as exc:
         raise _FailedError("invalid_input", str(exc)) from exc

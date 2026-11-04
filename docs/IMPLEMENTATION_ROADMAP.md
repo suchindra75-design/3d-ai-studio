@@ -683,6 +683,69 @@ Checks run on 2026-11-04 (COLMAP configured):
   triangles have not been tried in the browser.
 - Problems from the quality report are still not highlighted on the model.
 
+## Phase 13 — Geometry ✅ (with two colour fixes)
+
+New, optional Enhance steps (the *Surface* group in the Enhance tab):
+- **Smoothing:** Taubin smoothing (3, 10 or 30 passes), which keeps the
+  volume. It runs on the shape with texture seams merged, so seams do not
+  crack and UVs and colours are untouched. The report says how far the
+  surface moved.
+- **Retopology** in Blender:
+  - **QuadriFlow** gives an even quad layout of about N quads.
+  - **Voxels** give a uniform, closed surface.
+  - Either result is **kept only if it stays close to the original:** both
+    surfaces are sampled (20,000 points each way), and the result is
+    rejected if 95% of the points are not within 1% of the model's size, or
+    the mean is over 0.3% (D48). The report gives the measured distances.
+  - Vertex colours are carried over from the nearest point of the original;
+    a texture is baked onto new UVs.
+  - GLB holds triangles, so each quad is saved as two (stated in the UI).
+- **Normal and ambient-occlusion maps:** baked with Cycles onto the new
+  surface. They are written as glTF `normalTexture` and `occlusionTexture`.
+
+QuadriFlow refused real models ("needs to be manifold…") even when they were
+manifold. Blender's check also rejects edges shorter than 1e-4 units, which
+models about a unit across have plenty of. It now runs on a copy scaled up to
+a 1,000-unit diagonal.
+
+**Measured on real models** (6-core Intel CPU):
+- The AI plush, QuadriFlow to about 5,000 quads, with normal and occlusion
+  maps:
+  - 13 s;
+  - mean distance 0.065% of the model's size; 95% of points within 0.19%;
+  - colours carried over (the orange feet stay orange).
+- The 357,650-triangle photogrammetry scan, QuadriFlow to about 40,000 quads,
+  with the texture rebaked plus normal and occlusion maps (4096 px):
+  - 184 s, giving 34,622 quads (69,244 triangles);
+  - 95% of points within 0.05% of the model's size (mean 0.01%);
+  - rendered side by side with the original, curls, ears and texture marks
+    match.
+
+**Two colour bugs fixed on the way** (both older than this phase):
+- **16-bit vertex colours** (Blender writes them) were read by trimesh as
+  noise, by wrapping (7,666 → 242) instead of scaling. GLB files are now
+  narrowed to 8-bit before trimesh reads them (D49), and textured models'
+  16-bit colours are scaled correctly.
+- **Colours next to a texture turned black** whenever a model was saved
+  again through trimesh (every Enhance), because float colours were written
+  as truncated bytes. They are kept as bytes now.
+
+Checks run on 2026-11-04 (COLMAP and Blender installed):
+- **Python:** 324 tests passed, including QuadriFlow through the Enhance API.
+- **Frontend:** 107 unit tests.
+- **Browser tests:**
+  - web: 23, after updating the workspace test, which had expected
+    retopology to be "unavailable";
+  - desktop UI: 2;
+  - job workflows: 2.
+- **Rust:** 14 tests.
+- **Static checks:** ruff, mypy, ESLint, Prettier, tsc and builds.
+
+**Not done or not verified:**
+- Instant Meshes (QuadriFlow covers the same need).
+- Quads are not kept in the files (GLB, and the exports made from it).
+- Smoothing that preserves sharp edges.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
@@ -727,8 +790,8 @@ working and adds tests that use real tools and real data.
 - Version comparison.
 - Large-model performance (3 million triangles measured).
 
-**Phase 13 — Geometry.**
-- Retopology with a measured fidelity check (QuadriFlow or Instant Meshes).
+**Phase 13 — Geometry ✅ (see above).**
+- Retopology with a measured fidelity check (QuadriFlow, voxels).
 - Smoothing and remeshing.
 - Normal and ambient-occlusion map baking.
 

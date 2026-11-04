@@ -1,6 +1,7 @@
 """Features that run Blender: FBX export (re-opened in a separate Blender run) and
 texture baking. Skipped when Blender is not installed."""
 
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from ai3d.models.enums import ExportFormat, QualityMode
 from ai3d.processing import exporters, geometry
 from ai3d.processing.exporters import ExportError
 from ai3d.processing.geometry import PROFILES, Profile, process
+from ai3d.processing.mesh import load_model_scene
 from ai3d.workers import JobRunner
 from ai3d_engine.blender import check_blender
 from tests.test_model_versions import _generated_model, _save
@@ -265,7 +267,7 @@ def test_professional_enhance_bakes_a_textured_model_over_the_budget(
     ).json()
     steps = {s["code"]: s for s in plan["steps"]}
     assert steps["baking"]["status"] == "will_run"
-    assert steps["retopology"]["status"] == "unavailable"
+    assert "retopology" not in steps
 
     job = client.post(
         f"/api/v1/models/{model['id']}/enhance",
@@ -283,7 +285,7 @@ def test_professional_enhance_bakes_a_textured_model_over_the_budget(
     report = {s["code"]: s for s in current["quality_report"]["metrics"]["enhancement"]}
     assert report["decimate"]["status"] == "applied"
     assert report["baking"]["status"] == "applied"
-    assert report["retopology"]["status"] == "unavailable"
+    assert "retopology" not in report
     reopened = trimesh.load_scene(
         trimesh.util.wrap_as_stream(client.get(current["file_url"]).content), file_type="glb"
     )
@@ -306,3 +308,86 @@ def test_professional_bakes_a_model_just_over_the_real_budget() -> None:
     assert len(mesh.faces) == 300_000
     assert mesh.visual.kind == "texture"
     assert result.scene.extents == pytest.approx(scene.extents, rel=1e-3)
+
+
+def _coloured_sphere() -> trimesh.Trimesh:
+    """Vertex colours from red (bottom) to blue (top)."""
+    sphere = trimesh.creation.icosphere(subdivisions=5, radius=RADIUS)
+    height = (sphere.vertices[:, 1] + RADIUS) / (2 * RADIUS)
+    colours = np.stack(
+        [(1 - height) * 220, np.full_like(height, 30), height * 220, np.full_like(height, 255)], 1
+    ).astype(np.uint8)
+    sphere.visual = trimesh.visual.ColorVisuals(sphere, vertex_colors=colours)
+    return sphere
+
+
+def test_quadriflow_retopology_through_enhance_keeps_shape_and_colours_and_bakes_maps(
+    client: TestClient, runner: JobRunner, make_image_project: MakeImageProject
+) -> None:
+    model = _generated_model(client, runner, make_image_project)
+    coloured = _scene(_coloured_sphere()).export(file_type="glb")
+    _save(client, model["id"], model["current_version"]["id"], coloured)
+    body = {
+        "quality_mode": "high_quality",
+        "smoothing": 2,
+        "remesh": {"method": "quadriflow", "target_faces": 1500, "maps": ["normal", "occlusion"]},
+    }
+    plan = client.post(f"/api/v1/models/{model['id']}/enhance/plan", json=body).json()
+    steps = {s["code"]: s for s in plan["steps"]}
+    assert steps["retopology"]["status"] == "will_run"
+    assert steps["maps"]["status"] == "will_run"
+    assert steps["smoothing"]["status"] == "will_run"
+    job = client.post(f"/api/v1/models/{model['id']}/enhance", json=body).json()
+    assert runner.run_until_idle() == 1
+    final = client.get(f"/api/v1/jobs/{job['id']}").json()
+    assert final["status"] == "succeeded", final["error"]
+
+    current = client.get(f"/api/v1/models/{model['id']}").json()["current_version"]
+    report = {s["code"]: s for s in current["quality_report"]["metrics"]["enhancement"]}
+    assert report["retopology"]["status"] == "applied", report["retopology"]
+    assert "quads" in report["retopology"]["detail"]
+    assert "Colours were carried over" in report["retopology"]["detail"]
+    assert report["maps"]["status"] == "applied"
+    metrics = current["quality_report"]["metrics"]
+    assert metrics["watertight"] is True
+    assert metrics["inside_out"] is False
+    assert 2000 < metrics["triangle_count"] < 4000  # ~1,500 quads, two triangles each
+    assert metrics["bbox_size"] == pytest.approx([2 * RADIUS] * 3, rel=0.03)
+
+    data = client.get(current["file_url"]).content
+    scene = load_model_scene_bytes(data)
+    (mesh,) = scene.geometry.values()
+    material = mesh.visual.material
+    assert material.normalTexture is not None
+    assert material.occlusionTexture is not None
+    colours = np.asarray(mesh.visual.vertex_attributes["color"])[:, :3] / 255.0
+    top = mesh.vertices[:, 1] > RADIUS * 0.8
+    bottom = mesh.vertices[:, 1] < -RADIUS * 0.8
+    assert colours[top, 2].mean() > 0.6
+    assert colours[top, 0].mean() < 0.2
+    assert colours[bottom, 0].mean() > 0.6
+    assert colours[bottom, 2].mean() < 0.2
+
+
+def test_voxel_remesh_rebakes_the_texture_onto_new_uvs(tmp_path: Path) -> None:
+    scene = _scene(_textured_sphere(4, _texture()))
+    result = process(
+        scene,
+        QualityMode.HIGH_QUALITY,
+        remesh_settings=geometry.RemeshSettings("voxel", resolution=120),
+        workdir=tmp_path,
+    )
+    steps = {s.code: s for s in result.steps}
+    assert steps["retopology"].status == "applied", steps["retopology"].detail
+    assert steps["baking"].status == "applied"
+    (mesh,) = result.scene.geometry.values()
+    assert mesh.visual.kind == "texture"
+    assert mesh.visual.material.baseColorTexture is not None
+    assert result.scene.extents == pytest.approx(scene.extents, rel=0.03)
+
+
+def load_model_scene_bytes(data: bytes) -> trimesh.Scene:
+    with tempfile.NamedTemporaryFile(suffix=".glb") as handle:
+        handle.write(data)
+        handle.flush()
+        return load_model_scene(Path(handle.name))

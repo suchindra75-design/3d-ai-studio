@@ -14,7 +14,7 @@ from ai3d.core.errors import ConflictError, InvalidInputError
 from ai3d.core.timeutil import utcnow
 from ai3d.models import GenerationJob, ModelVersion
 from ai3d.models.enums import JobEventType, JobKind, JobStatus, ProcessingMode
-from ai3d.processing.geometry import BAKE_MAX_TEXTURE, PROFILES, RETOPOLOGY_DETAIL
+from ai3d.processing.geometry import BAKE_MAX_TEXTURE, PROFILES, REMESH_MAX_P95
 from ai3d.schemas.enhance import EnhancePlanRead, EnhanceRequest, EnhanceStepPlan
 from ai3d.services.jobs import add_event
 from ai3d.services.models import QUALITY_LABELS, get_model, get_version
@@ -51,6 +51,38 @@ def build_plan(body: EnhanceRequest) -> EnhancePlanRead:
         step("normals", "Consistent normals", "Flips triangles that face the wrong way.")
     if profile.fill_holes:
         step("holes", "Fill holes", "Closes small holes on untextured, uncoloured meshes.")
+    if body.smoothing:
+        step(
+            "smoothing",
+            "Smoothing",
+            f"{body.smoothing} passes of Taubin smoothing (keeps the volume); the report says "
+            "how far the surface moved.",
+        )
+    remesh_problem = check_blender() if body.remesh else None
+    if body.remesh:
+        method = (
+            f"QuadriFlow, about {body.remesh.target_faces:,} quads (an even layout)"
+            if body.remesh.method == "quadriflow"
+            else f"voxels, {body.remesh.resolution} across (a uniform, closed surface)"
+        )
+        step(
+            "retopology",
+            "Retopology" if body.remesh.method == "quadriflow" else "Remesh",
+            remesh_problem
+            or f"Rebuilds the surface in Blender ({method}). Kept only if it stays within "
+            f"{REMESH_MAX_P95:.0%} of the model's size of the original; colours are carried "
+            "over and textures baked onto new UVs. Can take minutes.",
+            available=remesh_problem is None,
+        )
+        if body.remesh.maps:
+            names = {"normal": "normal map", "occlusion": "ambient occlusion"}
+            step(
+                "maps",
+                "Normal / occlusion maps",
+                remesh_problem
+                or "Bakes " + " and ".join(names[m] for m in body.remesh.maps) + " in Blender.",
+                available=remesh_problem is None,
+            )
     step("textures", "Texture size", f"Downscales textures larger than {profile.max_texture} px.")
     blender_problem = check_blender() if profile.report_tools else None
     if profile.decimate_to is not None:
@@ -61,8 +93,7 @@ def build_plan(body: EnhanceRequest) -> EnhancePlanRead:
             if profile.report_tools and blender_problem is None
             else "Quadric decimation on untextured models (textured models are kept as they are).",
         )
-    if profile.report_tools:
-        step("retopology", "Retopology", RETOPOLOGY_DETAIL, available=False)
+    if profile.report_tools and body.remesh is None:
         if blender_problem is None:
             step(
                 "baking",
@@ -111,6 +142,8 @@ def retry_enhance(
         source_version_id=original.source_model_version_id,
         remove_ground=bool(params.get("remove_ground")),
         scale=params.get("scale"),
+        smoothing=int(params.get("smoothing") or 0),
+        remesh=params.get("remesh"),
     )
     return create_enhance_job(
         db,
@@ -152,6 +185,8 @@ def create_enhance_job(
             "source_version_number": source.version_number,
             "remove_ground": body.remove_ground,
             "scale": body.scale.model_dump() if body.scale else None,
+            "smoothing": body.smoothing,
+            "remesh": body.remesh.model_dump() if body.remesh else None,
             "provider_summary": [s.title for s in plan.steps if s.status == "will_run"],
             "warnings": [],
         },

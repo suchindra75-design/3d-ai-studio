@@ -28,7 +28,7 @@ from ai3d_engine.runtime import find_tool, run_tool
 log = logging.getLogger(__name__)
 
 SCRIPT = Path(__file__).resolve().parent / "blender_scripts" / "ai3d_blender.py"
-COMMANDS = frozenset({"inspect", "export_fbx", "bake"})
+COMMANDS = frozenset({"inspect", "export_fbx", "bake", "remesh"})
 # The script uses the Blender 4.x Python API (Principled BSDF socket names, EMIT bake).
 MIN_VERSION = (4, 2)
 TAIL_LINES = 30

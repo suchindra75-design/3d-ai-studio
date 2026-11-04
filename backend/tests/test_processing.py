@@ -148,8 +148,7 @@ def test_professional_decimates_untextured_but_not_textured_models() -> None:
 def test_profiles_report_tools_honestly() -> None:
     result = process(_scene(trimesh.creation.box()), QualityMode.PROFESSIONAL)
     by_code = {s.code: s for s in result.steps}
-    assert by_code["retopology"].status == "unavailable"
-    assert "QuadriFlow" in by_code["retopology"].detail
+    assert "retopology" not in by_code  # an explicit option, not part of a profile
     assert by_code["baking"].status == "skipped"
     assert by_code["baking"].detail.startswith("Not needed: the model is within 300,000")
     fast = [s.code for s in process(_scene(trimesh.creation.box()), QualityMode.FAST).steps]
@@ -295,3 +294,54 @@ def test_an_inside_out_model_is_reported_and_enhance_turns_it_round(tmp_path: Pa
     report = validate_mesh_file(fixed)
     assert report.metrics["inside_out"] is False
     assert "inside_out" not in [i.code for i in report.issues]
+
+
+def test_smoothing_calms_noise_keeps_volume_and_texture_coordinates() -> None:
+    sphere = trimesh.creation.icosphere(subdivisions=4, radius=1.0)
+    rng = np.random.default_rng(2)
+    sphere.vertices = sphere.vertices * (1 + rng.normal(0, 0.02, (len(sphere.vertices), 1)))
+    noisy = sphere.copy()
+    sphere.unmerge_vertices()  # seams everywhere, like a textured model
+    sphere.visual = trimesh.visual.TextureVisuals(uv=rng.random((len(sphere.vertices), 2)))
+    uv_before = sphere.visual.uv.copy()
+    scene = _scene(sphere)
+    step = geometry.smooth(scene, 10)
+    assert step.status == "applied"
+    assert "on average" in step.detail
+    (mesh,) = scene.geometry.values()
+    radius = np.linalg.norm(mesh.vertices, axis=1)
+    assert radius.std() < 0.5 * np.linalg.norm(noisy.vertices, axis=1).std()  # less rough
+    welded = mesh.copy()
+    welded.merge_vertices(merge_tex=True, merge_norm=True)
+    assert welded.is_watertight  # seams moved together: no cracks
+    assert abs(welded.volume / noisy.volume - 1) < 0.03  # Taubin keeps the volume
+    assert np.array_equal(mesh.visual.uv, uv_before)
+    assert geometry.smooth(scene, 0).status == "skipped"
+
+
+def test_a_remesh_that_drifts_from_the_original_is_not_kept(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_blender(command: str, request: dict, **_: object) -> dict:
+        assert command == "remesh"
+        Path(request["output"]).write_bytes(_scene(trimesh.creation.box()).export(file_type="glb"))
+        return {
+            "fidelity": {"mean": 0.004, "p95": 0.02, "max": 0.05},
+            "triangles_before": 12,
+            "faces_after": 6,
+            "quads_after": 6,
+            "triangles_after": 12,
+            "colours_transferred": False,
+            "maps": [],
+        }
+
+    monkeypatch.setattr(geometry, "check_blender", lambda: None)
+    monkeypatch.setattr(geometry, "run_blender", fake_blender)
+    scene = _scene(trimesh.creation.icosphere())
+    settings = geometry.RemeshSettings("quadriflow", target_faces=100)
+    result = process(scene, QualityMode.HIGH_QUALITY, remesh_settings=settings, workdir=tmp_path)
+    step = next(s for s in result.steps if s.code == "retopology")
+    assert step.status == "skipped"
+    assert "Not kept" in step.detail
+    assert "2.00%" in step.detail
+    assert result.scene is scene

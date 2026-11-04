@@ -16,6 +16,11 @@ never code); the result is written as JSON. Commands:
 ``bake``
     Import a (textured) GLB, make a reduced copy, give it new UVs and bake the
     original's base colour onto it (Cycles, selected-to-active); write it as GLB.
+``remesh``
+    Import a GLB and rebuild its surface: QuadriFlow (an even quad layout) or a
+    voxel remesh. Measures how far the new surface is from the original, carries
+    vertex colours over, and on request bakes base colour, normal and ambient-
+    occlusion maps onto new UVs; write it as GLB.
 
 Blender's coordinate system is Z-up; the glTF importer/exporter convert from/to
 glTF's Y-up (x, y, z)_gltf = (x, z, -y)_blender. Blender's unit is the metre.
@@ -34,7 +39,7 @@ import bpy  # type: ignore[import-not-found]
 import numpy as np
 from mathutils.bvhtree import BVHTree  # type: ignore[import-not-found]
 
-COMMANDS = ("inspect", "export_fbx", "bake")
+COMMANDS = ("inspect", "export_fbx", "bake", "remesh")
 
 
 class RequestError(Exception):
@@ -503,14 +508,310 @@ def bake(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# -- remesh ----------------------------------------------------------------------------
+
+# QuadriFlow refuses meshes with edges shorter than 1e-4 Blender units, which models a
+# unit or so across (AI output, unscaled scans) have plenty of; it runs on a copy scaled
+# to this diagonal and is scaled back afterwards.
+_REMESH_DIAGONAL = 1000.0
+
+
+def _surface_samples(obj: Any, count: int, seed: int) -> np.ndarray:
+    """``count`` points spread over the surface by area (world space)."""
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    mesh.transform(obj.matrix_world)
+    bmesh.ops.triangulate(mesh, faces=mesh.faces)
+    corners = np.array([[list(v.co) for v in f.verts] for f in mesh.faces], dtype=np.float64)
+    mesh.free()
+    if len(corners) == 0:
+        return np.zeros((0, 3))
+    area = np.linalg.norm(
+        np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]), axis=1
+    )
+    rng = np.random.default_rng(seed)
+    pick = rng.choice(len(corners), count, p=area / area.sum())
+    r1, r2 = rng.random(count), rng.random(count)
+    s = np.sqrt(r1)
+    tri = corners[pick]
+    return (
+        (1 - s)[:, None] * tri[:, 0]
+        + (s * (1 - r2))[:, None] * tri[:, 1]
+        + (s * r2)[:, None] * tri[:, 2]
+    )
+
+
+def _distances(points: np.ndarray, target: Any) -> np.ndarray:
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    tree = BVHTree.FromObject(target, depsgraph)
+    out = np.empty(len(points))
+    for i, point in enumerate(points):
+        hit = tree.find_nearest(point.tolist())
+        out[i] = hit[3] if hit[0] is not None else np.inf
+    return out
+
+
+def _fidelity(source: Any, result: Any, diagonal: float, count: int = 20_000) -> dict[str, float]:
+    """Distances between the two surfaces, both ways, as fractions of the diagonal."""
+    d = np.concatenate(
+        [
+            _distances(_surface_samples(source, count, 1), result),
+            _distances(_surface_samples(result, count, 2), source),
+        ]
+    ) / max(diagonal, 1e-12)
+    return {
+        "mean": float(d.mean()),
+        "p95": float(np.percentile(d, 95)),
+        "max": float(d.max()),
+    }
+
+
+def _scaled(obj: Any, factor: float) -> None:
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    bmesh.ops.scale(mesh, vec=(factor, factor, factor), verts=mesh.verts)
+    mesh.to_mesh(obj.data)
+    mesh.free()
+
+
+def _duplicate(obj: Any, name: str) -> Any:
+    copy = obj.copy()
+    copy.data = obj.data.copy()
+    copy.name = name
+    bpy.context.scene.collection.objects.link(copy)
+    return copy
+
+
+def _colour_attribute(obj: Any) -> tuple[str, str] | None:
+    """Name and domain (POINT or CORNER) of the mesh's first colour attribute."""
+    attributes = getattr(obj.data, "color_attributes", None)
+    if not attributes or not len(attributes):
+        return None
+    return attributes[0].name, attributes[0].domain
+
+
+def _transfer_colours(source: Any, target: Any, name: str, domain: str) -> None:
+    """Vertex colours from the nearest point of the original surface (interpolated).
+
+    glTF files from different tools store them per vertex (POINT) or per face
+    corner (CORNER); the transfer uses the same domain as the original.
+    """
+    target.data.color_attributes.new(name=name, type="BYTE_COLOR", domain=domain)
+    _select_only([target])
+    modifier = target.modifiers.new("Colours", "DATA_TRANSFER")
+    modifier.object = source
+    if domain == "POINT":
+        modifier.use_vert_data = True
+        modifier.data_types_verts = {"COLOR_VERTEX"}
+        modifier.vert_mapping = "POLYINTERP_NEAREST"
+        modifier.layers_vcol_vert_select_src = "ALL"
+        modifier.layers_vcol_vert_select_dst = "NAME"
+    else:
+        modifier.use_loop_data = True
+        modifier.data_types_loops = {"COLOR_CORNER"}
+        modifier.loop_mapping = "POLYINTERP_NEAREST"
+        modifier.layers_vcol_loop_select_src = "ALL"
+        modifier.layers_vcol_loop_select_dst = "NAME"
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+
+def _new_image(name: str, size: int, colour: bool) -> Any:
+    image = bpy.data.images.new(name, width=size, height=size, alpha=False)
+    image.colorspace_settings.name = "sRGB" if colour else "Non-Color"
+    return image
+
+
+def _occlusion_output(tree: Any) -> Any:
+    """The node group the glTF exporter reads the occlusion texture from."""
+    group = bpy.data.node_groups.get("glTF Material Output")
+    if group is None:
+        group = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+        group.interface.new_socket("Occlusion", in_out="INPUT", socket_type="NodeSocketFloat")
+    node = tree.nodes.new("ShaderNodeGroup")
+    node.node_tree = group
+    return node
+
+
+def _rebuild(low: Any, request: dict[str, Any], diagonal: float) -> None:
+    """QuadriFlow or voxel remesh, on a copy scaled to _REMESH_DIAGONAL and back."""
+    factor = _REMESH_DIAGONAL / diagonal
+    _scaled(low, factor)
+    _select_only([low])
+    if request["method"] == "quadriflow":
+        target = int(request["target_faces"])
+        if not 100 <= target <= 2_000_000:
+            raise RequestError("Invalid target face count.")
+        outcome = bpy.ops.object.quadriflow_remesh(
+            target_faces=target,
+            use_mesh_symmetry=False,
+            use_preserve_sharp=False,
+            use_preserve_boundary=True,
+            seed=0,
+        )
+        if "FINISHED" not in outcome:
+            raise RequestError(
+                "QuadriFlow could not rebuild this surface (it needs a connected, "
+                "consistently oriented, manifold mesh)."
+            )
+    else:
+        resolution = int(request["resolution"])
+        if not 16 <= resolution <= 2000:
+            raise RequestError("Invalid voxel resolution.")
+        low.data.remesh_voxel_size = _REMESH_DIAGONAL / resolution
+        bpy.ops.object.voxel_remesh()
+    _scaled(low, 1.0 / factor)
+
+
+def _bake_maps(
+    high: list[Any], low: Any, maps: set[str], settings: dict[str, Any], extrusion: float
+) -> list[str]:
+    """Bake the requested maps onto new UVs of ``low``; returns what was baked."""
+    _unwrap(low)
+    surface = _emit_base_colour(high) if "base" in maps else None
+    material = bpy.data.materials.new("Remeshed")
+    material.use_nodes = True
+    tree = material.node_tree
+    bsdf = tree.nodes.get("Principled BSDF")
+    if surface:
+        bsdf.inputs["Metallic"].default_value = surface["metallic"]
+        bsdf.inputs["Roughness"].default_value = surface["roughness"]
+    low.data.materials.clear()
+    low.data.materials.append(material)
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = settings["samples"]
+    scene.render.bake.margin = settings["margin"]
+    scene.render.bake.margin_type = "EXTEND"
+    images: dict[str, Any] = {}
+    for kind in ("base", "normal", "occlusion"):
+        if kind not in maps:
+            continue
+        node = tree.nodes.new("ShaderNodeTexImage")
+        node.image = _new_image(kind, settings["size"], colour=kind == "base")
+        tree.nodes.active = node
+        if kind == "occlusion":
+            _select_only([low])
+            bpy.ops.object.bake(type="AO", margin=settings["margin"], target="IMAGE_TEXTURES")
+        else:
+            _select_only([*high, low], active=low)
+            bpy.ops.object.bake(
+                type="EMIT" if kind == "base" else "NORMAL",
+                use_selected_to_active=True,
+                cage_extrusion=extrusion,
+                max_ray_distance=extrusion * 2.0,
+                normal_space="TANGENT",
+                margin=settings["margin"],
+                target="IMAGE_TEXTURES",
+                use_clear=True,
+            )
+        node.image.filepath_raw = str(settings["folder"] / f"{settings['stem']}-{kind}.png")
+        node.image.file_format = "PNG"
+        node.image.save()
+        images[kind] = node
+    links = tree.links
+    if "base" in images:
+        links.new(images["base"].outputs["Color"], bsdf.inputs["Base Color"])
+    if "normal" in images:
+        normal_map = tree.nodes.new("ShaderNodeNormalMap")
+        links.new(images["normal"].outputs["Color"], normal_map.inputs["Color"])
+        links.new(normal_map.outputs["Normal"], bsdf.inputs["Normal"])
+    if "occlusion" in images:
+        split = tree.nodes.new("ShaderNodeSeparateColor")
+        links.new(images["occlusion"].outputs["Color"], split.inputs["Color"])
+        links.new(split.outputs["Red"], _occlusion_output(tree).inputs["Occlusion"])
+    return list(images)
+
+
+def remesh(request: dict[str, Any]) -> dict[str, Any]:
+    source_path, dest = _path(request, "input"), _path(request, "output")
+    maps = set(request.get("maps", []))
+    size = int(request.get("texture_size", 2048))
+    if request.get("method") not in {"quadriflow", "voxel"}:
+        raise RequestError("Invalid remesh method.")
+    if not maps <= {"base", "normal", "occlusion"} or not 64 <= size <= 16384:
+        raise RequestError("Invalid maps or texture size.")
+    started = time.monotonic()
+    _empty_scene()
+    high = _import(source_path)
+    if not high:
+        raise RequestError("The model contains no meshes.")
+    before = _facts(high)
+    diagonal = float(np.linalg.norm(before["size"])) or 1.0
+    colour = next((c for c in (_colour_attribute(o) for o in high) if c), None)
+
+    source = _reduced_copy(high, diagonal)  # joined, world space, seams merged
+    source.name = "Source"
+    low = _duplicate(source, "Model")
+    _rebuild(low, request, diagonal)
+    remeshed_at = time.monotonic()
+    faces = len(low.data.polygons)
+    if faces < 4:
+        raise RequestError(f"Remeshing left only {faces} faces.")
+    quads = sum(1 for p in low.data.polygons if len(p.vertices) == 4)
+    fidelity = _fidelity(source, low, diagonal)
+    measured_at = time.monotonic()
+
+    if colour:
+        _transfer_colours(source, low, *colour)
+    if before["textured"]:
+        maps.add("base")  # a texture cannot survive new UVs without baking it
+    baked: list[str] = []
+    if maps:
+        settings = {
+            "size": size,
+            "samples": int(request.get("samples", 4)),
+            "margin": int(request.get("margin", 16)),
+            "folder": dest.parent,
+            "stem": dest.stem,
+        }
+        extrusion = fidelity["max"] * diagonal * 1.5 + diagonal * 1e-3
+        baked = _bake_maps(high, low, maps, settings, extrusion)
+    baked_at = time.monotonic()
+
+    bpy.data.objects.remove(source, do_unlink=True)
+    _select_only([low])
+    bpy.ops.export_scene.gltf(
+        filepath=str(dest),
+        export_format="GLB",
+        use_selection=True,
+        export_yup=True,
+        export_apply=True,
+        export_texcoords=True,
+        export_normals=True,
+        export_materials="EXPORT",
+        export_image_format="AUTO",
+        export_vertex_color="ACTIVE" if colour else "MATERIAL",
+    )
+    return {
+        "method": request["method"],
+        "triangles_before": before["triangles"],
+        "faces_after": faces,
+        "quads_after": quads,
+        "triangles_after": _triangles(low),
+        "fidelity": fidelity,
+        "colours_transferred": colour is not None,
+        "maps": baked,
+        "texture_size": size if baked else None,
+        "seconds": {
+            "remesh": round(remeshed_at - started, 3),
+            "measure": round(measured_at - remeshed_at, 3),
+            "bake": round(baked_at - measured_at, 3),
+            "total": round(time.monotonic() - started, 3),
+        },
+    }
+
+
 def main(argv: list[str]) -> int:
     args = argv[argv.index("--") + 1 :] if "--" in argv else []
     if len(args) != 3 or args[0] not in COMMANDS:
-        print("usage: ... -- {inspect|export_fbx|bake} <request.json> <result.json>")
+        print("usage: ... -- {inspect|export_fbx|bake|remesh} <request.json> <result.json>")
         return 2
     command, request_path, result_path = args[0], Path(args[1]), Path(args[2])
     request = json.loads(request_path.read_text(encoding="utf-8"))
-    handler = {"inspect": inspect, "export_fbx": export_fbx, "bake": bake}[command]
+    handler = {"inspect": inspect, "export_fbx": export_fbx, "bake": bake, "remesh": remesh}[
+        command
+    ]
     try:
         result: dict[str, Any] = {"ok": True, **handler(request)}
     except RequestError as exc:

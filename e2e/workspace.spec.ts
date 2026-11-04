@@ -139,8 +139,11 @@ test('enhance with a measurement, then export verified files', async ({
 
   await page.getByRole('tab', { name: 'Enhance' }).click();
   await page.getByLabel('Quality', { exact: true }).selectOption({ label: 'Professional' });
-  // Retopology is never offered (versions are triangle-only GLBs).
-  await expect(page.getByText(/Retopology \(unavailable\)/)).toBeVisible();
+  // Retopology is an option (off by default), with its fidelity rule stated.
+  await expect(page.getByLabel('Retopology')).toHaveValue('none');
+  await page.getByLabel('Retopology').selectOption('quadriflow');
+  await expect(page.getByText(/kept only if it stays within 1%/)).toBeVisible();
+  await page.getByLabel('Retopology').selectOption('none');
   await page.getByRole('checkbox', { name: /Set the real-world size/ }).check();
   await page.getByLabel('Length (mm)').fill('100');
   await page.getByRole('button', { name: /^Enhance \(/ }).click();

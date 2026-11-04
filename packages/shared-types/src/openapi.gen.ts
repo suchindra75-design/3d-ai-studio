@@ -745,6 +745,7 @@ export interface components {
         /** EnhanceRequest */
         EnhanceRequest: {
             quality_mode: components["schemas"]["QualityMode"];
+            remesh?: components["schemas"]["RemeshIn"] | null;
             /**
              * Remove Ground
              * @description Remove a supporting surface under the object (photogrammetry scans).
@@ -752,6 +753,12 @@ export interface components {
              */
             remove_ground?: boolean;
             scale?: components["schemas"]["ScaleReferenceIn"] | null;
+            /**
+             * Smoothing
+             * @description Taubin smoothing passes (0 = off).
+             * @default 0
+             */
+            smoothing?: number;
             /** Source Version Id */
             source_version_id?: string | null;
         };
@@ -1632,6 +1639,35 @@ export interface components {
             severity: "info" | "warning" | "error";
         };
         /**
+         * RemeshIn
+         * @description Rebuild the surface in Blender (kept only if it stays close to the original).
+         */
+        RemeshIn: {
+            /**
+             * Maps
+             * @description Extra maps to bake from the original onto the new surface.
+             */
+            maps?: ("normal" | "occlusion")[];
+            /**
+             * Method
+             * @description quadriflow: an even quad layout; voxel: a uniform, closed surface.
+             * @enum {string}
+             */
+            method: "quadriflow" | "voxel";
+            /**
+             * Resolution
+             * @description Voxel: cells across the model's diagonal.
+             * @default 300
+             */
+            resolution?: number;
+            /**
+             * Target Faces
+             * @description QuadriFlow: about this many quads.
+             * @default 20000
+             */
+            target_faces?: number;
+        };
+        /**
          * ReportStatus
          * @enum {string}
          */
@@ -1800,6 +1836,7 @@ export type QualityMode = components['schemas']['QualityMode'];
 export type QualityModeInfo = components['schemas']['QualityModeInfo'];
 export type QualityReportRead = components['schemas']['QualityReportRead'];
 export type QualityWarningRead = components['schemas']['QualityWarningRead'];
+export type RemeshIn = components['schemas']['RemeshIn'];
 export type ReportStatus = components['schemas']['ReportStatus'];
 export type RetryRequest = components['schemas']['RetryRequest'];
 export type ScaleReferenceIn = components['schemas']['ScaleReferenceIn'];
