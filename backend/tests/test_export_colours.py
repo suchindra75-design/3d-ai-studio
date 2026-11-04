@@ -16,6 +16,7 @@ import trimesh
 
 from ai3d.models.enums import ExportFormat
 from ai3d.processing import exporters
+from ai3d.processing.mesh import load_model_scene, validate_mesh_file
 from ai3d_engine.blender import check_blender
 
 USD = importlib.util.find_spec("pxr") is not None
@@ -183,3 +184,22 @@ def test_a_blender_draco_file_with_a_material_and_colours_exports_everywhere(
     out = tmp_path / "again.glb"
     exporters.write(scene, ExportFormat.GLB, out)  # crashed before the colours were normalised
     assert exporters.validate(out, ExportFormat.GLB, facts)["coloured"]
+
+
+@pytest.mark.parametrize("fmt", [ExportFormat.STL, ExportFormat.THREE_MF])
+def test_a_mirrored_part_exports_with_outward_faces(tmp_path: Path, fmt: ExportFormat) -> None:
+    """The workspace stores a mirror as a negative scale; exports must bake it correctly."""
+    box = trimesh.creation.box(extents=(0.2, 0.5, 0.1))
+    box.apply_translation([0.3, 0, 0])
+    scene = trimesh.Scene()
+    scene.add_geometry(box, node_name="part", transform=np.diag([-1.0, 1.0, 1.0, 1.0]))
+    source = tmp_path / "mirrored.glb"
+    source.write_bytes(scene.export(file_type="glb"))
+    assert validate_mesh_file(source).metrics["inside_out"] is False
+    loaded = load_model_scene(source)
+    out = tmp_path / f"mirrored.{fmt.value}"
+    exporters.write(loaded, fmt, out)
+    mesh = trimesh.load(out, file_type=fmt.value, force="mesh")
+    assert mesh.is_watertight
+    assert mesh.volume > 0  # faces point outwards
+    assert mesh.bounds[:, 0].mean() < 0  # and the part really moved to -X

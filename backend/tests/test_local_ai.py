@@ -319,6 +319,19 @@ def test_real_photo_to_model_with_the_installed_engine(
     extents = mesh.extents
     assert extents[1] == max(extents)  # upright: the plush toy is taller than wide or deep
     assert "NORMAL" in data[:4096].decode("latin-1")  # smooth normals for shading
+    # Not mirrored or inside out, and the colours belong where they are (Phase 11 found
+    # that the marching-cubes stand-in returned swapped axes): this plush has orange
+    # feet, and dark eyes on the front of its head (+Z, glTF's front).
+    assert mesh.volume > 0
+    assert report["metrics"]["inside_out"] is False
+    height = (mesh.vertices[:, 1] - mesh.vertices[:, 1].min()) / np.ptp(mesh.vertices[:, 1])
+    depth = (mesh.vertices[:, 2] - mesh.vertices[:, 2].min()) / np.ptp(mesh.vertices[:, 2])
+    orange = (colours[:, 0] > 120) & (colours[:, 1] < 0.75 * colours[:, 0]) & (colours[:, 2] < 60)
+    assert orange[height < 0.15].mean() > 0.1
+    assert orange[height > 0.5].mean() < 0.01
+    eyes = (colours.max(axis=1) < 25) & (height > 0.6)
+    assert eyes.sum() > 10
+    assert depth[eyes].mean() > 0.6
 
     # Every available export of this real AI model re-opens with its colours.
     formats = client.get("/api/v1/exports/formats").json()["items"]

@@ -99,6 +99,14 @@ export function QualityPanel({ version }: { version: ModelVersionRead }) {
           ],
           ['Consistent normals', yesNo(m.winding_consistent, 'Undefined (non-manifold)')],
           [
+            'Faces point outwards',
+            m.inside_out === true
+              ? 'No (inside out)'
+              : m.inside_out === false
+                ? 'Yes'
+                : 'Not measured (not closed)',
+          ],
+          [
             'Duplicate triangles',
             num(m.duplicate_faces) === null ? '—' : formatCount(num(m.duplicate_faces)!),
           ],

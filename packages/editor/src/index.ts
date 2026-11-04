@@ -19,3 +19,16 @@ export {
 export { exportGlb } from './export';
 export { TransformGizmo, type GizmoMode } from './gizmo';
 export { useHistoryState, type HistoryState } from './use-history';
+export {
+  EditError,
+  axisVector,
+  centreOnOriginCommand,
+  deleteCommand,
+  mirrorCommand,
+  pivotToCentreCommand,
+  placeOnGroundCommand,
+  type Axis,
+} from './arrange';
+export { cutCommand, cutGeometry, type CutResult, type CutSummary } from './cut';
+export { MAX_TEXTURE_SIZE, canTexture, textureCommand, uvTriangles } from './texture';
+export { ClipPreview } from './clip-preview';

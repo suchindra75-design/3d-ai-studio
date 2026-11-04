@@ -28,6 +28,7 @@ import { useMemo, useRef, type ReactNode } from 'react';
 import * as THREE from 'three';
 
 import { provenanceLabel, reportStatusLabel, reportStatusTone } from '../labels';
+import { ModelActions, PartActions, TextureControls, type RunEdit } from './edit-tools';
 import { ColorField, LiveSlider, Vec3Field, type Vec3 } from './fields';
 import { scaleOf, sizeLabel } from './scale';
 
@@ -117,15 +118,21 @@ const SCALARS: { property: ScalarProperty; label: string }[] = [
 ];
 
 function MaterialEditor({
+  root,
   material,
   users,
   history,
   onPreview,
+  onEdit,
+  revision,
 }: {
+  root: THREE.Object3D;
   material: THREE.Material;
   users: number;
   history: EditHistory;
   onPreview: () => void;
+  onEdit: RunEdit;
+  revision: number;
 }) {
   // Value before a live preview began, so the recorded edit undoes to it.
   const colorStart = useRef<THREE.Color | null>(null);
@@ -193,6 +200,7 @@ function MaterialEditor({
           This material type has no editable settings.
         </p>
       ) : null}
+      <TextureControls root={root} material={material} onEdit={onEdit} revision={revision} />
     </li>
   );
 }
@@ -206,6 +214,10 @@ export interface InspectorProps {
   /** Changes whenever the model changed; the panel re-reads it. */
   revision: number;
   onPreview: () => void;
+  /** Runs a structural edit (see edit-tools.tsx). */
+  onEdit: RunEdit;
+  /** Clears the selection, e.g. after the selected part was deleted. */
+  onDeselect: () => void;
 }
 
 export function InspectorPanel({
@@ -216,6 +228,8 @@ export function InspectorPanel({
   display,
   revision,
   onPreview,
+  onEdit,
+  onDeselect,
 }: InspectorProps) {
   const root = loaded.root;
   /* eslint-disable react-hooks/exhaustive-deps -- `revision` signals in-place edits */
@@ -243,7 +257,8 @@ export function InspectorPanel({
       }
     });
     return [...own].map((material) => ({ material, users: users.get(material) ?? 1 }));
-  }, [root, selected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision`: parts may be deleted
+  }, [root, selected, revision]);
 
   const report = version.quality_report;
   const measured = version.surface_provenance === 'measured';
@@ -279,6 +294,7 @@ export function InspectorPanel({
               ? 'Sizes are in the model’s own units. The shape was measured from the photos, but the scale is unknown (no reference object), so only proportions are meaningful. Enhance can set it from one measurement.'
               : 'Sizes are in the model’s own units. This model has no real-world scale: its shape was not measured from the object.'}
         </p>
+        <ModelActions root={root} onEdit={onEdit} />
         {loaded.animations.length > 0 || loaded.extensions.length > 0 ? (
           <p className="text-xs text-subtle-foreground">
             {loaded.animations.length > 0 ? `${loaded.animations.length} animation(s). ` : ''}
@@ -306,14 +322,18 @@ export function InspectorPanel({
             </div>
             {selectedBox ? <Facts items={sizeFacts(selectedBox, scale !== null)} /> : null}
             {isPart ? (
-              <TransformEditor
-                key={`${selected.uuid}:${revision}`}
-                object={selected}
-                history={history}
-              />
+              <>
+                <TransformEditor
+                  key={`${selected.uuid}:${revision}`}
+                  object={selected}
+                  history={history}
+                />
+                <PartActions root={root} part={selected} onEdit={onEdit} onDeleted={onDeselect} />
+              </>
             ) : (
               <p className="text-xs text-subtle-foreground">
-                This is the whole model. Select a part to move, rotate or scale it.
+                This is the whole model (its actions are under Model). Select a part to move,
+                rotate, mirror or delete it.
               </p>
             )}
           </>
@@ -331,10 +351,13 @@ export function InspectorPanel({
             {materials.map(({ material, users }) => (
               <MaterialEditor
                 key={`${material.uuid}:${revision}`}
+                root={root}
                 material={material}
                 users={users}
                 history={history}
                 onPreview={onPreview}
+                onEdit={onEdit}
+                revision={revision}
               />
             ))}
           </ul>

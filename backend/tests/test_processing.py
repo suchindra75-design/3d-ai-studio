@@ -276,3 +276,22 @@ def test_only_blender_baking_waits_for_the_heavy_work_slot(
     order.clear()
     process(_scene(trimesh.creation.box()), QualityMode.PROFESSIONAL, heavy_turn=turn)
     assert order == []  # nothing to bake: no waiting
+
+
+def test_an_inside_out_model_is_reported_and_enhance_turns_it_round(tmp_path: Path) -> None:
+    box = trimesh.creation.box()
+    box.invert()
+    path = tmp_path / "inside_out.glb"
+    path.write_bytes(_scene(box).export(file_type="glb"))
+    report = validate_mesh_file(path)
+    assert report.metrics["inside_out"] is True
+    assert "inside_out" in [i.code for i in report.issues]
+
+    result = process(_scene(box), QualityMode.HIGH_QUALITY)
+    normals = next(s for s in result.steps if s.code == "normals")
+    assert normals.status == "applied"
+    fixed = tmp_path / "fixed.glb"
+    fixed.write_bytes(result.scene.export(file_type="glb"))
+    report = validate_mesh_file(fixed)
+    assert report.metrics["inside_out"] is False
+    assert "inside_out" not in [i.code for i in report.issues]

@@ -199,6 +199,15 @@ def _findings(metrics: dict[str, Any]) -> list[MeshIssue]:
                 "normals); Enhance can fix this.",
             )
         )
+    if metrics.get("inside_out"):
+        issues.append(
+            MeshIssue(
+                "inside_out",
+                "warning",
+                "The model is inside out: its triangles face inwards, so lighting looks wrong "
+                "and 3D-printing tools may reject it. Enhance (High or Professional) fixes this.",
+            )
+        )
     duplicates = metrics.get("duplicate_faces") or 0
     if duplicates:
         issues.append(
@@ -361,6 +370,10 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
         if non_manifold_edges == 0
         else None,
         "volume": round(abs(float(shape.volume)), 9) if watertight else None,
+        # A closed, consistently wound surface with negative volume faces inwards.
+        "inside_out": bool(watertight and shape.is_winding_consistent and shape.volume < 0)
+        if watertight and non_manifold_edges == 0
+        else None,
         "uv_out_of_range": _uv_out_of_range(meshes),
         "texture_sizes": _texture_sizes(scene),
     }

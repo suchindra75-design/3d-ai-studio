@@ -34,6 +34,11 @@ def install_shims(dino_config: str) -> None:
 
     def marching_cubes(volume, threshold):  # torchmcubes' signature and output layout
         verts, faces = mcubes.marching_cubes(volume.cpu().numpy(), threshold)
+        # torchmcubes returns coordinates in reversed axis order (TripoSR swaps them
+        # back with v_pos[..., [2, 1, 0]]); PyMCubes returns them in array order.
+        # Without this the mesh came out mirrored and inside out, and colours were
+        # looked up at the mirrored positions.
+        verts = np.ascontiguousarray(verts[:, ::-1])
         return (
             torch.from_numpy(verts.astype(np.float32)),
             torch.from_numpy(faces.astype(np.int64)),
@@ -76,11 +81,11 @@ def cut_out(image, u2net_path: str):
 
 
 def to_gltf(mesh):
-    """TripoSR axes (up +X, front +Z) to glTF (up +Y, front +Z); sRGB colours to linear."""
+    """TripoSR axes (up +Z, front +X) to glTF (up +Y, front +Z); sRGB colours to linear."""
     import numpy as np
 
     rotate = np.eye(4)
-    rotate[:3, :3] = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    rotate[:3, :3] = [[0, 1, 0], [0, 0, 1], [1, 0, 0]]  # x→z, y→x, z→y (a rotation)
     mesh.apply_transform(rotate)
     colors = mesh.visual.vertex_colors
     srgb = colors[:, :3].astype(np.float64) / 255.0

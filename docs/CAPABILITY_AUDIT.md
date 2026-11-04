@@ -1,4 +1,4 @@
-# Capability audit (2026-11-04, updated after Phases 8, 9, 9b and 10)
+# Capability audit (2026-11-04, updated after Phases 8, 9, 9b, 10 and 11)
 
 An audit of the repository after phases 0–7 (commit `f8ec4af`), against the
 product vision in [PRODUCT_SPECIFICATION.md](PRODUCT_SPECIFICATION.md).
@@ -14,12 +14,12 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 1 | Single-image → 3D | 🟡 | Local path verified on a real photo (Phase 8); Tripo/Meshy still never called for real |
 | 2 | Multi-image → 3D | ✅ | With OpenMVS (Phase 9b): a real 67-photo capture became a detailed, upright, textured model on the CPU in ~7 min; without OpenMVS the sparse surface is coarse; CUDA path never run |
 | 3 | Tripo & Meshy | 🟡 | Full adapters tested against fakes built from the API docs; no paid key yet |
-| 4 | Local AI generation engine | ✅ | TripoSR (Phase 8), verified end to end on a real photo on a CPU; GPU and other OSes untested |
+| 4 | Local AI generation engine | ✅ | TripoSR (Phase 8), verified end to end on a real photo on a CPU; mirrored/inside-out output found and fixed in Phase 11; GPU and other OSes untested |
 | 5 | Hybrid local/cloud | 🟡 | Automatic keeps photos local when it can and checks the machine first; failed jobs offer the other route with consent (Phase 10). Cloud side tested only with the mock provider |
 | 6 | Professional viewer | 🟠 | Solid basics; no measuring, lighting, normals/UV views, clipping or large-model handling |
-| 7 | 3D editing | 🟠 | Object transforms and material values with undo; no part or mesh-level edits |
+| 7 | 3D editing | 🟡 | Transforms, delete, mirror, pivot, ground/centre and plane cuts with filled caps (Phase 11), tested on real models; no merge/split or vertex editing |
 | 8 | Geometry refinement & retopology | 🟠 | Clean-up, decimation and baking work; retopology, smoothing and remeshing missing |
-| 9 | Texture & material editing | 🟠 | Colour/roughness/metalness/opacity only; no texture replace, UV view or map baking |
+| 9 | Texture & material editing | 🟠 | Material values, texture replace and a UV layout view (Phase 11); no texture adjustments, map baking or painting |
 | 10 | AI model enhancement | ❌ | "Enhance" is geometric processing; no AI refinement or texture enhancement |
 | 11 | Model quality analysis | ✅ | Run on real AI output, a real photogrammetry scan and Draco files (Phase 9); now flags stray and shattered surfaces |
 | 12 | Version management | ✅ | Immutable versions with provenance, save edits, switch current; tested end to end |
@@ -92,15 +92,17 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
   - Level of detail or progressive loading for large models.
   - Draco untested end to end.
 
-### 7. Actual 3D editing — 🟠
+### 7. Actual 3D editing — 🟡
 - **Have:** move, rotate and scale per part (gizmo and numbers); material
   colour, roughness, metalness and opacity; undo/redo; save as a new version
   (re-validated on the server).
+- **Added in Phase 11:** delete parts, mirror, pivot to centre, place on the
+  ground, centre on the origin, cut by a plane with filled caps. Tested on a
+  real AI model, a two-part textured model in the browser, and with the
+  server's checks on the saved versions.
 - **Missing:**
-  - Hide or delete parts.
-  - Set origin/pivot; place on the ground; mirror.
-  - Crop or cut by a plane.
   - Merge or split.
+  - Cutting a single part, or skinned/instanced parts.
   - Any mesh-level (vertex/face) editing. The app does not claim to offer it.
 
 ### 8. Geometry refinement and retopology — 🟠
@@ -119,9 +121,10 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 ### 9. Texture and material editing — 🟠
 - **Have:** material values (above); texture size limits in Enhance;
   base-colour baking.
+- **Added in Phase 11:** replace or add a base-colour texture; a UV layout
+  view.
 - **Missing:**
-  - Replacing or adjusting a texture.
-  - A UV layout view.
+  - Adjusting a texture (brightness, tiling), other maps.
   - Generating normal, roughness or ambient-occlusion maps.
   - Texture painting.
 
@@ -133,8 +136,9 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 
 ### 11. Model quality analysis — 🟡
 - **Have:**
-  - Report v2: boundary and non-manifold edges, duplicates, winding, volume,
-    UV range, texture sizes, provenance and scale status.
+  - Report v2: boundary and non-manifold edges, duplicates, winding,
+    inside-out surfaces (Phase 11), volume, UV range, texture sizes,
+    provenance and scale status.
   - Photo quality and overlap measurement.
   - All tested on generated, scanned and broken meshes.
 - **Missing:**

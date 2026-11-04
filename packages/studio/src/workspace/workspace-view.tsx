@@ -6,10 +6,14 @@
  * always starts from the stored file with an empty undo history.
  */
 import {
+  ClipPreview,
+  EditError,
   EditHistory,
+  deleteCommand,
   exportGlb,
   TransformGizmo,
   useHistoryState,
+  type Command,
   type GizmoMode,
 } from '@ai3d/editor';
 import type { ModelRead, ModelVersionRead } from '@ai3d/shared-types';
@@ -36,12 +40,14 @@ import { ErrorState } from '../components/page';
 import { useApi, useStudio } from '../context';
 import { versionSourceLabel } from '../labels';
 import { routes } from '../routes';
+import { CutPanel, defaultCut, draftPlane, type CutDraft } from './edit-tools';
 import { EnhancePanel } from './enhance-panel';
 import { ExportPanel } from './export-panel';
 import { HierarchyPanel } from './hierarchy-panel';
 import { InspectorPanel } from './inspector-panel';
 import { useModelFile } from './model-file';
 import { QualityPanel } from './quality-panel';
+import { scaleOf } from './scale';
 import { VersionPanel } from './version-panel';
 import { GizmoControls, ViewportControls } from './viewport-controls';
 
@@ -87,6 +93,7 @@ const SHORTCUTS: [string, string][] = [
   ['W / E / R', 'Move / rotate / scale tool'],
   ['F or 0, 1–6', 'Fit, camera views'],
   ['Esc', 'Clear selection'],
+  ['Delete / Backspace', 'Delete the selected part'],
   ['⌘/Ctrl Z, ⇧⌘/Ctrl Z', 'Undo, redo'],
 ];
 
@@ -120,9 +127,10 @@ function VersionWorkspace({
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const [view, setView] = useState<ViewRequest>({ preset: 'iso', nonce: 0 });
   const [gizmo, setGizmo] = useState<GizmoMode>('translate');
-  const [tab, setTab] = useState<'inspect' | 'quality' | 'enhance' | 'export' | 'versions'>(
+  const [tab, setTab] = useState<'inspect' | 'cut' | 'quality' | 'enhance' | 'export' | 'versions'>(
     'inspect',
   );
+  const [cutDraft, setCutDraft] = useState<CutDraft | null>(null);
   const [pendingView, setPendingView] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -132,9 +140,12 @@ function VersionWorkspace({
 
   const loaded = file.status === 'ready' ? file.model : null;
   const root = loaded?.root ?? null;
-  const tree = useMemo(() => (root ? buildHierarchy(root) : null), [root]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read after edits (deleted parts)
+  const tree = useMemo(() => (root ? buildHierarchy(root) : null), [root, edits.version]);
   const selected =
     root && selectedId ? (root.getObjectByProperty('uuid', selectedId) ?? null) : null;
+  const draft = cutDraft ?? (root ? defaultCut(root) : null);
+  const clipPlane = useMemo(() => (draft ? draftPlane(draft) : null), [draft]);
   const stats = useMemo(
     () => (root ? sceneStats(root, sourceMaterials) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- recount after edits
@@ -144,6 +155,21 @@ function VersionWorkspace({
   const saving = exporting || save.isPending;
   const nextVersion =
     Math.max(...versions.map((v) => v.version_number), version.version_number) + 1;
+
+  /** Runs a structural edit; shows why when it cannot be done. */
+  function runEdit(make: () => Command): boolean {
+    try {
+      history.execute(make());
+      setError(null);
+      return true;
+    } catch (cause) {
+      if (cause instanceof EditError) {
+        setError(cause.message);
+        return false;
+      }
+      throw cause;
+    }
+  }
 
   function requestView(preset: CameraPreset) {
     setView((current) => ({ preset, nonce: current.nonce + 1 }));
@@ -193,6 +219,8 @@ function VersionWorkspace({
 
   // Keyboard shortcuts (ignored while typing in a field).
   useEffect(() => {
+    // The part the Delete key removes (never the whole model).
+    const part = selected && selected !== root ? selected : null;
     function onKeyDown(event: KeyboardEvent) {
       if (isTyping(event.target) || event.altKey) return;
       const mod = event.metaKey || event.ctrlKey;
@@ -214,14 +242,21 @@ function VersionWorkspace({
       else if (key === 'r') setGizmo('scale');
       else if (key === 'f') requestView('iso');
       else if (key === 'escape') setSelectedId(null);
-      else {
+      else if ((key === 'delete' || key === 'backspace') && part) {
+        try {
+          history.execute(deleteCommand(part));
+          setSelectedId(null);
+        } catch (cause) {
+          if (!(cause instanceof EditError)) throw cause;
+        }
+      } else {
         const preset = CAMERA_PRESETS.find((p) => p.key === key);
         if (preset) requestView(preset.value);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [history]);
+  }, [history, selected, root]);
 
   // Warn before closing the tab with unsaved edits.
   useEffect(() => {
@@ -337,8 +372,11 @@ function VersionWorkspace({
                 view={view}
                 label={`3D view of ${model.name}, version ${version.version_number}`}
               >
-                {selected && selected !== root ? (
+                {selected && selected !== root && tab !== 'cut' ? (
                   <TransformGizmo object={selected} mode={gizmo} history={history} />
+                ) : null}
+                {tab === 'cut' && clipPlane ? (
+                  <ClipPreview plane={clipPlane} root={root} revision={edits.version} />
                 ) : null}
               </Viewport>
               <ViewportControls
@@ -394,6 +432,7 @@ function VersionWorkspace({
             {(
               [
                 ['inspect', 'Inspect'],
+                ['cut', 'Cut'],
                 ['quality', 'Quality'],
                 ['enhance', 'Enhance'],
                 ['export', 'Export'],
@@ -420,7 +459,18 @@ function VersionWorkspace({
             ))}
           </div>
           <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-            {tab === 'quality' ? (
+            {tab === 'cut' ? (
+              root && draft ? (
+                <CutPanel
+                  root={root}
+                  draft={draft}
+                  onDraft={setCutDraft}
+                  onEdit={runEdit}
+                  scaleKnown={scaleOf(version) !== null}
+                  revision={edits.version}
+                />
+              ) : null
+            ) : tab === 'quality' ? (
               <QualityPanel version={version} />
             ) : tab === 'enhance' ? (
               <EnhancePanel
@@ -452,6 +502,8 @@ function VersionWorkspace({
                   display={options.display}
                   revision={edits.version}
                   onPreview={() => setPreview((n) => n + 1)}
+                  onEdit={runEdit}
+                  onDeselect={() => setSelectedId(null)}
                 />
                 <details className="border-t border-border px-4 py-3 text-xs">
                   <summary className="cursor-pointer text-muted-foreground">
@@ -467,9 +519,10 @@ function VersionWorkspace({
                   </dl>
                 </details>
                 <p className="border-t border-border px-4 py-3 text-xs leading-relaxed text-subtle-foreground">
-                  Saving re-exports the scene as a new GLB version (three.js exporter). Hidden parts
-                  are kept. Mesh compression in the original file is not re-applied, so the new file
-                  can be larger. Vertex-level mesh editing is not available yet.
+                  Saving re-exports the scene as a new GLB version (three.js exporter); the server
+                  re-opens and checks it. Hidden parts are kept (hiding is only a view aid); deleted
+                  parts are not. Mesh compression in the original file is not re-applied, so the new
+                  file can be larger. Vertex-level mesh editing is not available.
                 </p>
               </>
             ) : null}

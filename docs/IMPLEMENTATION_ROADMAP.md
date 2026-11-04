@@ -393,7 +393,9 @@ Checks run on 2026-11-04 (TripoSR engine, COLMAP and Blender installed):
   terminal.
 - Not included in desktop release builds.
 - No preview image for local models.
-- Colour fidelity is modest: TripoSR at 256³ gives muted colours.
+- ~~Colour fidelity is modest~~: the muted colours were a bug. Models were
+  mirrored, inside out and coloured from mirrored positions. Found and fixed
+  in Phase 11.
 - First run after installing is slow (200 s for the installer's test while
   macOS checked the new libraries).
 
@@ -559,6 +561,76 @@ Checks run on 2026-11-04:
   computer.
 - Model-size limits for the viewer (moved to Phase 12, large models).
 
+## Phase 11 — Editing ✅ (with a major fix to Phase 8)
+
+New edits in the 3D workspace. Each is one undoable step, saved like any
+other edit as a new version that the server re-opens and checks.
+- **Parts:** delete (button or the Delete key; undo puts the part back in
+  place), mirror along X/Y/Z, and move the pivot to the part's centre without
+  moving anything on screen.
+- **Whole model:** place on the ground; centre on the origin (standing on the
+  ground); mirror.
+- **Cut with a plane** (new *Cut* tab):
+  - choose the axis, the position and the side to keep; the 3D view shows
+    what will be kept;
+  - closed outlines are filled with a flat cap (holes included), so a closed
+    model stays closed for 3D printing. The cap takes the colours of the cut
+    edge;
+  - open surfaces are left open, and the result says so.
+- **Textures:** replace or add a material's base-colour texture (PNG or
+  JPEG, up to 8192 px), only when its parts have texture coordinates. A
+  *UV layout* view draws the texture coordinates over the texture.
+
+**Decisions** (D40–D42):
+- The cut runs in the browser, like the other edits; the server checks the
+  saved file. Capping uses three.js' built-in Earcut, so no new dependency.
+- Mirroring is stored as a negative scale. The STL and 3MF exports were
+  checked to bake it with outward-facing triangles.
+- The cap's triangles follow the direction of the cut outline, so they always
+  agree with their neighbours.
+
+**Major finding: local AI models were mirrored and inside out (fixed).**
+Testing the cut on a real TripoSR model showed inconsistent winding. The cause
+was in Phase 8: the PyMCubes stand-in for `torchmcubes` returned coordinates
+in the opposite axis order to what TripoSR expects (D29). As a result:
+- every local AI model was a mirror image, with its triangles facing inwards;
+- the colours were looked up at mirrored positions. The plush's orange feet
+  and white belly were missing; the "muted colours" noted in Phase 8 came
+  from this.
+
+The fixes:
+- The stand-in now matches `torchmcubes`, and the axis conversion was
+  re-derived.
+- On the same photo the model now has outward faces, orange feet, a white
+  belly and its eyes on the front.
+- The real-engine test now checks exactly these things.
+- The quality report gained an **inside-out** check, which Enhance (High or
+  Professional) fixes. Phase 9's checks had looked at size, upright
+  orientation and file validity, and missed this.
+
+Checks run on 2026-11-04 (COLMAP configured):
+- **Python:** 317 tests passed. The real TripoSR test was run separately with
+  `AI3D_LOCAL_AI_DIR` and passed (85 s), with the new checks for outward
+  faces, orange feet and eyes on the front.
+- **Frontend:** 104 unit tests, including 14 new editor tests
+  (`structure.test.ts`).
+- **Browser tests:**
+  - web: 21, including `e2e/editing.spec.ts` and photogrammetry with COLMAP;
+  - desktop UI: 2;
+  - job workflows: 2.
+- **By hand in the browser:** a cut on a real TripoSR model, saved and
+  checked by the server.
+- **Rust:** 13 tests.
+- **Static checks:** ruff, mypy, ESLint, Prettier, tsc and builds.
+
+**Not done or not verified:**
+- Merge and split parts; vertex-level editing.
+- Cutting skinned, instanced or shape-key parts: they are skipped and named.
+- Cutting a single part only: the cut always applies to the whole model.
+- Texture adjustments (brightness, tiling); maps other than base colour.
+- Earlier local AI versions stay as they were (versions are never changed);
+  regenerate them to get the fix.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
@@ -591,10 +663,10 @@ working and adds tests that use real tools and real data.
 - An offered, consent-gated fallback between local and cloud when a route
   fails or the machine is too small.
 
-**Phase 11 — Editing.**
-- Hide or delete parts; set origin; place on ground; mirror.
-- Cut or crop by a plane (done on the server and validated like every
-  version).
+**Phase 11 — Editing ✅ (see above).**
+- Delete parts; pivot to centre; place on ground; centre; mirror.
+- Cut by a plane, with filled caps (done in the browser, validated by the
+  server like every version; D40).
 - Replace a texture; a UV layout view.
 
 **Phase 12 — Viewer.**
