@@ -24,10 +24,13 @@ stand-ins are for **paid external services**:
 | Web end-to-end | `pnpm test:e2e` | the Next.js app in Chrome, desktop and phone viewports (Playwright) |
 | Desktop UI end-to-end | `pnpm test:e2e:desktop` | the desktop UI against a backend that requires the per-launch token |
 | Job workflows end-to-end | `pnpm test:e2e:workflows` | cancel, retry and provider errors through the UI |
+| Local AI (real TripoSR) | `AI3D_LOCAL_AI_DIR=… uv run pytest backend/tests/test_local_ai.py` and `AI3D_LOCAL_AI_DIR=… pnpm test:e2e e2e/local-ai.spec.ts` | a real phone photo → model, through the API and the browser (needs `ai3d-local-ai install`) |
 | Desktop shell | `cd apps/desktop/src-tauri && cargo test` | Rust: token, ports, downloads allow-list, file names, the real engine's lifecycle |
 | Engine bundle | `pnpm bundle:engine` | builds the release engine and smoke-tests it (starts it with a token, lists exports) |
 
-Optional dependencies decide what runs: COLMAP tests need `AI3D_COLMAP_PATH`
+Optional dependencies decide what runs: local AI tests need `AI3D_LOCAL_AI_DIR`
+pointing at an installed engine (other tests ignore an installed engine unless
+it is set), COLMAP tests need `AI3D_COLMAP_PATH`
 (or COLMAP on `PATH`), Blender tests need Blender 4.2+, error-reporting tests
 need the `errors` extra, S3 tests need the `s3` extra and an endpoint. Missing
 ones are **skipped with the reason**, never reported as passed. Run
@@ -57,9 +60,9 @@ Each test uses its own prefix in the `ai3d-test` bucket.
 |---|---|---|---|
 | 1 | Create a project | `e2e/projects.spec.ts` · project lifecycle; `e2e/desktop-shell/token.spec.ts` | `test_projects.py` |
 | 2 | Upload a photo | `projects.spec.ts` (valid, unsupported, duplicate); `token.spec.ts` (thumbnail through the token) | `test_images.py`, `test_image_analysis.py` |
-| 3 | Start a generation | `e2e/generation.spec.ts` · explicit consent; waiting for permission | `test_generation.py` (consent, idempotency, routing) |
+| 3 | Start a generation | `e2e/generation.spec.ts` · explicit consent; waiting for permission; `e2e/local-ai.spec.ts` (local, no consent) | `test_generation.py` (consent, idempotency, routing), `test_local_ai.py` (local routing) |
 | 4 | Monitor progress | `generation.spec.ts` (live status); `workflows/jobs.spec.ts` (running → result) | `test_generation.py::test_event_stream` (Server-Sent Events), `job-list.test.tsx` |
-| 5 | Receive the model | `generation.spec.ts` (model card, preview, GLB bytes) | `test_generation.py`, `test_cloud_providers.py` (Tripo/Meshy fakes) |
+| 5 | Receive the model | `generation.spec.ts` (model card, preview, GLB bytes); `local-ai.spec.ts` (**real AI model from a real photo**) | `test_generation.py`, `test_cloud_providers.py` (Tripo/Meshy fakes), `test_local_ai.py` (real TripoSR run) |
 | 6 | Open the 3D viewer | `e2e/workspace.spec.ts` (real WebGL canvas); `token.spec.ts` | `packages/viewer` unit tests |
 | 7 | Inspect geometry | `workspace.spec.ts` (triangles, bounds, hierarchy) | `test_mesh_and_preprocess.py`, `test_processing.py` (quality report) |
 | 8 | Export | `workspace.spec.ts` (GLB, STL, and FBX when Blender is installed) | `test_enhance_export.py` (every format) |

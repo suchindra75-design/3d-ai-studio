@@ -26,7 +26,7 @@ def _provider(client: TestClient, key: str) -> dict[str, object]:
 
 def test_list_providers(client: TestClient) -> None:
     items = {p["key"]: p for p in client.get("/api/v1/providers").json()["items"]}
-    assert list(items) == ["tripo", "meshy", "local-photogrammetry", "mock"]
+    assert list(items) == ["tripo", "meshy", "local-photogrammetry", "local-triposr", "mock"]
     tripo = items["tripo"]
     assert tripo["configured"] is False
     assert tripo["credential_source"] == "none"

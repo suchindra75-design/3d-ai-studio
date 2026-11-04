@@ -10,7 +10,8 @@ or a full photo set of a real object into an inspectable, exportable 3D model
 > generation pipeline (jobs, live progress, consent, Tripo and Meshy adapters)
 > the 3D workspace (viewer, inspection, transforms, materials, undo/redo,
 > versions) and local photogrammetry with COLMAP (measured, textured, on your
-> computer) work today. The Tripo and Meshy integrations have **not yet been
+> computer) work today, and so does **turning one photo into a 3D model on your
+> own computer** with the optional local AI engine (TripoSR). The Tripo and Meshy integrations have **not yet been
 > run against the real services**, which need a paid key. Enhancing models,
 > verified exports and the desktop app (with its own bundled local engine)
 > work too. Desktop builds are unsigned, and only the macOS Intel build has
@@ -20,15 +21,15 @@ or a full photo set of a real object into an inspectable, exportable 3D model
 
 ## What it does (and will do)
 
-|            | Today                                                                                                                                                                                                      | Planned                                                                         |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Projects   | create, search, archive, delete                                                                                                                                                                            | version history, asset library                                                  |
-| Photos     | JPEG/PNG/WebP upload, originals preserved, dedupe, EXIF (GPS never exposed), thumbnails                                                                                                                    | preprocessing & segmentation                                                    |
-| Quality    | per-photo sharpness/exposure/clipping analysis; set-level capture check; overlap measured by feature matching                                                                                              |                                                                                 |
-| Generation | Local photogrammetry (COLMAP 4: measured, textured, nothing uploaded); Tripo & Meshy (cloud, your key, per-job consent; untested with real keys); live progress, cancel/retry                              | dense surfaces on CUDA (implemented, untested), local AI models on capable GPUs |
-| Workspace  | Three.js viewer, inspection, move/rotate/scale, materials, undo/redo, versions; Enhance (clean-up, normals, fragments, ground removal, real-world scale); full quality report; texture baking with Blender | vertex-level editing, retopology                                                |
-| Export     | GLB, glTF, OBJ+MTL, STL, 3MF, USDZ, FBX (with Blender) — each re-opened and compared with the model before it is offered                                                                                   |                                                                                 |
-| Platforms  | web app, desktop app (Tauri) with its own bundled engine, Docker; optional S3 storage                                                                                                                      | signed desktop builds                                                           |
+|            | Today                                                                                                                                                                                                                                             | Planned                                                                               |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Projects   | create, search, archive, delete                                                                                                                                                                                                                   | version history, asset library                                                        |
+| Photos     | JPEG/PNG/WebP upload, originals preserved, dedupe, EXIF (GPS never exposed), thumbnails                                                                                                                                                           | preprocessing & segmentation                                                          |
+| Quality    | per-photo sharpness/exposure/clipping analysis; set-level capture check; overlap measured by feature matching                                                                                                                                     |                                                                                       |
+| Generation | Local photogrammetry (COLMAP 4: measured, textured, nothing uploaded); local AI from one photo (TripoSR, optional install, runs on a CPU); Tripo & Meshy (cloud, your key, per-job consent; untested with real keys); live progress, cancel/retry | dense surfaces on CUDA (implemented, untested), larger local AI models on NVIDIA GPUs |
+| Workspace  | Three.js viewer, inspection, move/rotate/scale, materials, undo/redo, versions; Enhance (clean-up, normals, fragments, ground removal, real-world scale); full quality report; texture baking with Blender                                        | vertex-level editing, retopology                                                      |
+| Export     | GLB, glTF, OBJ+MTL, STL, 3MF, USDZ, FBX (with Blender) — each re-opened and compared with the model before it is offered                                                                                                                          |                                                                                       |
+| Platforms  | web app, desktop app (Tauri) with its own bundled engine, Docker; optional S3 storage                                                                                                                                                             | signed desktop builds                                                                 |
 
 **Honesty rules:** single-photo results invent the hidden sides of the object;
 AI meshes are not dimensionally accurate; photogrammetry has an unknown scale
@@ -93,9 +94,11 @@ some of which restrict commercial use or regions.
 
 ## Hardware
 
-Upload and analysis run anywhere. Dense photogrammetry and local AI generation
-need an NVIDIA GPU with CUDA (Apple Silicon partially, Intel Macs not) — the
-Settings screen reports exactly what your machine supports.
+Upload and analysis run anywhere. Local AI generation from one photo (TripoSR)
+runs on the CPU with 8 GB of RAM or more (about 1.5 minutes per photo on a
+6-core Intel Mac; an NVIDIA GPU is used when present). Dense photogrammetry
+needs an NVIDIA GPU with CUDA. The Settings screen reports what your machine
+supports.
 
 ## Contributing
 

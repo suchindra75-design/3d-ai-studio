@@ -162,8 +162,9 @@ project `allow_cloud_upload`, job `cloud_upload_consented`.
 
 ```
 if input is single image:
-    local AI possible? (CUDA ≥ 6 GB, or Apple Silicon with MPS-capable model) → local
-    else cloud provider configured → cloud (needs consent) else → error "no route"
+    local AI engine installed (TripoSR, CPU or CUDA) and mode is Local/Automatic → local
+    else (Automatic/Cloud) cloud provider configured → cloud (needs consent)
+    else → blocked with the reason (e.g. how to install the local engine)
 if multi-view (implemented in services/jobs.py::_choose_kind):
     provider = local-photogrammetry, or processing_mode = local → photogrammetry
     automatic: ≥ 20 photos (or more than 4) and COLMAP 4 available → photogrammetry
@@ -188,17 +189,18 @@ Rules that are never relaxed:
 | pycolmap 4.2.1 wheels: win_amd64, manylinux x86_64, macOS **arm64 only**; CUDA wheels Linux-only (`pycolmap-cuda12`) | Intel Macs must use the COLMAP CLI (Homebrew `colmap` 4.2.1) instead of pycolmap. |
 | Open3D 0.20.0 (2026-09-16): macOS wheels arm64-only; Intel macOS dropped | Intel Macs use Open3D 0.19.0 (universal2 wheel; verified with NumPy 2.4 on macOS 26 Intel). |
 | conda-forge ships COLMAP 4.2.1 CPU builds for osx-64 | Intel Macs install COLMAP without compiling (see LOCAL_GPU_SETUP.md). |
-| PyTorch has no current x86_64 macOS GPU path | Intel Macs cannot run local AI generation; detection reports this. |
+| PyTorch 2.2.2 is the last release with x86_64 macOS wheels (CPU only, needs NumPy 1.x) | The local AI engine runs in its own environment with those versions; TripoSR on the CPU takes about 1.5 minutes per photo on an Intel Mac. |
 | TRELLIS / TRELLIS.2 require NVIDIA GPUs with 16 GB / 24 GB | Offer only on matching hardware. |
 
-## 8. Local AI models (candidates, not bundled)
+## 8. Local AI models (not bundled)
 
 Model weights are **never** redistributed. Users install them and accept the
-licence themselves. Candidates for a local-AI provider (Phase 6+):
+licence themselves. **TripoSR is integrated** (Phase 8: `ai3d-local-ai install`,
+provider `local-triposr`, see LOCAL_GPU_SETUP.md); the others are candidates:
 
 | Model | Code / weights licence | Min VRAM | Devices | Notes |
 |---|---|---|---|---|
-| TripoSR | MIT / MIT | ≈6 GB | CUDA; CPU fallback | Good first local provider |
+| TripoSR | MIT / MIT | CPU works | CPU (verified, Intel Mac); CUDA (untested) | **Integrated** (Phase 8) |
 | Stable Fast 3D | Stability AI Community License | ≈6 GB | CUDA; MPS experimental; CPU | Free below US$1M annual revenue |
 | SPAR3D | Stability AI Community License | 10.5 GB (≈7 GB low-VRAM) | CUDA; MPS experimental | Same licence terms |
 | TRELLIS | MIT / MIT (some submodules separate) | ≥16 GB | CUDA, Linux-tested | |

@@ -206,3 +206,79 @@ it('sends a capture set to local photogrammetry without view labels', async () =
   const options = screen.getAllByRole('option').map((o) => o.textContent);
   expect(options).not.toContain('Local photogrammetry (COLMAP)');
 });
+
+it('offers the local AI engine for one photo and needs no upload consent', async () => {
+  const localAi = {
+    key: 'local-triposr',
+    display_name: 'Local AI (TripoSR)',
+    kind: 'local',
+    uploads_images: false,
+  } as const;
+  const api = fakeApi({
+    providers: {
+      list: vi.fn().mockResolvedValue({
+        items: [
+          ...providers.items,
+          { ...localAi, configured: true },
+          {
+            key: 'local-photogrammetry',
+            display_name: 'Local photogrammetry (COLMAP)',
+            configured: true,
+            uploads_images: false,
+          },
+        ],
+      }),
+    },
+    generations: {
+      plan: vi.fn().mockResolvedValue(
+        plan({
+          route: 'local',
+          provider: localAi,
+          requires_consent: false,
+          consent_reason: null,
+          estimate: { amount: 0, unit: 'USD', usd: 0, basis: 'Runs on this computer', notes: [] },
+        }),
+      ),
+    },
+  });
+  renderWithStudio(<GenerationPanel project={project} images={images.slice(0, 1)} />, api);
+  const select = await screen.findByRole('combobox', { name: 'Provider' });
+  await waitFor(() =>
+    expect(screen.getByRole('option', { name: 'Local AI (TripoSR)' })).toBeEnabled(),
+  );
+  // Photogrammetry is a method of its own, not an AI provider.
+  expect(screen.queryByRole('option', { name: /photogrammetry/i })).not.toBeInTheDocument();
+  await userEvent.selectOptions(select, 'local-triposr');
+  await waitFor(() =>
+    expect(api.generations.plan).toHaveBeenLastCalledWith(
+      'p1',
+      expect.objectContaining({ provider: 'local-triposr' }),
+    ),
+  );
+  expect(await screen.findByText('Estimated cost: Free')).toBeInTheDocument();
+  expect(screen.queryByRole('checkbox', { name: /Send/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Generate$/ })).toBeEnabled();
+});
+
+it('marks a local engine that is not installed', async () => {
+  const api = fakeApi({
+    providers: {
+      list: vi.fn().mockResolvedValue({
+        items: [
+          ...providers.items,
+          {
+            key: 'local-triposr',
+            display_name: 'Local AI (TripoSR)',
+            configured: false,
+            uploads_images: false,
+          },
+        ],
+      }),
+    },
+    generations: { plan: vi.fn().mockResolvedValue(plan()) },
+  });
+  renderWithStudio(<GenerationPanel project={project} images={images.slice(0, 1)} />, api);
+  const option = await screen.findByRole('option', { name: 'Local AI (TripoSR) (not installed)' });
+  expect(option).toBeDisabled();
+  expect(screen.getByRole('option', { name: 'Meshy AI (no API key)' })).toBeDisabled();
+});

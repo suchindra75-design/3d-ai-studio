@@ -30,7 +30,9 @@ from ai3d_engine.runtime import find_tool, run_tool
 # Python packages relevant to reconstruction, checked without importing them.
 _PY_PACKAGES = ("torch", "open3d", "trimesh", "pycolmap", "opencv-python-headless", "bpy")
 
-MIN_RAM_LOCAL_AI = 16 * 1024**3
+# TripoSR at High quality peaked at 3.7 GB of memory on the CPU (measured); 8 GB of
+# RAM leaves room for the app and the OS.
+MIN_RAM_LOCAL_AI = 8 * 1024**3
 MIN_VRAM_LOCAL_AI_MB = 6 * 1024  # smallest documented requirement (TripoSR/SF3D ≈ 6 GB)
 MIN_FREE_DISK = 5 * 1024**3
 
@@ -239,28 +241,27 @@ def _capabilities(report: HardwareReport) -> dict[str, Capability]:
 
     caps: dict[str, Capability] = {}
 
+    cpu_note = (
+        "Local AI (TripoSR) runs on the CPU: about 1.5 minutes per photo on a 6-core "
+        "Intel Mac, longer on fewer cores."
+    )
     if cuda and best_vram >= MIN_VRAM_LOCAL_AI_MB:
         caps["local_ai_generation"] = Capability(
-            True, f"NVIDIA GPU with {best_vram // 1024} GB VRAM and CUDA detected."
+            True, f"NVIDIA GPU with {best_vram // 1024} GB VRAM and CUDA detected (fastest)."
         )
-    elif cuda:
-        caps["local_ai_generation"] = Capability(
-            False, f"CUDA GPU has {best_vram} MB VRAM; local image-to-3D models need ≥ 6 GB."
-        )
-    elif mps_possible and ram >= MIN_RAM_LOCAL_AI:
-        caps["local_ai_generation"] = Capability(
-            True,
-            "Apple Silicon with Metal (MPS). Only models with MPS support can run; "
-            "expect slower generation than on CUDA.",
-        )
-    elif system == "Darwin" and arch in {"x86_64", "amd64"}:
+    elif ram >= MIN_RAM_LOCAL_AI:
+        gpu_note = ""
+        if cuda:
+            gpu_note = f" The CUDA GPU has {best_vram} MB VRAM; models need ≥ 6 GB on the GPU."
+        elif mps_possible:
+            gpu_note = " Apple's GPU (MPS) is not used."
+        caps["local_ai_generation"] = Capability(True, cpu_note + gpu_note)
+    else:
         caps["local_ai_generation"] = Capability(
             False,
-            "Intel Macs have no supported PyTorch GPU backend (no CUDA, no MPS). "
-            "Use a cloud provider or a remote GPU worker.",
+            f"{ram / 1024**3:.0f} GB of RAM; local AI generation needs at least "
+            f"{MIN_RAM_LOCAL_AI // 1024**3} GB.",
         )
-    else:
-        caps["local_ai_generation"] = Capability(False, "No CUDA-capable NVIDIA GPU detected.")
 
     if colmap.get("installed") or pycolmap:
         caps["photogrammetry_sparse"] = Capability(

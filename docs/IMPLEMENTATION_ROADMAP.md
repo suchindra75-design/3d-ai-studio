@@ -334,6 +334,133 @@ GitHub Actions has not been run. The hand-checked `.app`/`.dmg` was built
 before the last backend changes (S3, error reporting, test knobs); the engine
 bundle was rebuilt and smoke-tested after them, but the app was not rebuilt.
 
+## Phase 8 — Local single-image AI engine ✅ (CPU on macOS Intel verified)
+
+- **Engine:**
+  - TripoSR (MIT code and weights), installed with `ai3d-local-ai install`.
+  - Lives in its own folder and Python environment (D28), with pinned sources
+    and SHA-256-checked downloads.
+  - A real test generation must pass before the engine is marked installed.
+- **Run-time safety** (D29):
+  - fixed runner; offline model lookups;
+  - tensors-only checkpoint loading;
+  - no API keys in the engine's environment.
+- **Pipeline:**
+  - metadata-free working copy of the photo;
+  - U²-Net background removal;
+  - TripoSR shape and colours;
+  - marching cubes on a 160³ / 256³ / 320³ grid (Fast / High / Professional);
+  - glTF axes and linear vertex colours (both fixes found by looking at
+    renders of real output);
+  - the usual validation, quality report and AI provenance.
+- **Routing:**
+  - **Local** and **Automatic** modes keep a single photo on the computer when
+    the engine is installed. Without it, Local mode explains how to install
+    it.
+  - Cloud mode is unchanged.
+  - Local AI and COLMAP share one heavy-job slot (D30).
+- **UI:** *Local AI (TripoSR)* appears in the provider list, marked
+  *(not installed)* until it is installed. There is no upload consent step:
+  nothing is uploaded.
+- **Tests:**
+  - Engine wrapper (10): status, request validation, minimal environment,
+    progress, failure, cancel, timeout, download checksums, unsafe archives.
+  - Routing and job (5), with a stand-in for the engine call only.
+  - **Real runs on a real phone photo** (TripoSR's own MIT example):
+    - API test: 82 s, 97,944 triangles, upright, coloured, quality report not
+      failing.
+    - Browser test (`e2e/local-ai.spec.ts`): Local processing → Done →
+      opened in the 3D workspace, 38,028 triangles at Fast.
+
+Checks run on 2026-11-04 (TripoSR engine, COLMAP and Blender installed):
+- **Python:** 278 tests passed. The 8 skips are the S3 variants and the
+  real-engine test. The real-engine tests passed separately with
+  `AI3D_LOCAL_AI_DIR`: the API test in 82 s, and 16 local AI tests in total.
+- **Frontend:** 87 unit tests.
+- **Browser tests:**
+  - web: 19 passed;
+  - desktop UI: 2;
+  - job workflows: 2;
+  - local AI with the real engine: 1.
+- **Rust:** 13 tests.
+- **Static checks:** ruff, mypy (strict), ESLint, Prettier, tsc and builds.
+- **Hardware detection** now reports local AI as possible on any machine with
+  8 GB of RAM (measured peak: 3.7 GB).
+
+**Not done or not verified:**
+- NVIDIA GPU (CUDA) path and Windows/Linux/Apple Silicon are untested.
+- No installing from inside the app yet: the engine needs `uv` and a
+  terminal.
+- Not included in desktop release builds.
+- No preview image for local models.
+- Colour fidelity is modest: TripoSR at 256³ gives muted colours.
+- First run after installing is slow (200 s for the installer's test while
+  macOS checked the new libraries).
+
+## Roadmap after the capability audit (2026-11-04)
+
+Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
+capable application; publication comes later. Each phase keeps the app
+working and adds tests that use real tools and real data.
+
+**Phase 8 — Local single-image AI engine ✅ (verified on macOS Intel CPU; see below).**
+- **The engine:**
+  - TripoSR (MIT code and weights) in its own isolated Python environment.
+  - Installed on request, showing the licence; weights are downloaded with
+    checksums, never bundled.
+  - Run through the restricted engine runner.
+  - Works on CPU; uses CUDA when present.
+- **Pipeline:** background removal, then generation, a GLB, and the existing
+  validation and quality report.
+- **Routing:** Local and Automatic modes send a single photo to it.
+- **Done when:** this Intel Mac turns real photos into models, end to end, in
+  the web and desktop apps.
+
+**Phase 9 — Real-world verification.**
+- Real photo captures for photogrammetry (our own photographs, or public
+  datasets with compatible licences).
+- Real-output checks of the quality report and every export.
+- Draco decoding on the backend.
+- A Tripo/Meshy smoke test as soon as a key is available.
+
+**Phase 10 — Hybrid processing and resources.**
+- Resource checks before heavy local jobs (RAM, disk, model size).
+- A single slot for heavy local work.
+- An offered, consent-gated fallback between local and cloud when a route
+  fails or the machine is too small.
+
+**Phase 11 — Editing.**
+- Hide or delete parts; set origin; place on ground; mirror.
+- Cut or crop by a plane (done on the server and validated like every
+  version).
+- Replace a texture; a UV layout view.
+
+**Phase 12 — Viewer.**
+- Measuring tool; lighting presets.
+- Normals and UV-checker views; clipping plane; screenshots.
+- Version comparison.
+- Large-model performance.
+
+**Phase 13 — Geometry.**
+- Retopology with a measured fidelity check (QuadriFlow or Instant Meshes).
+- Smoothing and remeshing.
+- Normal and ambient-occlusion map baking.
+
+**Phase 14 — AI enhancement.**
+- Local texture super-resolution (permissive licences only).
+- Optional provider refine/retexture with consent.
+
+**Phase 15 — Projects.**
+- Import existing 3D files (GLB/OBJ/STL/PLY) as versions.
+- Project backup and export.
+
+**Later, needs hardware:**
+- TRELLIS (NVIDIA ≥16 GB) as the high-quality local engine.
+- The dense COLMAP path.
+- Windows, Linux and Apple Silicon builds.
+
+Not planned: billing or subscriptions, public release work.
+
 ## Known gaps carried forward
 
 | Gap | Status |

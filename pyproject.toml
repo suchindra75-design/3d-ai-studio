@@ -32,6 +32,8 @@ allowed-confusables = ["×", "–", "’"]
 [tool.ruff.lint.per-file-ignores]
 "backend/tests/**" = ["S", "PLR", "N802"]
 "local-engine/tests/**" = ["S", "PLR"]
+# Runs in the local AI engine's environment; imports must follow the stand-in modules.
+"local-engine/ai3d_engine/local_ai_scripts/**" = ["PLC0415"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["ai3d", "ai3d_engine", "tests"]

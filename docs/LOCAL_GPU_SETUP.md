@@ -11,10 +11,13 @@ Studio detected and why each capability is or isn't available. Use
 | Upload, analysis, capture check | nothing extra | ✅ | ✅ | ✅ | ✅ |
 | Photogrammetry: camera poses (sparse) | COLMAP | ✅ | ✅ (COLMAP CLI) | ✅ | ✅ |
 | Photogrammetry: dense surfaces | COLMAP + **CUDA** | ❌ | ❌ | ✅ | ❌ |
-| Local AI generation | PyTorch + GPU (≥ 6 GB VRAM typical) | ⚠️ MPS, model-dependent | ❌ | ✅ | ❌ (CPU fallback impractically slow) |
+| Local AI from one photo (TripoSR) | the local AI engine (below) | ⚠️ CPU (untested) | ✅ CPU, ~1.5 min (verified) | ⚠️ CUDA (untested) | ⚠️ CPU (untested) |
 
-Why: COLMAP's dense stereo is CUDA-only; PyTorch has no supported GPU backend
-on Intel Macs; Apple's MPS backend works only for models that support it.
+Why: COLMAP's dense stereo is CUDA-only. TripoSR is small enough to run on a
+CPU; it was measured on a 6-core Intel Mac (macOS 26): 82 s for a 12-megapixel
+phone photo at High quality, using at most 3.7 GB of memory (so 8 GB of RAM
+is the minimum). NVIDIA GPUs are used automatically when present
+but have not been tested yet; Apple's MPS backend is not used.
 
 ## COLMAP (photogrammetry)
 
@@ -90,13 +93,47 @@ Optional (`reconstruction` extra). Open3D 0.20 provides wheels for Windows x64,
 Linux x86_64/aarch64 and macOS arm64; Intel Macs get 0.19.0, the last release
 with an Intel macOS wheel.
 
-## Local AI models (Phase 6+)
+## Local AI engine (TripoSR: one photo → 3D on this computer)
 
-Model weights are never bundled. When local AI providers arrive you will
-install them yourself and accept their licences — some restrict commercial
-use (Stability AI Community License above US$1M revenue; nvdiffrast is
-non-commercial) or exclude regions (Hunyuan3D: EU, UK, South Korea). See
-`AI_PIPELINE.md` §8.
+Optional. Turns a single photo into a 3D model without uploading it: the
+background is removed (U²-Net), TripoSR predicts the shape and its colours,
+and the result is an AI-generated mesh with per-vertex colours. Hidden sides
+are invented and the size is not measured; the app labels the model so.
+
+Install (needs [uv](https://docs.astral.sh/uv/) and about 4 GB of free disk):
+
+```bash
+uv run ai3d-local-ai install      # shows what is downloaded and the licences, then asks
+uv run ai3d-local-ai status
+uv run ai3d-local-ai uninstall    # or delete the folder
+```
+
+It goes to `~/.local/share/ai3d-studio/tools/local-ai` (or `--dir`, then set
+`AI3D_LOCAL_AI_DIR`), in its own Python environment (PyTorch needs versions
+the backend cannot share). Everything is pinned and checked:
+
+| Part | Licence | Source |
+|---|---|---|
+| TripoSR code (commit `107cefdc`) | MIT | github.com/VAST-AI-Research/TripoSR |
+| TripoSR weights (1.68 GB, revision `5b521936`) | MIT | huggingface.co/stabilityai/TripoSR |
+| DINO ViT-B/16 configuration | Apache-2.0 | huggingface.co/facebook/dino-vitb16 |
+| U²-Net background removal (176 MB) | Apache-2.0 | github.com/danielgatis/rembg release v0.0.0 |
+| PyTorch 2.2.2 (Intel Mac) / current elsewhere, transformers 4.35, onnxruntime, PyMCubes | BSD / Apache-2.0 / MIT | PyPI |
+
+Every download is checked against its SHA-256; the installer runs a real test
+generation before it marks the engine as installed. At run time the engine
+never goes online: model lookups are redirected to the verified files, the
+checkpoint is loaded tensors-only (no pickle code execution), and the process
+gets a minimal environment without API keys.
+
+Then choose **Local** processing (or **Automatic**: a single photo then stays
+on this computer when the engine is installed), or pick *Local AI (TripoSR)*
+as the provider. Quality: Fast/High/Professional extract the surface on a
+160³/256³/320³ grid (High took 82 s on the Intel Mac above, first runs after
+installing are slower while macOS checks the new libraries).
+
+Other models (TRELLIS on NVIDIA ≥16 GB; Stable Fast 3D and Hunyuan3D have
+restrictive licences) are not integrated; see `AI_PIPELINE.md` §8.
 
 ## Disk space
 

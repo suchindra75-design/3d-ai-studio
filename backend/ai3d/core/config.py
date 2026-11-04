@@ -116,6 +116,10 @@ class Settings(BaseSettings):
 
     # Local photogrammetry. COLMAP is found on PATH unless a path is given here.
     colmap_path: Path | None = None
+    # The optional local AI engine (TripoSR), installed with `ai3d-local-ai install`.
+    # Default: ~/.local/share/ai3d-studio/tools/local-ai
+    local_ai_dir: Path | None = None
+    local_ai_timeout_seconds: int = Field(default=30 * 60, ge=60)
     # A local reconstruction that has not finished after this many seconds fails.
     reconstruction_timeout_seconds: int = Field(default=4 * 3600, ge=60)
 

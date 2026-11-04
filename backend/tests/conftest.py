@@ -83,6 +83,9 @@ def make_settings(tmp_path: Path, database_url: str | None, **overrides: Any) ->
         "provider_poll_interval": 0,
         # The COLMAP integration tests run only when this points at COLMAP 4.
         "colmap_path": os.environ.get("AI3D_COLMAP_PATH") or None,
+        # The local AI engine is used only when this points at an installed engine
+        # (an engine in the default folder must not change other tests' routing).
+        "local_ai_dir": os.environ.get("AI3D_LOCAL_AI_DIR") or tmp_path / "no-local-ai",
         **(s3_test_settings() if TEST_S3_ENDPOINT else {}),
         **overrides,
     }

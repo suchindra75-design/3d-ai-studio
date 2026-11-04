@@ -80,7 +80,8 @@ returns a fixed placeholder sphere and is never offered in normal use.
 | Engine | Cost | Requirements |
 |---|---|---|
 | Photogrammetry (COLMAP, Phase 4) | free (BSD) | 20+ overlapping photos; CPU for poses, NVIDIA CUDA for dense surfaces |
-| Local AI models (Phase 6+) | free to run; **licences vary** | typically ≥ 6 GB NVIDIA VRAM — see `AI_PIPELINE.md` §8 for licences (Stability Community License revenue cap, Hunyuan territory exclusions, nvdiffrast non-commercial) |
+| Local AI (TripoSR, Phase 8) | free (MIT code and weights) | one photo; CPU works (≈1.5 min on an Intel Mac), NVIDIA used when present; installed with `ai3d-local-ai install` ([LOCAL_GPU_SETUP.md](LOCAL_GPU_SETUP.md)) |
+| Other local AI models | free to run; **licences vary** | see `AI_PIPELINE.md` §8 (Stability Community License revenue cap, Hunyuan territory exclusions, nvdiffrast non-commercial) |
 
 ## Choosing a provider for a quality mode
 

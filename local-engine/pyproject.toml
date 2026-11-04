@@ -18,6 +18,10 @@ reconstruction = [
     "open3d>=0.20; sys_platform != 'darwin' or platform_machine != 'x86_64'",
 ]
 
+[project.scripts]
+# Installs/checks the optional local AI engine (TripoSR) in its own environment.
+ai3d-local-ai = "ai3d_engine.local_ai.install:main"
+
 [build-system]
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"

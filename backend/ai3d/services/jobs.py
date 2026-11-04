@@ -32,6 +32,7 @@ from ai3d.models.enums import (
 )
 from ai3d.providers import Provider
 from ai3d.providers.base import VIEW_ORDER, ProviderPlan, ViewRole
+from ai3d.providers.local_ai import LocalAIProvider
 from ai3d.providers.local_photogrammetry import LocalPhotogrammetryProvider
 from ai3d.schemas.common import ErrorBody
 from ai3d.schemas.job import (
@@ -236,6 +237,21 @@ def _plan_photogrammetry(manager: ProviderManager, plan: Plan) -> None:
         )
 
 
+def _no_local_engine_message(manager: ProviderManager, kind: JobKind) -> str:
+    if kind == JobKind.IMAGE_TO_3D:
+        reason = manager.unavailable_reason(LocalAIProvider.key)
+        return (
+            "Turning a single photo into 3D on this computer needs the local AI engine. "
+            f"{reason or ''} Local photogrammetry works from many overlapping photos; "
+            "otherwise choose Cloud or Automatic processing."
+        ).replace("  ", " ")
+    return (
+        "No local engine turns 2–4 photos into 3D. Local photogrammetry needs "
+        f"{PHOTOGRAMMETRY_MIN}+ overlapping photos; otherwise choose Cloud or Automatic "
+        "processing."
+    )
+
+
 def _choose_provider(
     db: Session, manager: ProviderManager, plan: Plan, requested: str | None
 ) -> None:
@@ -245,40 +261,62 @@ def _choose_provider(
         _choose_ai_provider(db, manager, plan, requested)
 
 
+def _use_requested_provider(
+    db: Session, manager: ProviderManager, plan: Plan, requested: str
+) -> None:
+    local_only = plan.processing_mode == ProcessingMode.LOCAL
+    cls = manager.provider_class(requested)
+    if local_only and cls.uploads_images:
+        plan.block(
+            "local_only",
+            f"Local processing never sends photos to {cls.display_name}. Choose Cloud or "
+            "Automatic processing to use it.",
+        )
+        return
+    if not cls.capabilities().supports(plan.kind):
+        plan.block(
+            "unsupported_input",
+            f"{cls.display_name} does not support this kind of input.",
+        )
+        return
+    if not manager.is_configured(db, cls.key):
+        plan.block(
+            "provider_not_configured",
+            manager.unavailable_reason(cls.key)
+            or f"{cls.display_name} is not configured. Add an API key in Settings → AI providers.",
+        )
+        return
+    plan.provider = cls
+
+
 def _choose_ai_provider(
     db: Session, manager: ProviderManager, plan: Plan, requested: str | None
 ) -> None:
     local_only = plan.processing_mode == ProcessingMode.LOCAL
     if requested is not None:
-        cls = manager.provider_class(requested)
-        if local_only and cls.uploads_images:
-            plan.block(
-                "local_only",
-                f"Local processing never sends photos to {cls.display_name}. Choose Cloud or "
-                "Automatic processing to use it.",
-            )
-            return
-        if not cls.capabilities().supports(plan.kind):
-            plan.block(
-                "unsupported_input",
-                f"{cls.display_name} does not support this kind of input.",
-            )
-            return
-        if not manager.is_configured(db, cls.key):
-            plan.block(
-                "provider_not_configured",
-                f"{cls.display_name} is not configured. Add an API key in Settings → AI providers.",
-            )
-            return
-        plan.provider = cls
+        _use_requested_provider(db, manager, plan, requested)
         return
 
+    if plan.processing_mode != ProcessingMode.CLOUD:
+        local = [
+            cls
+            for cls in manager.registry.all()
+            if not cls.uploads_images
+            and cls.capabilities().supports(plan.kind)
+            and manager.is_configured(db, cls.key)
+        ]
+        if local:
+            plan.provider = local[0]
+            if plan.processing_mode == ProcessingMode.AUTO:
+                plan.warnings.append(
+                    f"Automatic mode chose {plan.provider.display_name}: your photo stays on "
+                    "this computer. Choose Cloud for a provider such as Tripo or Meshy."
+                )
+            return
     if local_only:
         plan.block(
             "no_local_engine",
-            "Turning a single photo into 3D on this computer needs a local AI model, which "
-            "this version does not include. Local photogrammetry works from many overlapping "
-            "photos; otherwise choose Cloud or Automatic processing.",
+            _no_local_engine_message(manager, plan.kind),
         )
         return
     candidates = [

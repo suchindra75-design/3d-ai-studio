@@ -2,6 +2,7 @@
 
 from ai3d.core.config import Settings
 from ai3d.providers.base import Provider
+from ai3d.providers.local_ai import LocalAIProvider
 from ai3d.providers.local_photogrammetry import LocalPhotogrammetryProvider
 from ai3d.providers.meshy import MeshyProvider
 from ai3d.providers.tripo import TripoProvider
@@ -11,6 +12,7 @@ _REAL_PROVIDERS: tuple[type[Provider], ...] = (
     TripoProvider,
     MeshyProvider,
     LocalPhotogrammetryProvider,
+    LocalAIProvider,
 )
 
 

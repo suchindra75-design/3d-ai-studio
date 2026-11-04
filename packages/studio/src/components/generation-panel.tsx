@@ -186,8 +186,8 @@ export function GenerationPanel({
     );
   }
 
-  // Local engines are chosen through the method, not the provider list.
-  const configured = (providers.data?.items ?? []).filter((p) => p.uploads_images !== false);
+  // Photogrammetry is chosen through the method; AI engines (cloud or local) are listed.
+  const configured = (providers.data?.items ?? []).filter((p) => p.key !== PHOTOGRAMMETRY);
 
   function toggleExcluded(id: string) {
     const next = new Set(excluded);
@@ -359,7 +359,11 @@ export function GenerationPanel({
                   {configured.map((p) => (
                     <option key={p.key} value={p.key} disabled={!p.configured}>
                       {p.display_name}
-                      {p.configured ? '' : ' (no API key)'}
+                      {p.configured
+                        ? ''
+                        : p.uploads_images === false
+                          ? ' (not installed)'
+                          : ' (no API key)'}
                     </option>
                   ))}
                 </select>

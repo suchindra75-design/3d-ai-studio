@@ -32,6 +32,7 @@ from ai3d.providers import ProviderRegistry
 from ai3d.services.providers import ProviderManager
 from ai3d.storage import create_storage
 from ai3d.workers import JobRunner
+from ai3d_engine import local_ai
 from ai3d_engine.runtime import configure_tool
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ def create_app(
     setup_error_reporting(settings)
     settings.ensure_directories()
     configure_tool("colmap", settings.colmap_path)
+    local_ai.configure(settings.local_ai_dir)
 
     database = Database(settings.resolved_database_url)
     storage = create_storage(settings)

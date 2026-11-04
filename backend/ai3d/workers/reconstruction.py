@@ -10,7 +10,6 @@ the photos (recovery re-queues it); it costs nothing.
 import logging
 import shutil
 import tempfile
-import threading
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -23,6 +22,7 @@ from ai3d.processing.mesh import validate_mesh_file
 from ai3d.processing.photogrammetry import mesh_to_glb, prepare_photo
 from ai3d.services.devices import cuda_available
 from ai3d.services.models import save_reconstructed_model
+from ai3d.workers import heavy
 from ai3d.workers.runner import JobContext
 from ai3d_engine.reconstruction import (
     STAGE_SPAN,
@@ -40,9 +40,6 @@ log = logging.getLogger(__name__)
 # Overall job progress: photo preparation before, saving after the COLMAP run.
 _RUN_SPAN = (0.05, 0.92)
 _HEARTBEAT_SECONDS = 2.0
-
-# COLMAP already uses every CPU core; two runs at once would only slow both down.
-_one_at_a_time = threading.Semaphore(1)
 
 _STAGE_MESSAGES: dict[Stage, str] = {
     "features": "Finding features in the photos.",
@@ -172,12 +169,8 @@ def _cancel_check(ctx: JobContext, deadline: float) -> Any:
 
 
 def _wait_turn(ctx: JobContext) -> None:
-    if _one_at_a_time.acquire(blocking=False):
-        return
-    ctx.event(JobEventType.STATUS, "Waiting for another reconstruction on this computer.")
-    while not _one_at_a_time.acquire(timeout=_HEARTBEAT_SECONDS):
-        if ctx.heartbeat():
-            raise _CancelledError
+    if not heavy.wait_turn(ctx, "Waiting for another local job on this computer to finish."):
+        raise _CancelledError
 
 
 def _run(ctx: JobContext, job: GenerationJob, workdir: Path) -> None:
@@ -268,7 +261,7 @@ def run_reconstruction(ctx: JobContext) -> None:
         _fail(ctx, exc.code, exc.message, exc.details)
     finally:
         if acquired:
-            _one_at_a_time.release()
+            heavy.release()
         shutil.rmtree(workdir, ignore_errors=True)
 
 

@@ -96,6 +96,22 @@ looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/Applications/COLMAP.app` and
 `AI3D_COLMAP_PATH=/path/to/colmap` in a `.env` file in the app's data folder
 (Settings → Data folder → *Open*) and restart the app.
 
+## Local AI engine (TripoSR)
+
+- *"not installed"* in the provider list or plan: run
+  `uv run ai3d-local-ai install` (needs uv and ~4 GB free), or set
+  `AI3D_LOCAL_AI_DIR` to where you installed it, then restart the backend.
+- `ai3d-local-ai status` says *incomplete* or *from another version*: run the
+  install again; finished downloads are reused when their checksum matches.
+- *"No object was found in the photo"*: the background removal kept nothing.
+  Use a photo with one clearly visible object that fills a good part of the
+  frame, or a PNG whose background is already transparent.
+- The first generation after installing is slow (several minutes) while the
+  operating system checks the new libraries; later runs take about 1.5
+  minutes on a 6-core CPU.
+- The engine's log for a failed job is in the job's error details
+  (`log_tail`).
+
 ## S3 storage errors
 
 - *"AI3D_STORAGE_BACKEND=s3 needs the s3 extra"*: `uv sync --extra s3` (the

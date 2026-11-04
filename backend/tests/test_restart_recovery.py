@@ -49,6 +49,7 @@ class Server:
             "AI3D_DATA_DIR": str(self.data_dir),
             "AI3D_DATABASE_URL": "",
             "AI3D_ENVIRONMENT": "test",
+            "AI3D_LOCAL_AI_DIR": str(self.data_dir.parent / "no-local-ai"),
             "AI3D_LOG_LEVEL": "WARNING",
             "AI3D_API_TOKEN": TOKEN,
             "AI3D_PROVIDER_POLL_INTERVAL": "0.3",

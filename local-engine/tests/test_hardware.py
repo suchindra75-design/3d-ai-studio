@@ -86,10 +86,19 @@ def test_intel_mac_is_honest(monkeypatch: pytest.MonkeyPatch) -> None:
         dependencies={"colmap": {"installed": True}, "python": {}},
     )
     caps = hardware._capabilities(report)
-    assert not caps["local_ai_generation"].supported
-    assert "Intel Mac" in caps["local_ai_generation"].reason
+    # TripoSR runs on the CPU (measured: ~1.5 min, 3.7 GB peak on a 6-core Intel Mac).
+    assert caps["local_ai_generation"].supported
+    assert "CPU" in caps["local_ai_generation"].reason
     assert caps["photogrammetry_sparse"].supported
     assert not caps["photogrammetry_dense"].supported
+
+
+def test_too_little_ram_for_local_ai_is_explained() -> None:
+    report = _report(os_name="Linux", arch="x86_64", gpus=[], dependencies={"python": {}})
+    report.ram_total_bytes = 4 * 1024**3
+    cap = hardware._capabilities(report)["local_ai_generation"]
+    assert not cap.supported
+    assert "needs at least 8 GB" in cap.reason
 
 
 def test_low_disk_is_flagged() -> None:
