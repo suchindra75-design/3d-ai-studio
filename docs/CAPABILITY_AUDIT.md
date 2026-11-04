@@ -1,4 +1,4 @@
-# Capability audit (2026-11-04, updated after Phases 8, 9, 9b, 10 and 11)
+# Capability audit (2026-11-04, updated after Phases 8–12)
 
 An audit of the repository after phases 0–7 (commit `f8ec4af`), against the
 product vision in [PRODUCT_SPECIFICATION.md](PRODUCT_SPECIFICATION.md).
@@ -16,7 +16,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 3 | Tripo & Meshy | 🟡 | Full adapters tested against fakes built from the API docs; no paid key yet |
 | 4 | Local AI generation engine | ✅ | TripoSR (Phase 8), verified end to end on a real photo on a CPU; mirrored/inside-out output found and fixed in Phase 11; GPU and other OSes untested |
 | 5 | Hybrid local/cloud | 🟡 | Automatic keeps photos local when it can and checks the machine first; failed jobs offer the other route with consent (Phase 10). Cloud side tested only with the mock provider |
-| 6 | Professional viewer | 🟠 | Solid basics; no measuring, lighting, normals/UV views, clipping or large-model handling |
+| 6 | Professional viewer | 🟡 | Measuring, lighting presets, normals/UV views, section, screenshots and version comparison (Phase 12); 3M-triangle models usable; no level of detail |
 | 7 | 3D editing | 🟡 | Transforms, delete, mirror, pivot, ground/centre and plane cuts with filled caps (Phase 11), tested on real models; no merge/split or vertex editing |
 | 8 | Geometry refinement & retopology | 🟠 | Clean-up, decimation and baking work; retopology, smoothing and remeshing missing |
 | 9 | Texture & material editing | 🟠 | Material values, texture replace and a UV layout view (Phase 11); no texture adjustments, map baking or painting |
@@ -26,7 +26,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 13 | Export | ✅ | Seven formats re-opened and compared, now including per-vertex colours; STL/3MF Z-up; verified on real AI output (Phase 9) |
 | 14 | Project management | ✅ | Create/edit/search/archive/delete, tested end to end; importing existing models is missing |
 | 15 | Desktop app | 🟡 | Private engine, token, Save dialog, bundled release build; verified on macOS Intel only |
-| 16 | Performance & resources | 🟠 | Memory and disk checks and one heavy job at a time (Phase 10); no large-model handling in the viewer |
+| 16 | Performance & resources | 🟡 | Memory and disk checks, one heavy job at a time (Phase 10); 3M-triangle models measured and sped up (Phase 12) |
 
 ## Details
 
@@ -78,19 +78,20 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
     and Local mode is never offered the cloud.
 - **Not verified:** the cloud side against real Tripo/Meshy.
 
-### 6. Professional 3D model viewer — 🟠
+### 6. Professional 3D model viewer — 🟡
 - **Have:**
   - WebGL viewer with material, solid and wireframe modes.
   - Grid, axes and bounds; camera presets.
   - Hierarchy and statistics; real-world size once scaled.
   - Tested in a real browser.
+- **Added in Phase 12:** point-to-point measuring, lighting presets,
+  normals and UV-checker views, a section plane, screenshots (browser and
+  desktop) and side-by-side version comparison. A 3.1-million-triangle model
+  opens in seconds and stays responsive (measured in a browser test). Draco
+  is tested end to end since Phase 9.
 - **Missing:**
-  - Point-to-point measuring.
-  - Lighting and environment presets.
-  - Normals, UV and texture inspection views.
-  - Section/clipping, screenshots and side-by-side version comparison.
-  - Level of detail or progressive loading for large models.
-  - Draco untested end to end.
+  - Level of detail or progressive loading for models far beyond that.
+  - Quality problems highlighted on the model.
 
 ### 7. Actual 3D editing — 🟡
 - **Have:** move, rotate and scale per part (gizmo and numbers); material
@@ -175,15 +176,17 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
   - Windows, Linux and Apple Silicon builds never made.
   - Unsigned builds; no auto-update.
 
-### 16. Performance and resource management — 🟠
+### 16. Performance and resource management — 🟡
 - **Have:** a concurrency cap (2 jobs), job timeouts, cancellation (kills
   COLMAP/Blender), lease recovery, hardware report and temporary-file
   cleanup.
 - **Added in Phase 10:** memory and disk checks before heavy local work (at
   planning time and again when the job starts); one heavy job at a time now
   includes Blender baking.
+- **Added in Phase 12:** large models measured (3.1 million triangles:
+  opens in 3–6 s, 0.9 s to switch view and select); validation of very large
+  models 2.7× faster; web uploads over 10 MB fixed.
 - **Missing:**
-  - No viewer handling for multi-million-triangle models.
   - JavaScript bundle about 580 KB.
 
 ## The most important missing capability

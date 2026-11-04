@@ -3,8 +3,8 @@
 //! The Rust side deliberately exposes a small, fixed set of commands. There is
 //! no generic shell, process-spawning, file or HTTP command reachable from the
 //! web view: the window can ask for the backend's status, restart it, save one
-//! of a few kinds of backend download to a place the user picks in the native
-//! Save dialog, and open the app's own data folder. Local processing goes
+//! of a few kinds of backend download (or a PNG screenshot it made) to a place
+//! the user picks in the native Save dialog, and open the app's own data folder. Local processing goes
 //! through the backend's restricted engine.
 
 pub mod files;
@@ -100,6 +100,35 @@ async fn save_backend_file(
         .await
         .map_err(|e| e.to_string())??;
     Ok(Some(shown))
+}
+
+/// Asks where to save an image made in the window (a screenshot, PNG only) and
+/// writes it there. The bytes arrive as the raw request body; the suggested file
+/// name in the `x-file-name` header. Returns the saved path, or `None` if cancelled.
+#[tauri::command]
+async fn save_image(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<Option<String>, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Expected the image bytes.".into());
+    };
+    files::acceptable_png(bytes)?;
+    let name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("screenshot.png");
+    let mut name = files::safe_file_name(name);
+    if !name.to_ascii_lowercase().ends_with(".png") {
+        name.push_str(".png");
+    }
+    let Some(choice) = app.dialog().file().set_file_name(name).blocking_save_file() else {
+        return Ok(None);
+    };
+    let dest = choice.into_path().map_err(|e| e.to_string())?;
+    files::write_atomically(bytes, &dest)?;
+    Ok(Some(dest.display().to_string()))
 }
 
 /// Opens the app's own data folder (projects, models, logs) in Finder/Explorer.
@@ -227,6 +256,7 @@ pub fn run() {
             backend_status,
             restart_backend,
             save_backend_file,
+            save_image,
             open_data_folder
         ])
         .build(tauri::generate_context!())

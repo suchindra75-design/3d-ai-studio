@@ -64,6 +64,8 @@ export const desktopFeatures: DesktopFeatures | undefined = isTauri()
   ? {
       saveFile: (path, suggestedName) =>
         invoke<string | null>('save_backend_file', { path, suggestedName }),
+      saveImage: (png, suggestedName) =>
+        invoke<string | null>('save_image', png, { headers: { 'x-file-name': suggestedName } }),
       openDataFolder: () => invoke('open_data_folder'),
     }
   : undefined;

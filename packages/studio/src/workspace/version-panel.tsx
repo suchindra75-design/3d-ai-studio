@@ -16,6 +16,8 @@ export function VersionPanel({
   viewingId,
   onView,
   onMakeCurrent,
+  onCompare,
+  comparingId,
   busy,
 }: {
   modelName: string;
@@ -24,6 +26,9 @@ export function VersionPanel({
   viewingId: string;
   onView: (id: string) => void;
   onMakeCurrent: (id: string) => void;
+  /** Shows a version side by side with the one being viewed. */
+  onCompare: (id: string | null) => void;
+  comparingId: string | null;
   busy: boolean;
 }) {
   return (
@@ -64,6 +69,16 @@ export function VersionPanel({
                 {!viewing ? (
                   <Button size="sm" variant="secondary" onClick={() => onView(version.id)}>
                     View
+                  </Button>
+                ) : null}
+                {!viewing ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    aria-pressed={comparingId === version.id}
+                    onClick={() => onCompare(comparingId === version.id ? null : version.id)}
+                  >
+                    {comparingId === version.id ? 'Stop comparing' : 'Compare'}
                   </Button>
                 ) : null}
                 {!current ? (

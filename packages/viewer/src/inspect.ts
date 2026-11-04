@@ -112,10 +112,27 @@ export function buildHierarchy(root: THREE.Object3D): HierarchyNode {
   };
 }
 
-/** Exact world-space bounds (every vertex), so rotated parts are not over-estimated. */
+/**
+ * Above this many vertices, bounds come from each part's own box (no per-vertex pass):
+ * on a 3-million-triangle model the exact pass made selecting a part take ~2 s.
+ */
+export const PRECISE_BOUNDS_LIMIT = 500_000;
+
+/**
+ * World-space bounds. Exact (every vertex) up to PRECISE_BOUNDS_LIMIT vertices, so
+ * rotated parts are not over-estimated; above it, from each part's own bounding
+ * box, which is exact for unrotated parts and slightly larger for rotated ones.
+ */
 export function measure(object: THREE.Object3D): THREE.Box3 {
   object.updateWorldMatrix(true, true);
-  return new THREE.Box3().setFromObject(object, true);
+  let vertices = 0;
+  object.traverse((child) => {
+    const position = (child as THREE.Mesh).isMesh
+      ? (child as THREE.Mesh).geometry.getAttribute('position')
+      : undefined;
+    vertices += position ? position.count : 0;
+  });
+  return new THREE.Box3().setFromObject(object, vertices <= PRECISE_BOUNDS_LIMIT);
 }
 
 /** "12.3 cm" style lengths, choosing a unit that keeps three significant digits readable. */

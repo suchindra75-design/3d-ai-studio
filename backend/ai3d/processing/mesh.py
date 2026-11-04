@@ -278,6 +278,31 @@ def load_model_scene(path: Path, *, file_type: str = "glb") -> trimesh.Scene:
     return normalise_vertex_colours(trimesh.load_scene(path, file_type=file_type, process=False))
 
 
+def row_keys(rows: np.ndarray, base: int) -> np.ndarray:
+    """One int64 per row of 2 or 3 vertex indices (each < ``base``), for fast 1-D sorting.
+
+    ``np.unique(..., axis=0)`` sorts rows as structured data, which took 38 s on a
+    6-million-triangle model; sorting one integer key per row takes about a second.
+    Three indices need ``base**3 < 2**63`` (about 2 million vertices); beyond that the
+    rows are ranked pairwise first.
+    """
+    rows = np.asarray(rows, dtype=np.int64)
+    if rows.shape[1] == 2 or base**3 < 2**62:
+        key = np.zeros(len(rows), dtype=np.int64)
+        for column in range(rows.shape[1]):
+            key = key * base + rows[:, column]
+        return key
+    _, pair = np.unique(rows[:, 0] * base + rows[:, 1], return_inverse=True)
+    keys: np.ndarray = np.asarray(pair, dtype=np.int64) * base + rows[:, 2]
+    return keys
+
+
+def duplicate_face_count(faces: np.ndarray, vertex_count: int) -> tuple[int, np.ndarray]:
+    """Triangles using the same three vertices as an earlier one, and the first of each."""
+    _, first = np.unique(row_keys(np.sort(faces, axis=1), max(vertex_count, 1)), return_index=True)
+    return len(faces) - len(first), first
+
+
 def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
     try:
         scene = load_model_scene(path, file_type=file_type)
@@ -340,11 +365,12 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
 
     watertight = bool(shape.is_watertight)
     # How many triangles use each edge: 1 = open boundary, 3+ = non-manifold.
-    _, edge_counts = np.unique(shape.edges_sorted, axis=0, return_counts=True)
+    _, edge_counts = np.unique(
+        row_keys(shape.edges_sorted, max(len(shape.vertices), 1)), return_counts=True
+    )
     boundary_edges = int((edge_counts == 1).sum())
     non_manifold_edges = int((edge_counts > 2).sum())
-    _, first = np.unique(np.sort(shape.faces, axis=1), axis=0, return_index=True)
-    duplicate_faces = len(shape.faces) - len(first)
+    duplicate_faces, _ = duplicate_face_count(shape.faces, len(shape.vertices))
     metrics: dict[str, Any] = {
         "mesh_count": len(meshes),
         "vertex_count": len(vertices),

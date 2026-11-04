@@ -29,6 +29,8 @@ export interface RuntimeFact {
 export interface DesktopFeatures {
   /** Asks where to save a backend download; resolves to the saved path, or null if cancelled. */
   saveFile: (path: string, suggestedName: string) => Promise<string | null>;
+  /** Asks where to save an image made in the app (a screenshot); null if cancelled. */
+  saveImage?: (png: Uint8Array, suggestedName: string) => Promise<string | null>;
   openDataFolder: () => Promise<void>;
 }
 

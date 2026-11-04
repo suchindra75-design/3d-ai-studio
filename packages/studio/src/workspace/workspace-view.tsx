@@ -20,10 +20,13 @@ import type { ModelRead, ModelVersionRead } from '@ai3d/shared-types';
 import { Button, ConfirmDialog, Progress, Spinner, cn } from '@ai3d/ui';
 import {
   CAMERA_PRESETS,
+  CameraLink,
   DEFAULT_VIEWPORT_OPTIONS,
+  MeasureMarkers,
   Viewport,
   buildHierarchy,
   formatCount,
+  measure,
   sceneStats,
   sourceMaterials,
   webglAvailable,
@@ -32,7 +35,16 @@ import {
   type ViewportOptions,
 } from '@ai3d/viewer';
 import { ChevronLeft, Download, Redo2, Save, Undo2 } from 'lucide-react';
-import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import * as THREE from 'three';
 
 import { useModelVersions, useSaveModelVersion, useUpdateModel } from '../api/hooks';
 import { DownloadButton, versionFileName } from '../components/download-button';
@@ -49,6 +61,17 @@ import { useModelFile } from './model-file';
 import { QualityPanel } from './quality-panel';
 import { scaleOf } from './scale';
 import { VersionPanel } from './version-panel';
+import {
+  CompareTable,
+  CompareViewport,
+  MeasurePanel,
+  SectionControls,
+  defaultSection,
+  distanceLabel,
+  saveScreenshot,
+  sectionPlane,
+  type SectionState,
+} from './view-tools';
 import { GizmoControls, ViewportControls } from './viewport-controls';
 
 class CanvasBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -87,12 +110,16 @@ function isTyping(target: EventTarget | null): boolean {
   );
 }
 
+/** Above this many triangles shadows start off (they draw the model twice). */
+const LARGE_MODEL_TRIANGLES = 1_500_000;
+
 const SHORTCUTS: [string, string][] = [
   ['Drag · right-drag · scroll', 'Orbit · pan · zoom'],
   ['Click', 'Select a part'],
   ['W / E / R', 'Move / rotate / scale tool'],
   ['F or 0, 1–6', 'Fit, camera views'],
-  ['Esc', 'Clear selection'],
+  ['Esc', 'Clear selection and measurement'],
+  ['M', 'Measuring tool on/off'],
   ['Delete / Backspace', 'Delete the selected part'],
   ['⌘/Ctrl Z, ⇧⌘/Ctrl Z', 'Undo, redo'],
 ];
@@ -135,6 +162,17 @@ function VersionWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [webgl] = useState(webglAvailable);
+  const [measuring, setMeasuring] = useState(false);
+  const [points, setPoints] = useState<THREE.Vector3[]>([]);
+  const [section, setSection] = useState<SectionState | null>(null);
+  const [compareId, setCompareId] = useState<string | null>(null);
+  const [link] = useState(() => new CameraLink());
+  const [viewNotice, setViewNotice] = useState<string | null>(null);
+  const capture = useRef<(() => Promise<Blob>) | null>(null);
+  const onCaptureReady = useCallback((fn: () => Promise<Blob>) => {
+    capture.current = fn;
+  }, []);
+  const { desktop } = useStudio();
   const save = useSaveModelVersion(projectId, model.id);
   const update = useUpdateModel(projectId, model.id);
 
@@ -152,6 +190,41 @@ function VersionWorkspace({
     [root, edits.version],
   );
   const revision = edits.version * 100_000 + preview;
+  const scaleKnown = scaleOf(version) !== null;
+  const sectionClip = useMemo(() => (section ? sectionPlane(section) : null), [section]);
+  const markerSize = useMemo(
+    () =>
+      root ? Math.max(measure(root).getBoundingSphere(new THREE.Sphere()).radius, 1e-3) * 0.012 : 0,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-measure after edits
+    [root, edits.version],
+  );
+  const compareVersion = versions.find((v) => v.id === compareId && v.id !== version.id) ?? null;
+
+  // Large models: shadows double the drawing work, so they start off.
+  const large = (stats?.triangles ?? 0) > LARGE_MODEL_TRIANGLES;
+  const [largeHandled, setLargeHandled] = useState(false);
+  if (large && !largeHandled) {
+    // Adjusting state while rendering (once), React's pattern for derived state.
+    setLargeHandled(true);
+    setOptions((current) => ({ ...current, shadows: false }));
+    setViewNotice('Shadows are off for this large model; turn them on under Shadows.');
+  }
+
+  async function takeScreenshot() {
+    if (!capture.current) return;
+    try {
+      const blob = await capture.current();
+      const name = versionFileName(model.name, version.version_number, 'png');
+      const saved = await saveScreenshot(blob, name, desktop);
+      if (saved) setViewNotice(`Screenshot saved: ${saved}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The screenshot could not be saved.');
+    }
+  }
+
+  function pick(point: THREE.Vector3) {
+    setPoints((current) => (current.length >= 2 ? [point] : [...current, point]));
+  }
   const saving = exporting || save.isPending;
   const nextVersion =
     Math.max(...versions.map((v) => v.version_number), version.version_number) + 1;
@@ -241,7 +314,10 @@ function VersionWorkspace({
       else if (key === 'e') setGizmo('rotate');
       else if (key === 'r') setGizmo('scale');
       else if (key === 'f') requestView('iso');
-      else if (key === 'escape') setSelectedId(null);
+      else if (key === 'escape') {
+        setSelectedId(null);
+        setPoints([]);
+      } else if (key === 'm') setMeasuring((on) => !on);
       else if ((key === 'delete' || key === 'backspace') && part) {
         try {
           history.execute(deleteCommand(part));
@@ -339,65 +415,139 @@ function VersionWorkspace({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="relative order-1 h-[58dvh] min-w-0 bg-[#0e0e10] lg:order-2 lg:h-auto lg:flex-1">
-          {file.status === 'loading' ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
-              <p className="text-xs text-muted-foreground">Opening the 3D file…</p>
-              <div className="w-48">
-                {file.progress === null ? (
-                  <Spinner />
-                ) : (
-                  <Progress value={file.progress * 100} aria-label="Download progress" />
-                )}
+        <div
+          className={cn(
+            'order-1 flex min-w-0 bg-[#0e0e10] lg:order-2 lg:h-auto lg:flex-1',
+            compareVersion ? 'h-[80dvh] flex-col md:flex-row' : 'h-[58dvh]',
+          )}
+        >
+          <div className="relative min-h-0 min-w-0 flex-1">
+            {file.status === 'loading' ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
+                <p className="text-xs text-muted-foreground">Opening the 3D file…</p>
+                <div className="w-48">
+                  {file.progress === null ? (
+                    <Spinner />
+                  ) : (
+                    <Progress value={file.progress * 100} aria-label="Download progress" />
+                  )}
+                </div>
               </div>
+            ) : file.status === 'error' ? (
+              <ViewportMessage title="This version could not be opened">
+                {file.message}
+              </ViewportMessage>
+            ) : !webgl ? (
+              <ViewportMessage title="3D view unavailable">
+                This browser or device does not provide WebGL 2, which the 3D view needs. The
+                model’s facts and versions are listed alongside, and the GLB file can be downloaded.
+              </ViewportMessage>
+            ) : root ? (
+              <CanvasBoundary>
+                <Viewport
+                  className="size-full"
+                  model={root}
+                  revision={revision}
+                  options={options}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  view={view}
+                  tool={measuring ? 'measure' : 'select'}
+                  onPick={pick}
+                  clipPlane={tab === 'cut' ? null : sectionClip}
+                  cameraLink={compareVersion ? link : undefined}
+                  onCaptureReady={onCaptureReady}
+                  label={`3D view of ${model.name}, version ${version.version_number}`}
+                >
+                  {points.length > 0 ? (
+                    <MeasureMarkers
+                      points={points}
+                      size={markerSize}
+                      label={distanceLabel(points, scaleKnown)}
+                    />
+                  ) : null}
+                  {selected && selected !== root && tab !== 'cut' ? (
+                    <TransformGizmo object={selected} mode={gizmo} history={history} />
+                  ) : null}
+                  {tab === 'cut' && clipPlane ? (
+                    <ClipPreview plane={clipPlane} root={root} revision={edits.version} />
+                  ) : null}
+                </Viewport>
+                <ViewportControls
+                  options={options}
+                  onOptions={(change) => setOptions((current) => ({ ...current, ...change }))}
+                  onView={requestView}
+                  section={section !== null}
+                  onSection={(on) => setSection(on ? defaultSection(root) : null)}
+                  measuring={measuring}
+                  onMeasuring={(on) => {
+                    setMeasuring(on);
+                    if (!on) setPoints([]);
+                  }}
+                  onScreenshot={() => void takeScreenshot()}
+                />
+                <div className="pointer-events-none absolute left-2 top-24 flex flex-col gap-2 sm:top-12">
+                  {section && tab !== 'cut' ? (
+                    <SectionControls
+                      root={root}
+                      section={section}
+                      onSection={setSection}
+                      scaleKnown={scaleKnown}
+                      revision={edits.version}
+                    />
+                  ) : null}
+                  {measuring ? (
+                    <MeasurePanel
+                      points={points}
+                      scaleKnown={scaleKnown}
+                      measured={version.surface_provenance === 'measured'}
+                      onClear={() => setPoints([])}
+                    />
+                  ) : null}
+                  {viewNotice ? (
+                    <p
+                      role="status"
+                      className="pointer-events-auto max-w-64 rounded-md bg-background/85 px-2 py-1 text-[11px] text-muted-foreground"
+                    >
+                      {viewNotice}{' '}
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => setViewNotice(null)}
+                      >
+                        Dismiss
+                      </button>
+                    </p>
+                  ) : null}
+                </div>
+                <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-wrap items-end justify-between gap-2">
+                  {selected && selected !== root ? (
+                    <GizmoControls mode={gizmo} onMode={setGizmo} />
+                  ) : (
+                    <span />
+                  )}
+                  {stats ? (
+                    <p className="rounded-md bg-background/80 px-2 py-1 text-[11px] tabular-nums text-muted-foreground">
+                      {formatCount(stats.triangles)} triangles · {formatCount(stats.vertices)}{' '}
+                      vertices
+                    </p>
+                  ) : null}
+                </div>
+              </CanvasBoundary>
+            ) : null}
+          </div>
+          {compareVersion && webgl ? (
+            <div className="relative min-h-0 min-w-0 flex-1 border-t border-border md:border-t-0 md:border-l">
+              <CanvasBoundary>
+                <CompareViewport
+                  version={compareVersion}
+                  options={options}
+                  view={view}
+                  link={link}
+                  onClose={() => setCompareId(null)}
+                />
+              </CanvasBoundary>
             </div>
-          ) : file.status === 'error' ? (
-            <ViewportMessage title="This version could not be opened">
-              {file.message}
-            </ViewportMessage>
-          ) : !webgl ? (
-            <ViewportMessage title="3D view unavailable">
-              This browser or device does not provide WebGL 2, which the 3D view needs. The model’s
-              facts and versions are listed alongside, and the GLB file can be downloaded.
-            </ViewportMessage>
-          ) : root ? (
-            <CanvasBoundary>
-              <Viewport
-                className="size-full"
-                model={root}
-                revision={revision}
-                options={options}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                view={view}
-                label={`3D view of ${model.name}, version ${version.version_number}`}
-              >
-                {selected && selected !== root && tab !== 'cut' ? (
-                  <TransformGizmo object={selected} mode={gizmo} history={history} />
-                ) : null}
-                {tab === 'cut' && clipPlane ? (
-                  <ClipPreview plane={clipPlane} root={root} revision={edits.version} />
-                ) : null}
-              </Viewport>
-              <ViewportControls
-                options={options}
-                onOptions={(change) => setOptions((current) => ({ ...current, ...change }))}
-                onView={requestView}
-              />
-              <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-wrap items-end justify-between gap-2">
-                {selected && selected !== root ? (
-                  <GizmoControls mode={gizmo} onMode={setGizmo} />
-                ) : (
-                  <span />
-                )}
-                {stats ? (
-                  <p className="rounded-md bg-background/80 px-2 py-1 text-[11px] tabular-nums text-muted-foreground">
-                    {formatCount(stats.triangles)} triangles · {formatCount(stats.vertices)}{' '}
-                    vertices
-                  </p>
-                ) : null}
-              </div>
-            </CanvasBoundary>
           ) : null}
         </div>
 
@@ -483,15 +633,29 @@ function VersionWorkspace({
             ) : tab === 'export' ? (
               <ExportPanel modelName={model.name} version={version} dirty={edits.dirty} />
             ) : tab === 'versions' ? (
-              <VersionPanel
-                modelName={model.name}
-                versions={versions}
-                currentId={model.current_version?.id ?? null}
-                viewingId={version.id}
-                onView={requestVersion}
-                onMakeCurrent={(id) => update.mutate({ current_version_id: id })}
-                busy={update.isPending}
-              />
+              <>
+                {compareVersion ? (
+                  <div className="flex flex-col gap-2 border-b border-border px-4 py-4">
+                    <h2 className="text-xs font-medium">Comparing</h2>
+                    <p className="text-[11px] leading-relaxed text-subtle-foreground">
+                      Stored facts of both files; the cameras move together.
+                      {edits.dirty ? ' The left view also shows your unsaved edits.' : ''}
+                    </p>
+                    <CompareTable left={version} right={compareVersion} />
+                  </div>
+                ) : null}
+                <VersionPanel
+                  modelName={model.name}
+                  versions={versions}
+                  currentId={model.current_version?.id ?? null}
+                  viewingId={version.id}
+                  onView={requestVersion}
+                  onMakeCurrent={(id) => update.mutate({ current_version_id: id })}
+                  onCompare={setCompareId}
+                  comparingId={compareVersion?.id ?? null}
+                  busy={update.isPending}
+                />
+              </>
             ) : loaded ? (
               <>
                 <InspectorPanel

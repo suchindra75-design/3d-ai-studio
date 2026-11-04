@@ -2,7 +2,14 @@ import * as THREE from 'three';
 
 import { CAMERA_PRESETS, frameBox, gridCellSize } from './camera';
 import { applyDisplayMode, sourceMaterials, withSourceMaterials } from './display';
-import { buildHierarchy, formatLength, formatUnits, measure, sceneStats } from './inspect';
+import {
+  PRECISE_BOUNDS_LIMIT,
+  buildHierarchy,
+  formatLength,
+  formatUnits,
+  measure,
+  sceneStats,
+} from './inspect';
 
 function sampleScene() {
   const texture = new THREE.Texture();
@@ -157,5 +164,45 @@ describe('camera framing', () => {
     expect(gridCellSize(box(0.25))).toBeCloseTo(0.01);
     expect(gridCellSize(box(30))).toBeCloseTo(1);
     expect(gridCellSize(new THREE.Box3())).toBe(0.1);
+  });
+});
+
+describe('view-only display modes and large-model bounds', () => {
+  it('shows normals and a UV checker without touching the model’s own materials', () => {
+    const own = new THREE.MeshStandardMaterial({ name: 'Paint' });
+    const mapped = new THREE.Mesh(new THREE.BoxGeometry(), own);
+    const unmapped = new THREE.Mesh(new THREE.BoxGeometry(), own);
+    unmapped.geometry.deleteAttribute('uv');
+    const root = new THREE.Group().add(mapped, unmapped);
+    applyDisplayMode(root, 'normals');
+    expect((mapped.material as THREE.Material).type).toBe('MeshNormalMaterial');
+    applyDisplayMode(root, 'uv');
+    expect((mapped.material as unknown as THREE.MeshBasicMaterial).map).not.toBeNull();
+    expect((unmapped.material as THREE.Material).name).toBe('Solid view'); // no UVs: solid
+    expect(sourceMaterials(mapped)).toEqual([own]);
+    applyDisplayMode(root, 'material');
+    expect(mapped.material).toBe(own);
+  });
+
+  it('measures exactly below the vertex limit and from part boxes above it', () => {
+    const small = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+    small.rotation.y = Math.PI / 4;
+    const exact = measure(new THREE.Group().add(small));
+    expect(exact.max.x).toBeCloseTo(Math.SQRT1_2, 6); // corners, not the rotated box
+    // A circle of more vertices than the limit, turned 45° about Z: exact bounds would
+    // still reach x = 1, the turned bounding square reaches x = √2.
+    const count = PRECISE_BOUNDS_LIMIT + 1;
+    const ring = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) {
+      const angle = (i / count) * Math.PI * 2;
+      ring[i * 3] = Math.cos(angle);
+      ring[i * 3 + 1] = Math.sin(angle);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(ring, 3));
+    const big = new THREE.Mesh(geometry);
+    big.rotation.z = Math.PI / 4;
+    const approximate = measure(new THREE.Group().add(big));
+    expect(approximate.max.x).toBeCloseTo(Math.SQRT2, 4);
   });
 });

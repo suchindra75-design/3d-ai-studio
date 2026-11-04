@@ -29,7 +29,7 @@ import trimesh
 from PIL import Image
 
 from ai3d.models.enums import QualityMode
-from ai3d.processing.mesh import load_model_scene
+from ai3d.processing.mesh import duplicate_face_count, load_model_scene
 from ai3d_engine.blender import (
     BlenderFailedError,
     BlenderNotFoundError,
@@ -169,7 +169,7 @@ def cleanup(scene: trimesh.Scene) -> Step:
     for _, mesh in _meshes(scene):
         shape = _shape(mesh)
         keep = shape.nondegenerate_faces()
-        _, first = np.unique(np.sort(shape.faces, axis=1), axis=0, return_index=True)
+        _, first = duplicate_face_count(shape.faces, len(shape.vertices))
         unique = np.zeros(len(shape.faces), dtype=bool)
         unique[first] = True
         removed += _keep_faces(mesh, keep & unique)

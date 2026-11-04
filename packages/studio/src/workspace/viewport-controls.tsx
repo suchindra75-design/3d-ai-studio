@@ -4,11 +4,13 @@ import type { GizmoMode } from '@ai3d/editor';
 import { cn } from '@ai3d/ui';
 import {
   CAMERA_PRESETS,
+  LIGHTING_PRESETS,
   type CameraPreset,
   type DisplayMode,
+  type LightingPreset,
   type ViewportOptions,
 } from '@ai3d/viewer';
-import { Focus } from 'lucide-react';
+import { Camera, Focus } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 const panel = 'rounded-md border border-border bg-surface/95 p-0.5 shadow-sm';
@@ -74,10 +76,12 @@ function Toggle({
   );
 }
 
-const DISPLAY: { value: DisplayMode; label: string }[] = [
+const DISPLAY: { value: DisplayMode; label: string; hint?: string }[] = [
   { value: 'material', label: 'Material' },
   { value: 'solid', label: 'Solid' },
   { value: 'wireframe', label: 'Wireframe' },
+  { value: 'normals', label: 'Normals', hint: 'Surface direction as colour' },
+  { value: 'uv', label: 'UV', hint: 'Checker texture: shows stretching and seams' },
 ];
 
 const GIZMO: { value: GizmoMode; label: string; hint: string }[] = [
@@ -90,11 +94,21 @@ export function ViewportControls({
   options,
   onOptions,
   onView,
+  section,
+  onSection,
+  measuring,
+  onMeasuring,
+  onScreenshot,
 }: {
   options: ViewportOptions;
   /** Receives only the changed setting, so quick successive clicks never undo each other. */
   onOptions: (change: Partial<ViewportOptions>) => void;
   onView: (preset: CameraPreset) => void;
+  section: boolean;
+  onSection: (on: boolean) => void;
+  measuring: boolean;
+  onMeasuring: (on: boolean) => void;
+  onScreenshot: () => void;
 }) {
   const set = <K extends keyof ViewportOptions>(key: K, value: ViewportOptions[K]) =>
     onOptions({ [key]: value });
@@ -121,8 +135,39 @@ export function ViewportControls({
             Shadows
           </Toggle>
         </div>
+        <div role="group" aria-label="View tools" className={cn(panel, 'flex')}>
+          <Toggle pressed={section} onChange={onSection}>
+            Section
+          </Toggle>
+          <Toggle pressed={measuring} onChange={onMeasuring}>
+            Measure
+          </Toggle>
+        </div>
+        <label className={cn(panel, 'flex items-center gap-1 pl-2 text-xs text-muted-foreground')}>
+          Light
+          <select
+            aria-label="Lighting"
+            className="h-7 rounded bg-transparent px-1 text-xs text-foreground outline-none"
+            value={options.lighting}
+            onChange={(event) => set('lighting', event.target.value as LightingPreset)}
+          >
+            {LIGHTING_PRESETS.map((preset) => (
+              <option key={preset.value} value={preset.value} title={preset.hint}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       <div className={cn(panel, 'pointer-events-auto flex items-center')}>
+        <button
+          type="button"
+          className="flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+          title="Save the view as a PNG"
+          onClick={onScreenshot}
+        >
+          <Camera className="size-3.5" aria-hidden /> Screenshot
+        </button>
         <button
           type="button"
           className="flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"

@@ -631,6 +631,58 @@ Checks run on 2026-11-04 (COLMAP configured):
 - Earlier local AI versions stay as they were (versions are never changed);
   regenerate them to get the fix.
 
+## Phase 12 — Viewer ✅ (with two fixes found on a large model)
+
+View-only tools in the 3D workspace. None of them changes the model.
+- **Display modes:** Normals (surface direction as colour) and UV (a checker
+  texture that shows stretching and seams); parts without texture
+  coordinates show solid.
+- **Lighting presets:** Studio, Soft and Flat (no key light, for judging
+  colours).
+- **Section view:** a clipping plane across X, Y or Z with a position slider
+  and a flip button.
+- **Measuring** (button or *M*): click two points on the surface for the
+  distance and its X/Y/Z parts. The units follow the model: real units after
+  scaling in Enhance, otherwise the model's own units, with a reminder that AI
+  proportions are not measurements.
+- **Screenshot:** a PNG of the current view. In the browser it downloads; in
+  the desktop app it opens the native Save dialog through a new Rust command
+  that accepts only PNG data (D44).
+- **Compare versions:** the Versions tab shows another version side by side.
+  The cameras move together, and a table lists the stored facts of both, with
+  the differences marked.
+- **Large models:** shadows start off above 1.5 million triangles. Exact
+  bounds are computed per vertex only up to 500,000 vertices (D45).
+
+**Measured on a 3.1-million-triangle model** (56 MB): it opens in 3–6 s in the
+browser test, and switching a display mode and selecting a part takes 0.9 s
+(2.8 s before the bounds limit).
+
+**Fixes found on the way:**
+- **Web uploads over 10 MB hung.** Next.js cut proxied request bodies at
+  10 MB, which affected large photos and models in the web app (not the
+  desktop app, which talks to its engine directly). The limit is now 520 MB,
+  above the backend's own limits (D46).
+- **Checking very large models was slow.** Validating a 6-million-triangle
+  model took 57 s, 38 s of it in NumPy's row-wise `unique`. One integer key
+  per row brought it to 21 s; a 3-million-triangle model takes 9 s (D47).
+
+Checks run on 2026-11-04 (COLMAP configured):
+- **Python:** 318 tests passed.
+- **Frontend:** 106 unit tests.
+- **Browser tests:**
+  - web: 23, including `e2e/viewer.spec.ts` (2) and the large model;
+  - desktop UI: 2;
+  - job workflows: 2.
+- **Rust:** 14 tests, including PNG-only saving.
+- **Static checks:** ruff, mypy, ESLint, Prettier, tsc, cargo fmt, clippy
+  and builds.
+
+**Not done or not verified:**
+- Level of detail or progressive loading. Models above roughly 5 million
+  triangles have not been tried in the browser.
+- Problems from the quality report are still not highlighted on the model.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
@@ -669,11 +721,11 @@ working and adds tests that use real tools and real data.
   server like every version; D40).
 - Replace a texture; a UV layout view.
 
-**Phase 12 — Viewer.**
+**Phase 12 — Viewer ✅ (see above).**
 - Measuring tool; lighting presets.
-- Normals and UV-checker views; clipping plane; screenshots.
+- Normals and UV-checker views; section plane; screenshots.
 - Version comparison.
-- Large-model performance.
+- Large-model performance (3 million triangles measured).
 
 **Phase 13 — Geometry.**
 - Retopology with a measured fidelity check (QuadriFlow or Instant Meshes).

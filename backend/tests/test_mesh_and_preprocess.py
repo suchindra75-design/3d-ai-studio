@@ -12,7 +12,7 @@ import trimesh
 from PIL import Image, ImageCms
 
 from ai3d.models.enums import ReportStatus
-from ai3d.processing.mesh import validate_mesh_file
+from ai3d.processing.mesh import duplicate_face_count, row_keys, validate_mesh_file
 from ai3d.processing.preprocess import preprocess_for_provider
 from tests import images
 
@@ -189,3 +189,16 @@ def test_a_shattered_surface_warns(tmp_path: Path) -> None:
     assert report.metrics["components"] == 40
     assert report.metrics["largest_component_share"] == pytest.approx(1 / 40, rel=0.01)
     assert any(i.code == "fragmented" and i.severity == "warning" for i in report.issues)
+
+
+def test_row_keys_match_numpy_row_uniqueness() -> None:
+    rng = np.random.default_rng(5)
+    for vertices in (50, 3_000_000):  # the second needs the pairwise path for triangles
+        faces = rng.integers(0, vertices, size=(4000, 3))
+        faces[100:150] = faces[:50][:, ::-1]  # same triangles, other order
+        expected = len(faces) - len(np.unique(np.sort(faces, axis=1), axis=0))
+        count, first = duplicate_face_count(faces, vertices)
+        assert count == expected >= 50
+        assert len(first) == len(faces) - count
+        edges = np.sort(faces[:, :2], axis=1)
+        assert len(np.unique(row_keys(edges, vertices))) == len(np.unique(edges, axis=0))

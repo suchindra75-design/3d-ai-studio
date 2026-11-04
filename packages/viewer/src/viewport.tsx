@@ -16,8 +16,43 @@ export interface ViewRequest {
   nonce: number;
 }
 
+/** studio: image lighting plus a key light; soft: brighter fill, weaker key; flat: no key light. */
+export type LightingPreset = 'studio' | 'soft' | 'flat';
+
+export const LIGHTING_PRESETS: { value: LightingPreset; label: string; hint: string }[] = [
+  { value: 'studio', label: 'Studio', hint: 'Room lighting with a key light and shadows' },
+  { value: 'soft', label: 'Soft', hint: 'Even light, faint shadows' },
+  { value: 'flat', label: 'Flat', hint: 'No shading from a light: judge colours and textures' },
+];
+
+const LIGHTING: Record<LightingPreset, { environment: number; key: number; hemisphere: number }> = {
+  studio: { environment: 0.85, key: 1.4, hemisphere: 0.35 },
+  soft: { environment: 1.15, key: 0.55, hemisphere: 0.6 },
+  flat: { environment: 1.5, key: 0, hemisphere: 0.9 },
+};
+
+/** Shares one camera between viewports (version comparison). */
+export class CameraLink {
+  position = new THREE.Vector3();
+  target = new THREE.Vector3();
+  /** Who moved last, so a viewport does not react to its own change. */
+  source: object | null = null;
+  private readonly listeners = new Set<() => void>();
+  set(source: object, position: THREE.Vector3, target: THREE.Vector3): void {
+    this.source = source;
+    this.position.copy(position);
+    this.target.copy(target);
+    for (const listener of this.listeners) listener();
+  }
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+}
+
 export interface ViewportOptions {
   display: DisplayMode;
+  lighting: LightingPreset;
   grid: boolean;
   axes: boolean;
   bounds: boolean;
@@ -26,6 +61,7 @@ export interface ViewportOptions {
 
 export const DEFAULT_VIEWPORT_OPTIONS: ViewportOptions = {
   display: 'material',
+  lighting: 'studio',
   grid: true,
   axes: false,
   bounds: false,
@@ -45,6 +81,15 @@ export interface ViewportProps {
   className?: string;
   /** Extra scene content, e.g. the editor's transform gizmo. */
   children?: ReactNode;
+  /** 'measure': clicks on the model report the surface point instead of selecting. */
+  tool?: 'select' | 'measure';
+  onPick?: (point: THREE.Vector3) => void;
+  /** View-only section: hides everything on the side the plane's normal points away from. */
+  clipPlane?: THREE.Plane | null;
+  /** Keeps this viewport's camera in step with others sharing the link. */
+  cameraLink?: CameraLink;
+  /** Receives a function that renders the current view to a PNG. */
+  onCaptureReady?: (capture: () => Promise<Blob>) => void;
 }
 
 const SELECTION_COLOR = new THREE.Color('#0a84ff');
@@ -62,7 +107,7 @@ export function webglAvailable(): boolean {
 }
 
 /** Image-based lighting generated on the GPU from three's built-in room; nothing is downloaded. */
-function RoomLighting() {
+function RoomLighting({ intensity }: { intensity: number }) {
   const get = useThree((state) => state.get);
   useEffect(() => {
     const { gl, scene, invalidate } = get();
@@ -70,7 +115,6 @@ function RoomLighting() {
     const room = new RoomEnvironment();
     const target = pmrem.fromScene(room, 0.04);
     scene.environment = target.texture;
-    scene.environmentIntensity = 0.85;
     invalidate();
     return () => {
       scene.environment = null;
@@ -79,10 +123,88 @@ function RoomLighting() {
       pmrem.dispose();
     };
   }, [get]);
+  useEffect(() => {
+    const { scene, invalidate } = get();
+    scene.environmentIntensity = intensity;
+    invalidate();
+  }, [get, intensity]);
   return null;
 }
 
-function KeyLight({ box, shadows }: { box: THREE.Box3; shadows: boolean }) {
+/** Renders the current view to a PNG on request (the canvas keeps no copy otherwise). */
+function Capture({ onReady }: { onReady: (capture: () => Promise<Blob>) => void }) {
+  const get = useThree((state) => state.get);
+  useEffect(() => {
+    onReady(
+      () =>
+        new Promise<Blob>((resolve, reject) => {
+          const { gl, scene, camera } = get();
+          gl.render(scene, camera);
+          gl.domElement.toBlob((blob) =>
+            blob ? resolve(blob) : reject(new Error('The view could not be captured.')),
+          );
+        }),
+    );
+  }, [get, onReady]);
+  return null;
+}
+
+/** Copies camera moves to and from a shared link. */
+function LinkedCamera({ link }: { link: CameraLink }) {
+  const get = useThree((state) => state.get);
+  const controls = useThree((state) => state.controls) as unknown as
+    | (THREE.EventDispatcher<{ change: object }> & { target: THREE.Vector3; update: () => void })
+    | null;
+  useEffect(() => {
+    if (!controls) return undefined;
+    const me = {};
+    let applying = false; // our own update() also fires 'change'
+    const push = () => {
+      if (!applying) link.set(me, get().camera.position, controls.target);
+    };
+    const pull = () => {
+      if (link.source === me) return;
+      applying = true;
+      get().camera.position.copy(link.position);
+      controls.target.copy(link.target);
+      controls.update();
+      applying = false;
+      get().invalidate();
+    };
+    controls.addEventListener('change', push);
+    const stop = link.subscribe(pull);
+    return () => {
+      controls.removeEventListener('change', push);
+      stop();
+    };
+  }, [controls, get, link]);
+  return null;
+}
+
+/** Section view: renderer clipping, so nothing in the model changes. */
+function Section({ plane }: { plane: THREE.Plane }) {
+  const get = useThree((state) => state.get);
+  useEffect(() => {
+    const { gl, invalidate } = get();
+    gl.clippingPlanes = [plane];
+    invalidate();
+    return () => {
+      gl.clippingPlanes = [];
+      invalidate();
+    };
+  }, [get, plane]);
+  return null;
+}
+
+function KeyLight({
+  box,
+  shadows,
+  intensity,
+}: {
+  box: THREE.Box3;
+  shadows: boolean;
+  intensity: number;
+}) {
   const light = useRef<THREE.DirectionalLight>(null);
   const center = box.getCenter(new THREE.Vector3());
   const radius = Math.max(box.getBoundingSphere(new THREE.Sphere()).radius, 1e-3);
@@ -103,8 +225,8 @@ function KeyLight({ box, shadows }: { box: THREE.Box3; shadows: boolean }) {
   return (
     <directionalLight
       ref={light}
-      castShadow={shadows}
-      intensity={1.4}
+      castShadow={shadows && intensity > 0}
+      intensity={intensity}
       position={[center.x + radius * 2, center.y + radius * 3, center.z + radius * 1.5]}
       shadow-mapSize={[2048, 2048]}
       shadow-bias={-0.0004}
@@ -121,6 +243,11 @@ function Scene({
   onSelect,
   view,
   children,
+  tool = 'select',
+  onPick,
+  clipPlane,
+  cameraLink,
+  onCaptureReady,
 }: Omit<ViewportProps, 'label' | 'className'>) {
   const get = useThree((state) => state.get);
   const invalidate = useThree((state) => state.invalidate);
@@ -163,6 +290,7 @@ function Scene({
 
   useEffect(() => invalidate(), [revision, options, selectedId, invalidate]);
 
+  const light = LIGHTING[options.lighting];
   const radius = Math.max(box.getBoundingSphere(new THREE.Sphere()).radius, 1e-3);
   const floor = box.isEmpty() ? 0 : box.min.y;
   const center = box.getCenter(new THREE.Vector3());
@@ -171,16 +299,20 @@ function Scene({
   function handleClick(event: ThreeEvent<MouseEvent>) {
     if (event.delta > CLICK_TOLERANCE_PX) return;
     event.stopPropagation();
-    onSelect(event.object.uuid);
+    if (tool === 'measure') onPick?.(event.point.clone());
+    else onSelect(event.object.uuid);
   }
 
   return (
     <>
-      <RoomLighting />
-      <hemisphereLight args={['#ffffff', '#3a3a40', 0.35]} />
-      <KeyLight box={box} shadows={options.shadows} />
+      <RoomLighting intensity={light.environment} />
+      <hemisphereLight args={['#ffffff', '#3a3a40', light.hemisphere]} />
+      <KeyLight box={box} shadows={options.shadows} intensity={light.key} />
+      {clipPlane ? <Section plane={clipPlane} /> : null}
+      {cameraLink ? <LinkedCamera link={cameraLink} /> : null}
+      {onCaptureReady ? <Capture onReady={onCaptureReady} /> : null}
       <primitive object={model} onClick={handleClick} />
-      {options.shadows ? (
+      {options.shadows && light.key > 0 ? (
         <mesh rotation-x={-Math.PI / 2} position={[center.x, floor, center.z]} receiveShadow>
           <planeGeometry args={[radius * 8, radius * 8]} />
           <shadowMaterial opacity={0.32} />
