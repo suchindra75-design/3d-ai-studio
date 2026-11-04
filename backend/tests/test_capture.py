@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -136,7 +137,7 @@ def test_unrelated_photos_are_named_and_the_cache_goes_stale(
 
     check = _check(_measure(client, pid), "overlap")
     assert check["status"] == "warning"
-    assert "1 photo(s) overlap with no other photo" in check["message"]
+    assert "1 photo(s) matched no other photo" in check["message"]
     assert "stray.jpg" in check["message"]
     assert check["image_ids"] == [stray_id]
 
@@ -165,3 +166,26 @@ def test_overlap_needs_two_photos(
     _upload_all(client, pid, [("one.jpg", sharp_jpeg)])
     response = client.post(f"/api/v1/projects/{pid}/capture-assessment/overlap")
     assert response.status_code == 422
+
+
+def test_large_sets_in_shuffled_order_are_still_connected(tmp_path: Path) -> None:
+    """Upload order is often not capture order (found on a real 67-photo capture).
+
+    Above the exhaustive limit each photo is compared with its upload neighbours and
+    with the photos that look most similar, so a shuffled capture still connects.
+    """
+    import random  # noqa: PLC0415
+
+    from ai3d.processing import overlap  # noqa: PLC0415
+    from tests import scenes  # noqa: PLC0415
+
+    photos = []
+    for name, data in scenes.photo_set():
+        path = tmp_path / name
+        path.write_bytes(data)
+        photos.append((name, path))
+    random.Random(2).shuffle(photos)
+    result = overlap.assess_overlap(photos, exhaustive_limit=0)  # force the large-set path
+    assert not result.exhaustive
+    assert result.pairs_checked < len(photos) * (len(photos) - 1) // 2
+    assert len(result.groups) == 1, result.groups

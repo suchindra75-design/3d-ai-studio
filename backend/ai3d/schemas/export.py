@@ -16,6 +16,7 @@ class ExportFormatRead(Schema):
     available: bool
     unavailable_reason: str | None
     keeps_texture: bool
+    keeps_colour: bool  # per-vertex colours (e.g. local AI models)
     notes: list[str]
 
 

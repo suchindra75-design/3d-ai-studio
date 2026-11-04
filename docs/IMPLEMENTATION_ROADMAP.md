@@ -397,6 +397,73 @@ Checks run on 2026-11-04 (TripoSR engine, COLMAP and Blender installed):
 - First run after installing is slow (200 s for the installer's test while
   macOS checked the new libraries).
 
+## Phase 9 — Real-world verification ✅ (with one major finding)
+
+Real inputs were run through the whole application: the real TripoSR model,
+four other single images (including a real photo with a cluttered background),
+a real 67-photo capture (AliceVision's Buddha dataset, CC BY 4.0, 2736×1540
+photos) and Draco files made by an independent encoder (Blender). Bugs found
+by this, all fixed and covered by tests:
+
+- **STL and 3MF lay on their back in slicers.** They were Y-up; they are now
+  millimetres with Z up (D31).
+- **Colours were lost or wrong, silently:**
+  - 3MF dropped them; it now writes a 3MF colour group.
+  - USDZ and FBX dropped them; they now use displayColor and Blender's
+    sRGB colours respectively.
+  - OBJ wrote them too dark (linear values); they are now sRGB.
+  - Export validation now checks colours like textures (D32).
+- **A Blender-made, Draco-compressed GLB** was rejected: there was no Draco
+  decoder (now DracoPy, D34). Its float RGB colours next to a material also
+  crashed re-export; colours are now normalised on load (D33). The viewer
+  decodes Draco too (new e2e test).
+- **The capture check reported 8 disconnected groups and 25 unusable photos**
+  on a capture where COLMAP placed all 67. Upload order is not capture order.
+  Every pair is now compared up to 120 photos (2,211 pairs in 20–35 s);
+  larger sets add image retrieval with a small visual vocabulary (885 pairs
+  gave the same answer on the shuffled real set).
+- **The quality report passed a real reconstruction** whose bounding box was
+  18× larger than its surface. It now warns about stray surfaces (bounding box
+  more than 4× the central 95% of the surface) and shattered surfaces (many
+  pieces, none holding half).
+- **Local AI output had no normals,** which caused faceted, banded shading;
+  smooth normals are now written.
+
+**Major finding:** on real photos, photogrammetry without an NVIDIA GPU does
+not produce a usable surface.
+- COLMAP placed every camera: 67 of 67, 0.45 px reprojection error, 215 s on
+  the CPU.
+- The surface built from sparse points (18k points) is spiky: it reaches into
+  the background, and the statue is not recognisable.
+- Ground removal then kept the wrong piece. A guard against removing "too
+  much" was tried and reverted, because synthetic tests show a table can
+  legitimately be 98% of a scan.
+- The report now warns, but the real fix is a dense step that runs on a CPU
+  (for example OpenMVS, AGPL-3.0, run as a separate program). That needs a
+  decision.
+
+**Verified:** every export of the real TripoSR model, with colours checked in
+Blender for GLB, OBJ, FBX and USDZ. Local AI on four varied inputs: all
+shapes were plausible, 40–56 s each; colours come out duller than the photos,
+which is TripoSR's own output.
+
+Checks run on 2026-11-04 (COLMAP, Blender and the TripoSR engine installed):
+- **Python:** 297 tests passed. The 9 skips need settings, and these ran
+  separately and passed: the real capture in 4.9 min, the local AI tests
+  (16, with the real engine), and S3 in an earlier run.
+- **Frontend:** 87 unit tests.
+- **Browser tests:**
+  - web: 20, including the new Draco test;
+  - desktop UI: 2;
+  - job workflows: 2.
+- **Rust:** 13 tests.
+- **Static checks:** ruff, mypy (strict), ESLint, Prettier, tsc and builds.
+
+**Not verified:**
+- The 3MF colour group in a real slicer.
+- USDZ colours in Apple Quick Look.
+- Tripo/Meshy, which still need a key.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
@@ -416,7 +483,7 @@ working and adds tests that use real tools and real data.
 - **Done when:** this Intel Mac turns real photos into models, end to end, in
   the web and desktop apps.
 
-**Phase 9 — Real-world verification.**
+**Phase 9 — Real-world verification ✅ (see above).**
 - Real photo captures for photogrammetry (our own photographs, or public
   datasets with compatible licences).
 - Real-output checks of the quality report and every export.

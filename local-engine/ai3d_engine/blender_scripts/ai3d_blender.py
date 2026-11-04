@@ -122,6 +122,17 @@ def _image_textures(objects: list[Any]) -> list[dict[str, Any]]:
     return found
 
 
+def _has_colours(obj: Any) -> bool:
+    """True when the mesh has a colour attribute whose values actually vary."""
+    attributes = getattr(obj.data, "color_attributes", None)
+    if not attributes:
+        return False
+    data = attributes[0].data
+    values = np.empty(len(data) * 4, dtype=np.float32)
+    data.foreach_get("color", values)
+    return bool(len(values)) and float(values.reshape(-1, 4)[:, :3].std()) > 0.002
+
+
 def _facts(objects: list[Any]) -> dict[str, Any]:
     lo, hi = _bounds(objects)
     images = _image_textures(objects)
@@ -138,6 +149,8 @@ def _facts(objects: list[Any]) -> dict[str, Any]:
         "textured": any(i["has_pixels"] and i["linked"] for i in images),
         # Meshes whose material shows an image that is stored inside the file.
         "textured_objects": textured_objects,
+        # Meshes with per-vertex colours (e.g. from local AI generation).
+        "coloured_objects": sum(1 for o in objects if _has_colours(o)),
     }
 
 
@@ -255,6 +268,7 @@ def export_fbx(request: dict[str, Any]) -> dict[str, Any]:
         bake_anim=False,
         path_mode="COPY",
         embed_textures=True,
+        colors_type="SRGB",  # per-vertex colours, stored as sRGB like other FBX tools expect
     )
     return {"source": _facts(objects), "dropped_colour_factors": dropped}
 

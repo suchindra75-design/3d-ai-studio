@@ -24,6 +24,7 @@ stand-ins are for **paid external services**:
 | Web end-to-end | `pnpm test:e2e` | the Next.js app in Chrome, desktop and phone viewports (Playwright) |
 | Desktop UI end-to-end | `pnpm test:e2e:desktop` | the desktop UI against a backend that requires the per-launch token |
 | Job workflows end-to-end | `pnpm test:e2e:workflows` | cancel, retry and provider errors through the UI |
+| Real photo capture (photogrammetry) | `AI3D_REAL_CAPTURE_DIR=… AI3D_COLMAP_PATH=… uv run pytest backend/tests/test_real_captures.py -s` | a real capture through upload, overlap check, reconstruction, ground removal and every export; verified with AliceVision's Buddha dataset (67 photos, CC BY 4.0, github.com/alicevision/dataset_buddha), which is not in the repository |
 | Local AI (real TripoSR) | `AI3D_LOCAL_AI_DIR=… uv run pytest backend/tests/test_local_ai.py` and `AI3D_LOCAL_AI_DIR=… pnpm test:e2e e2e/local-ai.spec.ts` | a real phone photo → model, through the API and the browser (needs `ai3d-local-ai install`) |
 | Desktop shell | `cd apps/desktop/src-tauri && cargo test` | Rust: token, ports, downloads allow-list, file names, the real engine's lifecycle |
 | Engine bundle | `pnpm bundle:engine` | builds the release engine and smoke-tests it (starts it with a token, lists exports) |
@@ -66,7 +67,7 @@ Each test uses its own prefix in the `ai3d-test` bucket.
 | 6 | Open the 3D viewer | `e2e/workspace.spec.ts` (real WebGL canvas); `token.spec.ts` | `packages/viewer` unit tests |
 | 7 | Inspect geometry | `workspace.spec.ts` (triangles, bounds, hierarchy) | `test_mesh_and_preprocess.py`, `test_processing.py` (quality report) |
 | 8 | Export | `workspace.spec.ts` (GLB, STL, and FBX when Blender is installed) | `test_enhance_export.py` (every format) |
-| 9 | Re-open the export | `workspace.spec.ts` (downloaded GLB/STL bytes checked) | `test_enhance_export.py` (trimesh / Pixar USD), `test_blender.py` (FBX re-imported in Blender) |
+| 9 | Re-open the export | `workspace.spec.ts` (downloaded GLB/STL bytes checked); `draco.spec.ts` (Draco GLB decoded in the viewer) | `test_enhance_export.py` (trimesh / Pixar USD), `test_blender.py` (FBX re-imported in Blender), `test_export_colours.py` (colours, Z-up printing, Draco), `test_local_ai.py` (every export of a real AI model) |
 | 10 | Restart the application | — | `test_restart_recovery.py` (real server process killed with SIGKILL, restarted); `src-tauri/tests/sidecar.rs` (engine restarted after SIGKILL, clean stop) |
 | 11 | Recover project and job history | `workflows/jobs.spec.ts` (history after reload) | `test_restart_recovery.py` (project, photo, finished model and job history after restart; interrupted job resumes the same provider task without sending photos again); `test_generation.py` recovery tests |
 | 12 | Cancel and retry | `workflows/jobs.spec.ts` (cancel a running job, retry it) | `test_generation.py` (cancel while running, unsupported cancel, retry) |

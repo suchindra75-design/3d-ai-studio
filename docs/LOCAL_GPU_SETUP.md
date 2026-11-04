@@ -13,7 +13,12 @@ Studio detected and why each capability is or isn't available. Use
 | Photogrammetry: dense surfaces | COLMAP + **CUDA** | ❌ | ❌ | ✅ | ❌ |
 | Local AI from one photo (TripoSR) | the local AI engine (below) | ⚠️ CPU (untested) | ✅ CPU, ~1.5 min (verified) | ⚠️ CUDA (untested) | ⚠️ CPU (untested) |
 
-Why: COLMAP's dense stereo is CUDA-only. TripoSR is small enough to run on a
+Why: COLMAP's dense stereo is CUDA-only. **Without it, real photo captures
+do not give a usable surface:** on a real 67-photo capture every camera was
+placed correctly, but the surface built from the sparse points was spiky and
+reached into the background (the quality report now warns about this). The
+synthetic test scenes looked fine; real photos do not. A CPU dense step is
+being considered. TripoSR is small enough to run on a
 CPU; it was measured on a 6-core Intel Mac (macOS 26): 82 s for a 12-megapixel
 phone photo at High quality, using at most 3.7 GB of memory (so 8 GB of RAM
 is the minimum). NVIDIA GPUs are used automatically when present

@@ -232,4 +232,14 @@ def test_real_photo_to_model_with_the_installed_engine(
     assert colours.std() > 10  # real colours, not one flat value
     extents = mesh.extents
     assert extents[1] == max(extents)  # upright: the plush toy is taller than wide or deep
+    assert "NORMAL" in data[:4096].decode("latin-1")  # smooth normals for shading
+
+    # Every available export of this real AI model re-opens with its colours.
+    formats = client.get("/api/v1/exports/formats").json()["items"]
+    for fmt in (f for f in formats if f["available"]):
+        export = client.post(
+            f"/api/v1/model-versions/{version['id']}/exports", json={"format": fmt["format"]}
+        ).json()
+        assert export["status"] == "ready", (fmt["format"], export.get("error_message"))
+        assert export["validation"]["coloured"] is (fmt["format"] != "stl"), fmt["format"]
     print(f"\nreal TripoSR run: {seconds:.0f} s, {len(mesh.faces):,} triangles")

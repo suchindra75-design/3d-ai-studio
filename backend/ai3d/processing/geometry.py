@@ -27,6 +27,7 @@ import trimesh
 from PIL import Image
 
 from ai3d.models.enums import QualityMode
+from ai3d.processing.mesh import load_model_scene
 from ai3d_engine.blender import (
     BlenderFailedError,
     BlenderNotFoundError,
@@ -381,7 +382,7 @@ def bake_reduce(
                 cancel=cancel,
                 poll_seconds=2.0,
             )
-            baked = trimesh.load_scene(output, file_type="glb", process=False)
+            baked = load_model_scene(output)
         except (BlenderFailedError, BlenderNotFoundError) as exc:
             reason = exc.message if isinstance(exc, BlenderFailedError) else str(exc)
             log.warning("bake failed", extra={"reason": reason})

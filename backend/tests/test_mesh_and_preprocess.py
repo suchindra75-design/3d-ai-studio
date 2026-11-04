@@ -155,3 +155,37 @@ def test_texture_seams_are_not_counted_as_holes_or_pieces(tmp_path: Path) -> Non
     assert report.metrics["components"] == 1
     assert report.metrics["watertight"] is True
     assert report.status == ReportStatus.PASS
+
+
+def test_stray_triangles_far_from_the_surface_warn(tmp_path: Path) -> None:
+    """Like sparse photogrammetry on real photos: a compact shape plus spikes to far points."""
+    body = trimesh.creation.icosphere(subdivisions=3, radius=0.5)
+    spikes = [
+        trimesh.Trimesh(vertices=[[0, 0, 0.5], [0.05, 0, 0.5], [x, y, 20.0]], faces=[[0, 1, 2]])
+        for x, y in ((1, 0), (-1, 0), (0, 1))
+    ]
+    path = tmp_path / "spiky.glb"
+    path.write_bytes(trimesh.Scene([body, *spikes]).export(file_type="glb"))
+    report = validate_mesh_file(path)
+    assert report.metrics["spread_ratio"] > 4
+    issue = next(i for i in report.issues if i.code == "stray_surface")
+    assert issue.severity == "warning"
+    assert report.status == ReportStatus.WARN
+
+    compact = tmp_path / "compact.glb"
+    compact.write_bytes(trimesh.Scene(body).export(file_type="glb"))
+    assert validate_mesh_file(compact).metrics["spread_ratio"] < 2
+
+
+def test_a_shattered_surface_warns(tmp_path: Path) -> None:
+    rng = np.random.default_rng(1)
+    pieces = [
+        trimesh.creation.icosphere(subdivisions=1, radius=0.05).apply_translation(rng.random(3))
+        for _ in range(40)
+    ]
+    path = tmp_path / "shattered.glb"
+    path.write_bytes(trimesh.Scene(pieces).export(file_type="glb"))
+    report = validate_mesh_file(path)
+    assert report.metrics["components"] == 40
+    assert report.metrics["largest_component_share"] == pytest.approx(1 / 40, rel=0.01)
+    assert any(i.code == "fragmented" and i.severity == "warning" for i in report.issues)

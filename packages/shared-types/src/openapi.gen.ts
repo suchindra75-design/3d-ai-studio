@@ -808,6 +808,8 @@ export interface components {
             /** Available */
             available: boolean;
             format: components["schemas"]["ExportFormat"];
+            /** Keeps Colour */
+            keeps_colour: boolean;
             /** Keeps Texture */
             keeps_texture: boolean;
             /** Label */

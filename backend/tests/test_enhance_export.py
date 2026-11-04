@@ -170,7 +170,8 @@ def test_every_available_format_is_reopened_and_matches(
     validation = export["validation"]
     assert validation["triangles"] == version["stats"]["triangle_count"]
     millimetres = fmt in {"stl", "3mf"}
-    expected = [v * (1000 if millimetres else 1) for v in version["stats"]["bbox_size"]]
+    x, y, z = version["stats"]["bbox_size"]
+    expected = [v * 1000 for v in (x, z, y)] if millimetres else [x, y, z]  # Z up for printing
     assert validation["size"] == pytest.approx(expected, rel=1e-3)
     assert any("scale is unknown" in note for note in export["notes"])
 

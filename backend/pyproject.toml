@@ -25,6 +25,9 @@ dependencies = [
     "lxml>=5.3",
     # Quadric decimation (used by trimesh); light, MIT.
     "fast-simplification>=0.1.9",
+    # Decodes Draco-compressed glTF meshes (KHR_draco_mesh_compression), which some
+    # providers return; without it such files cannot be checked. Apache-2.0.
+    "DracoPy>=2.0",
     "cryptography>=44",
     "scipy>=1.14",
 ]

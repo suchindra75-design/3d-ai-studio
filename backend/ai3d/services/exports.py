@@ -7,7 +7,6 @@ import tempfile
 import uuid
 from pathlib import Path
 
-import trimesh
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,6 +16,7 @@ from ai3d.core.timeutil import utcnow
 from ai3d.models import Asset, Export, ModelVersion
 from ai3d.models.enums import AssetKind, ExportFormat, ExportStatus
 from ai3d.processing import exporters
+from ai3d.processing.mesh import load_model_scene
 from ai3d.schemas.export import ExportFormatRead, ExportRead
 from ai3d.services.models import download_filename, get_model, get_version, version_file
 from ai3d.storage import StorageBackend
@@ -33,6 +33,7 @@ def list_formats() -> list[ExportFormatRead]:
             available=info.available,
             unavailable_reason=info.reason,
             keeps_texture=info.keeps_texture,
+            keeps_colour=info.keeps_colour,
             notes=list(info.notes),
         )
         for info in exporters.formats()
@@ -87,7 +88,7 @@ def create_export(
         source = workdir / "source.glb"
         with storage.open(mesh_asset.storage_key) as src, source.open("wb") as copy:
             shutil.copyfileobj(src, copy)
-        scene = trimesh.load_scene(source, file_type="glb", process=False)
+        scene = load_model_scene(source)
         facts = exporters.scene_facts(scene)
         out = workdir / f"export.{info.extension}"
         file_notes = exporters.write(scene, fmt, out) or []

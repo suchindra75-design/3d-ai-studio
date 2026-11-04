@@ -10,12 +10,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import trimesh
-
 from ai3d.models import GenerationJob, ModelVersion
 from ai3d.models.enums import AssetKind, JobEventType, JobStatus
 from ai3d.processing.geometry import ScaleReference, process
-from ai3d.processing.mesh import validate_mesh_file
+from ai3d.processing.mesh import load_model_scene, validate_mesh_file
 from ai3d.services.models import save_enhanced_version, version_file
 from ai3d.workers.runner import JobContext
 from ai3d_engine.blender import BlenderCancelledError
@@ -48,7 +46,7 @@ def _run(ctx: JobContext, workdir: Path) -> None:
     with ctx.runner.storage.open(key) as src, path.open("wb") as copy:
         shutil.copyfileobj(src, copy)
     try:
-        scene = trimesh.load_scene(path, file_type="glb", process=False)
+        scene = load_model_scene(path)
     except Exception as exc:  # trimesh raises many types for unreadable input
         raise _FailedError("unreadable", "The source version could not be opened.") from exc
 

@@ -23,6 +23,11 @@ log = logging.getLogger(__name__)
 REPORT_VERSION = 2
 # Component analysis builds a face-adjacency graph; skip it for huge meshes.
 COMPONENT_ANALYSIS_MAX_FACES = 3_000_000
+# More pieces than this, with none holding half the surface, is a fragmented surface.
+FRAGMENTED_PIECES = 20
+# A bounding box this many times larger than the central 95% of the surface (measured: a
+# real sparse photogrammetry result 18×, generated and scanned models 1.1–1.7×).
+STRAY_SPREAD = 4.0
 HIGH_TRIANGLE_COUNT = 1_500_000
 
 
@@ -107,10 +112,48 @@ def _uv_out_of_range(meshes: list[trimesh.Trimesh]) -> float | None:
     return round(float(outside.mean()), 4)
 
 
+def _shape_findings(metrics: dict[str, Any]) -> list[MeshIssue]:
+    """Whether the surface is one compact shape, or scattered / shattered."""
+    issues: list[MeshIssue] = []
+    components = metrics["components"]
+    spread = metrics.get("spread_ratio")
+    if spread is not None and spread > STRAY_SPREAD:
+        issues.append(
+            MeshIssue(
+                "stray_surface",
+                "warning",
+                f"Stray triangles reach far from the main surface: the model's box is "
+                f"{spread:.0f}× larger than the region holding 95% of it, so its size and "
+                "framing are misleading and the shape is probably not usable as it is. "
+                "Photogrammetry without a dense step (no NVIDIA GPU) often looks like this "
+                "on real photos.",
+            )
+        )
+    share = metrics.get("largest_component_share")
+    if components is not None and components > FRAGMENTED_PIECES and (share or 0) < 0.5:
+        issues.append(
+            MeshIssue(
+                "fragmented",
+                "warning",
+                f"The surface is broken into {components:,} pieces and the largest holds only "
+                f"{(share or 0):.0%} of it, so the shape is probably not usable as it is. "
+                "Sparse photogrammetry (no dense step) on real photos often looks like this.",
+            )
+        )
+    elif components is not None and components > 1:
+        issues.append(
+            MeshIssue(
+                "multiple_components",
+                "info",
+                f"The model consists of {components} separate pieces.",
+            )
+        )
+    return issues
+
+
 def _findings(metrics: dict[str, Any]) -> list[MeshIssue]:
     issues: list[MeshIssue] = []
     degenerate = metrics["degenerate_triangles"]
-    components = metrics["components"]
     triangles = metrics["triangle_count"]
     if max(metrics["bbox_size"]) <= 0:
         issues.append(MeshIssue("flat", "error", "The model has zero size."))
@@ -126,14 +169,7 @@ def _findings(metrics: dict[str, Any]) -> list[MeshIssue]:
                 "The surface has holes or open edges; 3D printing needs repair first.",
             )
         )
-    if components is not None and components > 1:
-        issues.append(
-            MeshIssue(
-                "multiple_components",
-                "info",
-                f"The model consists of {components} separate pieces.",
-            )
-        )
+    issues.extend(_shape_findings(metrics))
     if triangles > HIGH_TRIANGLE_COUNT:
         issues.append(
             MeshIssue(
@@ -189,9 +225,53 @@ def _findings(metrics: dict[str, Any]) -> list[MeshIssue]:
     return issues
 
 
+def normalise_vertex_colours(scene: trimesh.Scene) -> trimesh.Scene:
+    """Makes glTF COLOR_0 usable everywhere, in place.
+
+    When a primitive has a material *and* COLOR_0, trimesh keeps the colours as a
+    float RGB vertex attribute next to the material. Its own glTF writer then
+    fails ("cannot reshape … into shape (4)"), and nothing sees the colours.
+    Material-only meshes become plain per-vertex colours (the base-colour factor
+    multiplied in, as glTF does); textured meshes keep their texture and get the
+    colours as RGBA.
+    """
+    for geometry in scene.geometry.values():
+        visual = getattr(geometry, "visual", None)
+        attributes = getattr(visual, "vertex_attributes", None)
+        if not isinstance(geometry, trimesh.Trimesh) or visual is None or visual.kind != "texture":
+            continue
+        if not attributes or "color" not in attributes:
+            continue
+        colours = np.asarray(attributes["color"], dtype=np.float64)
+        if colours.ndim != 2 or len(colours) != len(geometry.vertices):
+            attributes.pop("color")
+            continue
+        if colours.max(initial=0.0) > 1.0:  # stored as bytes
+            colours = colours / 255.0
+        if colours.shape[1] == 3:
+            colours = np.hstack([colours, np.ones((len(colours), 1))])
+        material = getattr(visual, "material", None)
+        image = getattr(material, "baseColorTexture", None) or getattr(material, "image", None)
+        has_texture = image is not None and getattr(visual, "uv", None) is not None
+        if has_texture:
+            attributes["color"] = colours.astype(np.float32)
+            continue
+        factor = np.asarray(getattr(material, "baseColorFactor", None) or [255] * 4, float)
+        rgba = np.clip(colours * (factor[:4] / 255.0), 0.0, 1.0)
+        geometry.visual = trimesh.visual.ColorVisuals(
+            geometry, vertex_colors=np.round(rgba * 255.0).astype(np.uint8)
+        )
+    return scene
+
+
+def load_model_scene(path: Path, *, file_type: str = "glb") -> trimesh.Scene:
+    """Loads a model file for processing, with vertex colours normalised."""
+    return normalise_vertex_colours(trimesh.load_scene(path, file_type=file_type, process=False))
+
+
 def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
     try:
-        scene = trimesh.load_scene(path, file_type=file_type, process=False)
+        scene = load_model_scene(path, file_type=file_type)
     except Exception as exc:  # trimesh raises many exception types for bad input
         log.info("mesh could not be loaded", extra={"error": type(exc).__name__})
         return MeshReport(
@@ -230,11 +310,24 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
     shape.merge_vertices(merge_tex=True, merge_norm=True)
 
     components: int | None = None
+    largest_share: float | None = None
     if len(faces) <= COMPONENT_ANALYSIS_MAX_FACES:
         labels = trimesh.graph.connected_component_labels(  # type: ignore[no-untyped-call]
             shape.face_adjacency, node_count=len(shape.faces)
         )
         components = int(labels.max()) + 1 if len(labels) else 0
+        if len(labels):
+            largest_share = round(float(np.bincount(labels).max()) / len(labels), 4)
+
+    # How far the bounding box reaches beyond where most of the surface is: a few stray
+    # triangles (e.g. sparse photogrammetry reaching background points) inflate it.
+    spread: float | None = None
+    if len(faces):
+        centres = vertices[faces].mean(axis=1)
+        core = np.percentile(centres, 97.5, axis=0) - np.percentile(centres, 2.5, axis=0)
+        core_diagonal = float(np.linalg.norm(core))
+        if core_diagonal > 0:
+            spread = round(float(np.linalg.norm(size)) / core_diagonal, 2)
 
     watertight = bool(shape.is_watertight)
     # How many triangles use each edge: 1 = open boundary, 3+ = non-manifold.
@@ -255,6 +348,10 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
         "bbox_size": [round(float(v), 6) for v in size],
         "watertight": watertight,
         "components": components,
+        # Share of the triangles in the biggest piece (1.0 = all in one piece).
+        "largest_component_share": largest_share,
+        # Bounding-box diagonal / diagonal of the central 95% of the surface (≈1 is compact).
+        "spread_ratio": spread,
         "degenerate_triangles": degenerate,
         "file_bytes": path.stat().st_size,
         "boundary_edges": boundary_edges,

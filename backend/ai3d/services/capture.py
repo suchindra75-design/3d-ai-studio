@@ -288,7 +288,11 @@ def _overlap_check(images: list[Image], cached: OverlapResult | None) -> Capture
         )
     isolated = cached.isolated
     groups = [g for g in cached.groups if len(g) > 1]
-    sampled = "" if cached.exhaustive else " (neighbouring photos and a sample were compared)"
+    sampled = (
+        ""
+        if cached.exhaustive
+        else " (each photo was compared with its neighbours and the most similar photos)"
+    )
     if not groups or len(groups[0]) < 3:
         return CaptureCheck(
             code="overlap",
@@ -303,8 +307,8 @@ def _overlap_check(images: list[Image], cached: OverlapResult | None) -> Capture
     problems: list[str] = []
     if isolated:
         problems.append(
-            f"{len(isolated)} photo(s) overlap with no other photo and will probably not be "
-            f"used: {_names(images, isolated)}."
+            f"{len(isolated)} photo(s) matched no other photo in this quick check and may not "
+            f"be used: {_names(images, isolated)}."
         )
     if len(groups) > 1:
         problems.append(

@@ -142,7 +142,8 @@ def main(request_path: str, result_path: str) -> None:
     with torch.no_grad():
         mesh = model.extract_mesh(scene_codes, True, resolution=int(request["resolution"]))[0]
     mesh = to_gltf(mesh)
-    mesh.export(request["output"], file_type="glb")
+    # With smooth normals viewers shade the surface smoothly instead of faceted.
+    mesh.export(request["output"], file_type="glb", include_normals=True)
     timings["meshing"] = time.perf_counter() - t
 
     result = {

@@ -1,4 +1,4 @@
-# Capability audit (2026-11-04, updated after Phase 8)
+# Capability audit (2026-11-04, updated after Phases 8 and 9)
 
 An audit of the repository after phases 0–7 (commit `f8ec4af`), against the
 product vision in [PRODUCT_SPECIFICATION.md](PRODUCT_SPECIFICATION.md).
@@ -12,7 +12,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | # | Area | Status | One-line reason |
 |---|---|---|---|
 | 1 | Single-image → 3D | 🟡 | Local path verified on a real photo (Phase 8); Tripo/Meshy still never called for real |
-| 2 | Multi-image → 3D | 🟡 | COLMAP photogrammetry works end to end, but only on synthetic renders; dense CUDA path never run |
+| 2 | Multi-image → 3D | 🟠 | Real 67-photo capture (Phase 9): every camera placed, but the CPU surface (sparse, no dense step) is not usable; dense CUDA path never run |
 | 3 | Tripo & Meshy | 🟡 | Full adapters tested against fakes built from the API docs; no paid key yet |
 | 4 | Local AI generation engine | ✅ | TripoSR (Phase 8), verified end to end on a real photo on a CPU; GPU and other OSes untested |
 | 5 | Hybrid local/cloud | 🟠 | Automatic now keeps single photos local when the engine is installed; no offered fallback, no resource checks |
@@ -21,9 +21,9 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 8 | Geometry refinement & retopology | 🟠 | Clean-up, decimation and baking work; retopology, smoothing and remeshing missing |
 | 9 | Texture & material editing | 🟠 | Colour/roughness/metalness/opacity only; no texture replace, UV view or map baking |
 | 10 | AI model enhancement | ❌ | "Enhance" is geometric processing; no AI refinement or texture enhancement |
-| 11 | Model quality analysis | 🟡 | Thorough reports, tested on mock spheres and synthetic scans, never on real AI output |
+| 11 | Model quality analysis | ✅ | Run on real AI output, a real photogrammetry scan and Draco files (Phase 9); now flags stray and shattered surfaces |
 | 12 | Version management | ✅ | Immutable versions with provenance, save edits, switch current; tested end to end |
-| 13 | Export | ✅ | Seven formats, each re-opened and compared; tested end to end (FBX with Blender) |
+| 13 | Export | ✅ | Seven formats re-opened and compared, now including per-vertex colours; STL/3MF Z-up; verified on real AI output (Phase 9) |
 | 14 | Project management | ✅ | Create/edit/search/archive/delete, tested end to end; importing existing models is missing |
 | 15 | Desktop app | 🟡 | Private engine, token, Save dialog, bundled release build; verified on macOS Intel only |
 | 16 | Performance & resources | 🟠 | Job concurrency, timeouts, cancel and recovery; no RAM/disk checks, no large-model handling |

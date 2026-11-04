@@ -487,6 +487,10 @@
           "format": {
             "$ref": "#/components/schemas/ExportFormat"
           },
+          "keeps_colour": {
+            "title": "Keeps Colour",
+            "type": "boolean"
+          },
           "keeps_texture": {
             "title": "Keeps Texture",
             "type": "boolean"
@@ -520,6 +524,7 @@
           "available",
           "unavailable_reason",
           "keeps_texture",
+          "keeps_colour",
           "notes"
         ],
         "title": "ExportFormatRead",
