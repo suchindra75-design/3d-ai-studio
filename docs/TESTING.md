@@ -62,7 +62,7 @@ Each test uses its own prefix in the `ai3d-test` bucket.
 |---|---|---|---|
 | 1 | Create a project | `e2e/projects.spec.ts` · project lifecycle; `e2e/desktop-shell/token.spec.ts` | `test_projects.py` |
 | 2 | Upload a photo | `projects.spec.ts` (valid, unsupported, duplicate); `token.spec.ts` (thumbnail through the token) | `test_images.py`, `test_image_analysis.py` |
-| 3 | Start a generation | `e2e/generation.spec.ts` · explicit consent; waiting for permission; `e2e/local-ai.spec.ts` (local, no consent) | `test_generation.py` (consent, idempotency, routing), `test_local_ai.py` (local routing) |
+| 3 | Start a generation | `e2e/generation.spec.ts` · explicit consent; waiting for permission; `e2e/local-ai.spec.ts` (local, no consent) | `test_generation.py` (consent, idempotency, routing), `test_local_ai.py` (local routing, offered fallback), `test_resources.py` (memory and disk checks), `job-list.test.tsx` (fallback buttons and consent) |
 | 4 | Monitor progress | `generation.spec.ts` (live status); `workflows/jobs.spec.ts` (running → result) | `test_generation.py::test_event_stream` (Server-Sent Events), `job-list.test.tsx` |
 | 5 | Receive the model | `generation.spec.ts` (model card, preview, GLB bytes); `local-ai.spec.ts` (**real AI model from a real photo**) | `test_generation.py`, `test_cloud_providers.py` (Tripo/Meshy fakes), `test_local_ai.py` (real TripoSR run) |
 | 6 | Open the 3D viewer | `e2e/workspace.spec.ts` (real WebGL canvas); `token.spec.ts` | `packages/viewer` unit tests |

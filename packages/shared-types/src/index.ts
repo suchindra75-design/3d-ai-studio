@@ -27,6 +27,7 @@ export type {
   ImageList,
   ImageRead,
   InputMode,
+  JobAlternative,
   JobCostRead,
   JobEventList,
   JobEventRead,

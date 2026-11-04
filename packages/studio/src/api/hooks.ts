@@ -314,11 +314,19 @@ export function useRetryJob(projectId: string) {
       jobId,
       consent,
       idempotencyKey,
+      provider,
     }: {
       jobId: string;
       consent: boolean;
       idempotencyKey: string;
-    }) => api.jobs.retry(jobId, { cloud_upload_consent: consent }, idempotencyKey),
+      /** Another engine the failed job offered (``JobRead.alternatives``). */
+      provider?: string;
+    }) =>
+      api.jobs.retry(
+        jobId,
+        provider ? { cloud_upload_consent: consent, provider } : { cloud_upload_consent: consent },
+        idempotencyKey,
+      ),
   );
 }
 

@@ -7,14 +7,17 @@ written; nothing is uploaded. An interrupted run is simply repeated.
 import logging
 import shutil
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from ai3d.models import GenerationJob, ModelVersion
 from ai3d.models.enums import AssetKind, JobEventType, JobStatus
-from ai3d.processing.geometry import ScaleReference, process
+from ai3d.processing.geometry import HeavyTurn, ScaleReference, process
 from ai3d.processing.mesh import load_model_scene, validate_mesh_file
 from ai3d.services.models import save_enhanced_version, version_file
+from ai3d.workers import heavy
 from ai3d.workers.runner import JobContext
 from ai3d_engine.blender import BlenderCancelledError
 
@@ -37,6 +40,19 @@ def _load(ctx: JobContext) -> tuple[GenerationJob, ModelVersion, str]:
         db.expunge(job)
         db.expunge(version)
         return job, version, asset.storage_key
+
+
+def _heavy_turn(ctx: JobContext) -> HeavyTurn:
+    @contextmanager
+    def turn() -> Iterator[None]:
+        if not heavy.wait_turn(ctx, "Waiting for another local job to finish before baking."):
+            raise _CancelledError
+        try:
+            yield
+        finally:
+            heavy.release()
+
+    return turn
 
 
 def _run(ctx: JobContext, workdir: Path) -> None:
@@ -64,6 +80,7 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             else None,
             workdir=workdir,
             cancel=ctx.heartbeat,  # polled while Blender runs (texture baking)
+            heavy_turn=_heavy_turn(ctx),
         )
     except ValueError as exc:
         raise _FailedError("invalid_input", str(exc)) from exc

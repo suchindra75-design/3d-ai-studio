@@ -183,6 +183,92 @@ def test_engine_failures_and_cancellation_end_the_job_cleanly(
     worker.heavy.release()
 
 
+# -- falling back to another engine -------------------------------------------------
+
+
+def _failed_job(
+    client: TestClient, runner: JobRunner, project_id: str, image_id: str, **body: Any
+) -> dict[str, Any]:
+    response = client.post(
+        f"/api/v1/projects/{project_id}/generations",
+        json={"inputs": [{"image_id": image_id}], **body},
+    )
+    assert response.status_code == 201, response.text
+    runner.run_until_idle()
+    job = client.get(f"/api/v1/jobs/{response.json()['id']}").json()
+    assert job["status"] == "failed", job
+    return dict(job)
+
+
+def test_a_failed_local_job_offers_the_cloud_with_consent(
+    client: TestClient, runner: JobRunner, make_image_project: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ai3d.providers.local_ai.check_local_ai", lambda: None)
+    monkeypatch.setattr(
+        worker, "generate", _stand_in([], fail=LocalAIFailedError("Out of memory.", []))
+    )
+    project, ids = make_image_project(1, allow_cloud_upload=True)
+    job = _failed_job(client, runner, project["id"], ids[0], processing_mode="auto")
+    assert job["provider"]["key"] == LOCAL
+    (offer,) = job["alternatives"]
+    assert offer["provider"]["key"] == "mock"
+    assert offer["provider"]["uploads_images"] is True
+    assert "you are asked first" in offer["reason"]
+
+    # Choosing it without consent uploads nothing: the new job waits for permission.
+    waiting = client.post(f"/api/v1/jobs/{job['id']}/retry", json={"provider": "mock"}).json()
+    assert waiting["status"] == "waiting_for_consent"
+    assert waiting["provider"]["key"] == "mock"
+    assert waiting["parent_job_id"] == job["id"]
+    # With consent it runs in the cloud (the mock stands for a cloud provider in tests).
+    retry = client.post(
+        f"/api/v1/jobs/{job['id']}/retry", json={"provider": "mock", "cloud_upload_consent": True}
+    ).json()
+    runner.run_until_idle()
+    assert client.get(f"/api/v1/jobs/{retry['id']}").json()["status"] == "succeeded"
+
+
+def test_local_mode_is_never_offered_the_cloud(
+    client: TestClient, runner: JobRunner, make_image_project: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("ai3d.providers.local_ai.check_local_ai", lambda: None)
+    monkeypatch.setattr(
+        worker, "generate", _stand_in([], fail=LocalAIFailedError("No object.", []))
+    )
+    project, ids = make_image_project(1, allow_cloud_upload=True)
+    job = _failed_job(client, runner, project["id"], ids[0], processing_mode="local")
+    assert job["alternatives"] == []
+    refused = client.post(
+        f"/api/v1/jobs/{job['id']}/retry", json={"provider": "mock", "cloud_upload_consent": True}
+    )
+    assert refused.status_code == 422
+    assert refused.json()["error"]["details"]["alternatives"] == []
+
+
+def test_a_failed_cloud_job_offers_the_local_engine(
+    client: TestClient,
+    runner: JobRunner,
+    make_image_project: Any,
+    installed: list[dict[str, Any]],
+) -> None:
+    from ai3d.providers.mock import MockProvider, MockScenario  # noqa: PLC0415
+
+    MockProvider.scenario = MockScenario(fail_on="poll")
+    project, ids = make_image_project(1, allow_cloud_upload=True)
+    job = _failed_job(
+        client, runner, project["id"], ids[0], provider="mock", cloud_upload_consent=True
+    )
+    (offer,) = job["alternatives"]
+    assert offer["provider"]["key"] == LOCAL
+    assert "nothing is uploaded" in offer["reason"]
+    retry = client.post(f"/api/v1/jobs/{job['id']}/retry", json={"provider": LOCAL}).json()
+    assert retry["status"] == "queued"  # local: no consent step
+    assert retry["processing_mode"] == "local"
+    runner.run_until_idle()
+    assert client.get(f"/api/v1/jobs/{retry['id']}").json()["status"] == "succeeded"
+    assert len(installed) == 1  # the local engine ran once
+
+
 # -- the real engine --------------------------------------------------------------
 
 REAL_ENGINE = os.environ.get("AI3D_LOCAL_AI_DIR")

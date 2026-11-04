@@ -1,5 +1,7 @@
 """Geometry/texture processing operations and the version-2 quality report."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -248,3 +250,29 @@ def test_report_texture_facts(tmp_path: Path) -> None:
     closed = _report(tmp_path, trimesh.creation.box())
     assert closed["metrics"]["volume"] == pytest.approx(1.0)
     assert closed["metrics"]["boundary_edges"] == 0
+
+
+def test_only_blender_baking_waits_for_the_heavy_work_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+
+    @contextmanager
+    def turn() -> Iterator[None]:
+        order.append("wait")
+        yield
+        order.append("release")
+
+    def fake_bake(scene: trimesh.Scene, *_args: object, **_kw: object) -> object:
+        order.append("bake")
+        skipped = geometry.Step("decimate", "Reduce", "skipped", "fake")
+        return None, skipped, geometry.Step("baking", "Texture baking", "skipped", "fake")
+
+    _small_professional(monkeypatch, 4)
+    monkeypatch.setattr(geometry, "check_blender", lambda: None)
+    monkeypatch.setattr(geometry, "bake_reduce", fake_bake)
+    process(_scene(_textured_box()), QualityMode.PROFESSIONAL, heavy_turn=turn)
+    assert order == ["wait", "bake", "release"]
+    order.clear()
+    process(_scene(trimesh.creation.box()), QualityMode.PROFESSIONAL, heavy_turn=turn)
+    assert order == []  # nothing to bake: no waiting

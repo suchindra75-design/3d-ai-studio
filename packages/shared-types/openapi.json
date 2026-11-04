@@ -1184,6 +1184,24 @@
         "title": "InputMode",
         "type": "string"
       },
+      "JobAlternative": {
+        "description": "Another engine that can do the same job, offered when a job failed.",
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/ProviderSummary"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "reason"
+        ],
+        "title": "JobAlternative",
+        "type": "object"
+      },
       "JobCostRead": {
         "properties": {
           "credits": {
@@ -1390,6 +1408,13 @@
       },
       "JobRead": {
         "properties": {
+          "alternatives": {
+            "items": {
+              "$ref": "#/components/schemas/JobAlternative"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
           "attempt": {
             "title": "Attempt",
             "type": "integer"
@@ -1658,6 +1683,7 @@
           "result_model_id",
           "can_cancel",
           "can_retry",
+          "alternatives",
           "created_at",
           "updated_at",
           "queued_at",
@@ -2926,6 +2952,18 @@
             "default": false,
             "title": "Cloud Upload Consent",
             "type": "boolean"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
           }
         },
         "title": "RetryRequest",

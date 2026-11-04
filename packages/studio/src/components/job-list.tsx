@@ -1,9 +1,9 @@
 'use client';
 
-import type { JobRead } from '@ai3d/shared-types';
+import type { JobRead, ProviderSummary } from '@ai3d/shared-types';
 import { Badge, Button, ConfirmDialog, Progress } from '@ai3d/ui';
 import { formatRelativeTime, pluralize } from '@ai3d/utilities';
-import { ChevronDown, ChevronRight, RotateCw, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Cloud, Cpu, RotateCw, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import {
@@ -113,16 +113,26 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
   const retry = useRetryJob(projectId);
   const [expanded, setExpanded] = useState(false);
   const [confirmRetry, setConfirmRetry] = useState(false);
+  // Another engine the failed job offered, waiting for the person to confirm.
+  const [switchTo, setSwitchTo] = useState<ProviderSummary | null>(null);
+  const [confirmSwitch, setConfirmSwitch] = useState(false);
   const retryKey = useRef(newIdempotencyKey());
   const name =
     job.kind === 'enhance'
       ? 'Enhance (on this computer)'
       : (job.provider?.display_name ?? 'Unknown provider');
   const uploads = job.provider?.uploads_images ?? false;
+  const photos = pluralize(job.inputs.length, 'photo');
 
-  function runRetry() {
+  function runRetry(provider?: ProviderSummary) {
     retry.mutate(
-      { jobId: job.id, consent: uploads, idempotencyKey: retryKey.current },
+      {
+        jobId: job.id,
+        // Confirming the dialog is the consent: it names the service and what is sent.
+        consent: provider ? provider.uploads_images : uploads,
+        idempotencyKey: retryKey.current,
+        provider: provider?.key,
+      },
       { onSuccess: () => (retryKey.current = newIdempotencyKey()) },
     );
   }
@@ -164,6 +174,38 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
         <p role="alert" className="text-xs leading-relaxed text-danger">
           {job.error.message}
         </p>
+      ) : null}
+
+      {job.status === 'failed' && job.alternatives.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-md bg-surface-raised p-3 text-xs leading-relaxed">
+          <p className="font-medium">Try another engine</p>
+          <ul className="flex flex-col gap-2">
+            {job.alternatives.map((alternative) => (
+              <li
+                key={alternative.provider.key}
+                className="flex flex-wrap items-center justify-between gap-2"
+              >
+                <span className="text-muted-foreground">{alternative.reason}</span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={retry.isPending}
+                  onClick={() => {
+                    setSwitchTo(alternative.provider);
+                    setConfirmSwitch(true);
+                  }}
+                >
+                  {alternative.provider.uploads_images ? (
+                    <Cloud aria-hidden />
+                  ) : (
+                    <Cpu aria-hidden />
+                  )}{' '}
+                  Use {alternative.provider.display_name}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-subtle-foreground">
@@ -214,11 +256,27 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
         title="Run this generation again?"
         description={
           uploads
-            ? `This sends ${pluralize(job.inputs.length, 'photo')} to ${name} again as a new job, which ${name} may charge for.`
+            ? `This sends ${photos} to ${name} again as a new job, which ${name} may charge for.`
             : 'This starts a new job with the same photos and settings.'
         }
         confirmLabel="Run again"
-        onConfirm={runRetry}
+        onConfirm={() => runRetry()}
+      />
+      <ConfirmDialog
+        open={confirmSwitch}
+        onOpenChange={setConfirmSwitch}
+        title={
+          switchTo?.uploads_images
+            ? `Send ${photos} to ${switchTo.display_name}?`
+            : `Run on this computer with ${switchTo?.display_name ?? ''}?`
+        }
+        description={
+          switchTo?.uploads_images
+            ? `${switchTo.display_name} is a cloud service: this uploads ${photos} to it as a new job, which it may charge for. Nothing is sent until you confirm.`
+            : 'This starts a new job with the same photos on this computer. Nothing is uploaded or charged.'
+        }
+        confirmLabel={switchTo?.uploads_images ? 'Send and start' : 'Start'}
+        onConfirm={() => (switchTo ? runRetry(switchTo) : undefined)}
       />
     </li>
   );

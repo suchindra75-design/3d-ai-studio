@@ -1,7 +1,8 @@
 """One heavy local job at a time.
 
-COLMAP and the local AI engine each use every CPU core (and most of the
-memory); two at once would only slow both down and risk running out of RAM.
+Photogrammetry (COLMAP, OpenMVS), the local AI engine and Blender texture
+baking each use every CPU core (and a lot of memory); two at once would only
+slow both down and risk running out of RAM.
 """
 
 import threading

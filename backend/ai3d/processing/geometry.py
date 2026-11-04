@@ -18,6 +18,8 @@ original order, and the result is applied back to the original faces.
 
 import logging
 import tempfile
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -39,6 +41,8 @@ from ai3d_engine.blender import (
 log = logging.getLogger(__name__)
 
 StepStatus = Literal["applied", "skipped", "unavailable"]
+# Entered around Blender runs: waits for the computer's heavy-work slot.
+HeavyTurn = Callable[[], AbstractContextManager[None]]
 Axis = Literal["x", "y", "z", "longest"]
 
 
@@ -561,6 +565,7 @@ def _reduce_steps(
     *,
     workdir: Path | None,
     cancel: CancelCheck | None,
+    heavy_turn: HeavyTurn | None,
 ) -> None:
     """Triangle budget, retopology and baking steps (Professional)."""
     if profile.decimate_to is None:
@@ -572,9 +577,10 @@ def _reduce_steps(
     blender_problem = check_blender() if profile.report_tools else "not used"
     if over and textured and blender_problem is None:
         size = bake_texture_size(scene, profile.max_texture)
-        baked, reduce_step, bake_step = bake_reduce(
-            scene, target, size, workdir=workdir, cancel=cancel
-        )
+        with (heavy_turn or nullcontext)():
+            baked, reduce_step, bake_step = bake_reduce(
+                scene, target, size, workdir=workdir, cancel=cancel
+            )
         if baked is not None:
             result.scene = baked
         result.steps.append(reduce_step)
@@ -613,9 +619,13 @@ def process(
     scale: ScaleReference | None = None,
     workdir: Path | None = None,
     cancel: CancelCheck | None = None,
+    heavy_turn: HeavyTurn | None = None,
 ) -> ProcessingResult:
     """Run the profile's steps. ``result.scene`` is the processed scene: usually
-    ``scene`` changed in place, but a new scene when the model was baked."""
+    ``scene`` changed in place, but a new scene when the model was baked.
+
+    ``heavy_turn`` is entered around Blender (it uses every core for minutes),
+    so it waits for other heavy local jobs; the quick steps never wait."""
     profile = PROFILES[quality]
     result = ProcessingResult(scene=scene)
     if remove_ground_plane:
@@ -627,7 +637,7 @@ def process(
     if profile.fill_holes:
         result.steps.append(fill_holes(scene))
     result.steps.append(limit_textures(scene, profile.max_texture))
-    _reduce_steps(result, profile, workdir=workdir, cancel=cancel)
+    _reduce_steps(result, profile, workdir=workdir, cancel=cancel, heavy_turn=heavy_turn)
     if scale is not None:
         step, result.scale = apply_scale(result.scene, scale)
         result.steps.append(step)

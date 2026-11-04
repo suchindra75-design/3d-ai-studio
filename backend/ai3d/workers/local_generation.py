@@ -17,6 +17,7 @@ from ai3d.models.enums import JobEventType, JobStatus
 from ai3d.processing.mesh import validate_mesh_file
 from ai3d.providers.base import ProviderResult
 from ai3d.providers.local_ai import LocalAIProvider
+from ai3d.services import resources
 from ai3d.services.models import save_generated_model
 from ai3d.workers import heavy
 from ai3d.workers.generation import JobFailedError, _load, _prepare_inputs
@@ -96,6 +97,13 @@ def _run(ctx: JobContext, workdir: Path) -> None:
     (photo,) = _prepare_inputs(ctx, job, LocalAIProvider, workdir)
     if not heavy.wait_turn(ctx, "Waiting for another local job on this computer to finish."):
         raise _CancelledError
+    # The plan checked the disk; it may have filled up while the job waited.
+    disk = resources.not_enough_disk(
+        resources.LOCAL_AI, resources.machine(ctx.settings.data_dir), LocalAIProvider.display_name
+    )
+    if disk:
+        heavy.release()
+        raise JobFailedError("not_enough_disk", disk)
     try:
         settings = dict(job.params.get("provider_settings") or {})
         deadline = monotonic() + ctx.settings.local_ai_timeout_seconds

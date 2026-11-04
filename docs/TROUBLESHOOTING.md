@@ -111,6 +111,17 @@ looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/Applications/COLMAP.app` and
   minutes on a 6-core CPU.
 - The engine's log for a failed job is in the job's error details
   (`log_tail`).
+- *"needs a computer with at least 8.0 GB of memory"*: local AI is not
+  offered on this computer. Automatic mode uses a cloud service instead (it
+  asks first); Local mode cannot run single photos.
+- *"needs about … of free disk space"*: free up space on the disk that holds
+  the data folder. Photogrammetry needs about three times the size of the
+  photos, at least 2 GB.
+- *"Waiting for another local job on this computer to finish"*: only one heavy
+  job (photogrammetry, local AI or Blender baking) runs at a time; it starts
+  by itself.
+- A failed generation may show **Try another engine**. A cloud choice says
+  what is sent and to whom, and nothing is uploaded until you confirm.
 
 ## S3 storage errors
 

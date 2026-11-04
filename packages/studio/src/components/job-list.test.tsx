@@ -34,6 +34,7 @@ function job(overrides: Partial<JobRead> = {}): JobRead {
     result_model_id: null,
     can_cancel: true,
     can_retry: false,
+    alternatives: [],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     queued_at: null,
@@ -103,4 +104,96 @@ it('shows the error and confirms before retrying a cloud job', async () => {
     'j1',
     { cloud_upload_consent: true },
   ]);
+});
+
+const failed = {
+  status: 'failed',
+  can_cancel: false,
+  can_retry: true,
+  error: { code: 'out_of_memory', message: 'Ran out of memory.', details: {}, request_id: null },
+  cost: null,
+} as const;
+
+it('offers the cloud after a local failure and asks before sending anything', async () => {
+  const api = fakeApi({ jobs: { retry: vi.fn().mockResolvedValue(job()) } });
+  const local = {
+    key: 'local-triposr',
+    display_name: 'Local AI (TripoSR)',
+    kind: 'local',
+    uploads_images: false,
+  } as const;
+  renderWithStudio(
+    <JobList
+      jobs={[
+        job({
+          ...failed,
+          provider: local,
+          alternatives: [
+            {
+              provider: {
+                key: 'tripo',
+                display_name: 'Tripo AI',
+                kind: 'cloud_api',
+                uploads_images: true,
+              },
+              reason:
+                'Sends 1 photo to Tripo AI; you are asked first, and it may charge for the job.',
+            },
+          ],
+        }),
+      ]}
+      projectId="p1"
+    />,
+    api,
+  );
+  expect(screen.getByText(/you are asked first/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Use Tripo AI' }));
+  expect(screen.getByText('Send 1 photo to Tripo AI?')).toBeInTheDocument();
+  expect(screen.getByText(/Nothing is sent until you confirm/)).toBeInTheDocument();
+  expect(api.jobs.retry).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: 'Send and start' }));
+  await waitFor(() => expect(api.jobs.retry).toHaveBeenCalled());
+  expect(vi.mocked(api.jobs.retry).mock.calls[0]!.slice(0, 2)).toEqual([
+    'j1',
+    { cloud_upload_consent: true, provider: 'tripo' },
+  ]);
+});
+
+it('offers the local engine after a cloud failure without upload consent', async () => {
+  const api = fakeApi({ jobs: { retry: vi.fn().mockResolvedValue(job()) } });
+  renderWithStudio(
+    <JobList
+      jobs={[
+        job({
+          ...failed,
+          alternatives: [
+            {
+              provider: {
+                key: 'local-triposr',
+                display_name: 'Local AI (TripoSR)',
+                kind: 'local',
+                uploads_images: false,
+              },
+              reason: 'Runs on this computer; nothing is uploaded or charged.',
+            },
+          ],
+        }),
+      ]}
+      projectId="p1"
+    />,
+    api,
+  );
+  await userEvent.click(screen.getByRole('button', { name: 'Use Local AI (TripoSR)' }));
+  expect(screen.getByText('Run on this computer with Local AI (TripoSR)?')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+  await waitFor(() => expect(api.jobs.retry).toHaveBeenCalled());
+  expect(vi.mocked(api.jobs.retry).mock.calls[0]!.slice(0, 2)).toEqual([
+    'j1',
+    { cloud_upload_consent: false, provider: 'local-triposr' },
+  ]);
+});
+
+it('offers nothing else when no other engine fits', () => {
+  renderWithStudio(<JobList jobs={[job({ ...failed })]} projectId="p1" />, fakeApi());
+  expect(screen.queryByText('Try another engine')).not.toBeInTheDocument();
 });

@@ -1041,6 +1041,15 @@ export interface components {
          * @enum {string}
          */
         InputMode: "single_image" | "multi_view";
+        /**
+         * JobAlternative
+         * @description Another engine that can do the same job, offered when a job failed.
+         */
+        JobAlternative: {
+            provider: components["schemas"]["ProviderSummary"];
+            /** Reason */
+            reason: string;
+        };
         /** JobCostRead */
         JobCostRead: {
             /** Credits */
@@ -1110,6 +1119,8 @@ export interface components {
         };
         /** JobRead */
         JobRead: {
+            /** Alternatives */
+            alternatives: components["schemas"]["JobAlternative"][];
             /** Attempt */
             attempt: number;
             /** Can Cancel */
@@ -1632,6 +1643,8 @@ export interface components {
              * @default false
              */
             cloud_upload_consent?: boolean;
+            /** Provider */
+            provider?: string | null;
         };
         /**
          * ScaleReferenceIn
@@ -1747,6 +1760,7 @@ export type ImageKind = components['schemas']['ImageKind'];
 export type ImageList = components['schemas']['ImageList'];
 export type ImageRead = components['schemas']['ImageRead'];
 export type InputMode = components['schemas']['InputMode'];
+export type JobAlternative = components['schemas']['JobAlternative'];
 export type JobCostRead = components['schemas']['JobCostRead'];
 export type JobEventList = components['schemas']['JobEventList'];
 export type JobEventRead = components['schemas']['JobEventRead'];

@@ -142,6 +142,7 @@ def retry_job(
         job_id,
         cloud_upload_consent=body.cloud_upload_consent,
         idempotency_key=idempotency_key,
+        provider=body.provider,
     )
     if not created:
         response.status_code = status.HTTP_200_OK

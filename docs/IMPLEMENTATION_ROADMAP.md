@@ -511,6 +511,54 @@ Checks run on 2026-11-04:
 - COLMAP's CUDA dense path.
 - RefineMesh, which is not used.
 
+## Phase 10 — Hybrid processing and resources ✅ (cloud side tested only with the mock provider)
+
+**Resource checks,** measured on this machine (6-core Intel Mac):
+- Local AI (TripoSR) peaks at 3.7 GB of memory. Photogrammetry with OpenMVS
+  peaked at 1.9 GB (texturing). A 540 MB, 67-photo capture used about 1 GB of
+  workspace, so the check asks for 3× the photos (at least 2 GB).
+- **At planning time** (D38):
+  - Too little free disk blocks the job (`not_enough_disk`).
+  - A computer with under 8 GB of installed memory is too small for local AI
+    (`machine_too_small`): Local mode explains why; Automatic mode uses the
+    cloud instead, with the usual consent, and says so.
+  - Too little *free* memory only warns: closing programs is enough.
+- **Just before running:** the disk is checked again once the job has its
+  turn, so a disk that filled up while it waited fails cleanly, before the
+  engine starts.
+
+**One heavy job at a time** now covers Blender texture baking as well as
+COLMAP/OpenMVS and local AI. Only the Blender part of Enhance waits; the
+quick steps never do (D30).
+
+**Offered fallback** (D39). A failed generation lists other engines that could
+run it, with a reason for each:
+- A failed local job offers the configured cloud services. Choosing one shows
+  what is uploaded and to whom, and nothing is sent until the person confirms.
+  A local-only project still asks for its own permission.
+- A failed cloud job offers the local engines ("nothing is uploaded or
+  charged").
+- A job in **Local** mode is never offered the cloud.
+- Nothing switches by itself: the offer is a new job (a retry with another
+  provider), and the backend rejects a provider that was not offered.
+
+Checks run on 2026-11-04:
+- **Python:** 311 tests passed, plus the COLMAP tests run separately with
+  `AI3D_COLMAP_PATH` set (11 passed). New tests are in `test_resources.py`,
+  `test_local_ai.py` (fallback) and `test_processing.py` (baking waits).
+- **Frontend:** 90 unit tests, including the fallback buttons in
+  `job-list.test.tsx`.
+- **Browser tests:** web 19 + photogrammetry 1 (with COLMAP), desktop UI 2,
+  job workflows 2.
+- **Rust:** 13 tests.
+- **Static checks:** ruff, mypy, ESLint, Prettier, tsc and builds.
+
+**Not verified:**
+- The cloud side of the fallback against real Tripo/Meshy (no key yet).
+- The memory threshold on a real 8 GB machine; the numbers come from one
+  computer.
+- Model-size limits for the viewer (moved to Phase 12, large models).
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
@@ -537,8 +585,8 @@ working and adds tests that use real tools and real data.
 - Draco decoding on the backend.
 - A Tripo/Meshy smoke test as soon as a key is available.
 
-**Phase 10 — Hybrid processing and resources.**
-- Resource checks before heavy local jobs (RAM, disk, model size).
+**Phase 10 — Hybrid processing and resources ✅ (see above).**
+- Resource checks before heavy local jobs (RAM and disk; model size moved to Phase 12).
 - A single slot for heavy local work.
 - An offered, consent-gated fallback between local and cloud when a route
   fails or the machine is too small.

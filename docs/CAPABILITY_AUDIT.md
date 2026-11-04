@@ -1,4 +1,4 @@
-# Capability audit (2026-11-04, updated after Phases 8, 9 and 9b)
+# Capability audit (2026-11-04, updated after Phases 8, 9, 9b and 10)
 
 An audit of the repository after phases 0–7 (commit `f8ec4af`), against the
 product vision in [PRODUCT_SPECIFICATION.md](PRODUCT_SPECIFICATION.md).
@@ -15,7 +15,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 2 | Multi-image → 3D | ✅ | With OpenMVS (Phase 9b): a real 67-photo capture became a detailed, upright, textured model on the CPU in ~7 min; without OpenMVS the sparse surface is coarse; CUDA path never run |
 | 3 | Tripo & Meshy | 🟡 | Full adapters tested against fakes built from the API docs; no paid key yet |
 | 4 | Local AI generation engine | ✅ | TripoSR (Phase 8), verified end to end on a real photo on a CPU; GPU and other OSes untested |
-| 5 | Hybrid local/cloud | 🟠 | Automatic now keeps single photos local when the engine is installed; no offered fallback, no resource checks |
+| 5 | Hybrid local/cloud | 🟡 | Automatic keeps photos local when it can and checks the machine first; failed jobs offer the other route with consent (Phase 10). Cloud side tested only with the mock provider |
 | 6 | Professional viewer | 🟠 | Solid basics; no measuring, lighting, normals/UV views, clipping or large-model handling |
 | 7 | 3D editing | 🟠 | Object transforms and material values with undo; no part or mesh-level edits |
 | 8 | Geometry refinement & retopology | 🟠 | Clean-up, decimation and baking work; retopology, smoothing and remeshing missing |
@@ -26,7 +26,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 13 | Export | ✅ | Seven formats re-opened and compared, now including per-vertex colours; STL/3MF Z-up; verified on real AI output (Phase 9) |
 | 14 | Project management | ✅ | Create/edit/search/archive/delete, tested end to end; importing existing models is missing |
 | 15 | Desktop app | 🟡 | Private engine, token, Save dialog, bundled release build; verified on macOS Intel only |
-| 16 | Performance & resources | 🟠 | Job concurrency, timeouts, cancel and recovery; no RAM/disk checks, no large-model handling |
+| 16 | Performance & resources | 🟠 | Memory and disk checks and one heavy job at a time (Phase 10); no large-model handling in the viewer |
 
 ## Details
 
@@ -61,20 +61,22 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 - **Missing:** a real run, which needs a paid key. Draco-compressed output
   would probably be rejected, because trimesh cannot validate glTF Draco.
 
-### 4. Local AI generation engine — ❌
-- `JobKind.IMAGE_TO_3D` has no local provider. Hardware detection reports
-  whether a GPU could run one; that is all.
+### 4. Local AI generation engine — ✅
+- TripoSR (Phase 8), installed on request and run in its own environment;
+  verified on a real photo on a CPU. GPU and other systems are untested.
 
-### 5. Hybrid local/cloud processing — 🟠
+### 5. Hybrid local/cloud processing — 🟡
 - **Have:**
   - Automatic / Local / Cloud modes; a project-level cloud permission and
     per-job consent.
   - Automatic picks local photogrammetry for real capture sets.
   - A local-only project can never reach a cloud provider (tested).
-- **Missing:**
-  - With no local AI, Automatic always means cloud for one to four photos.
-  - No offered fallback when one route fails; the user retries by hand.
-  - Routing ignores the machine's capacity, beyond reporting it.
+- **Added in Phase 10:**
+  - Routing checks memory and disk: a too-small computer is never sent to
+    local AI, and Automatic uses the cloud instead (with consent).
+  - A failed job offers the other route; a cloud choice still needs consent,
+    and Local mode is never offered the cloud.
+- **Not verified:** the cloud side against real Tripo/Meshy.
 
 ### 6. Professional 3D model viewer — 🟠
 - **Have:**
@@ -173,10 +175,10 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 - **Have:** a concurrency cap (2 jobs), job timeouts, cancellation (kills
   COLMAP/Blender), lease recovery, hardware report and temporary-file
   cleanup.
+- **Added in Phase 10:** memory and disk checks before heavy local work (at
+  planning time and again when the job starts); one heavy job at a time now
+  includes Blender baking.
 - **Missing:**
-  - No RAM or disk checks before heavy local work.
-  - Nothing stops two heavy local jobs (COLMAP plus Blender) from running at
-    once.
   - No viewer handling for multi-million-triangle models.
   - JavaScript bundle about 580 KB.
 

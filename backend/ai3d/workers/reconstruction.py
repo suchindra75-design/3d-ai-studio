@@ -20,6 +20,7 @@ from ai3d.models import GenerationJob, Image
 from ai3d.models.enums import JobEventType, JobStatus
 from ai3d.processing.mesh import validate_mesh_file
 from ai3d.processing.photogrammetry import mesh_to_glb, prepare_photo
+from ai3d.services import resources
 from ai3d.services.devices import cuda_available
 from ai3d.services.models import save_reconstructed_model
 from ai3d.workers import heavy
@@ -191,6 +192,15 @@ def _run(ctx: JobContext, job: GenerationJob, workdir: Path) -> None:
     ctx.stage("preparing", "Preparing photos on this computer.", 0.02)
     images_dir = workdir / "images"
     _prepare_photos(ctx, job, images_dir)
+    # The plan checked the disk; it may have filled up while the job waited.
+    photo_bytes = sum(p.stat().st_size for p in images_dir.iterdir())
+    disk = resources.not_enough_disk(
+        resources.photogrammetry(photo_bytes),
+        resources.machine(ctx.settings.data_dir),
+        "Photogrammetry",
+    )
+    if disk:
+        raise _FailedError("not_enough_disk", disk)
     options = _options(ctx, job)
     if options.openmvs:
         ctx.event(

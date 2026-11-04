@@ -39,6 +39,7 @@ from ai3d.schemas.job import (
     CostEstimateRead,
     GenerationCreate,
     GenerationPlanRead,
+    JobAlternative,
     JobCostRead,
     JobEventRead,
     JobInputRead,
@@ -47,6 +48,7 @@ from ai3d.schemas.job import (
     PlannedInputRead,
     ProviderSummary,
 )
+from ai3d.services import resources
 from ai3d.services.capture import PHOTOGRAMMETRY_MIN, PHOTOGRAMMETRY_RECOMMENDED
 from ai3d.services.devices import cuda_available
 from ai3d.services.projects import get_project
@@ -244,6 +246,38 @@ def _plan_photogrammetry(manager: ProviderManager, plan: Plan) -> None:
         )
 
 
+def _too_small_for(manager: ProviderManager, cls: type[Provider]) -> str | None:
+    """Why this local engine cannot run on this computer at all (memory), or None."""
+    if cls.key != LocalAIProvider.key:
+        return None
+    here = resources.machine(manager.settings.data_dir)
+    return resources.too_small(resources.LOCAL_AI, here, cls.display_name)
+
+
+def _check_resources(manager: ProviderManager, plan: Plan) -> None:
+    """Disk and memory for a local engine, on this computer, now."""
+    cls = plan.provider
+    if cls is None or cls.uploads_images:
+        return
+    if plan.kind == JobKind.PHOTOGRAMMETRY:
+        needs = resources.photogrammetry(sum(i.image.size_bytes for i in plan.inputs))
+    elif cls.key == LocalAIProvider.key:
+        needs = resources.LOCAL_AI
+        problem = _too_small_for(manager, cls)
+        if problem:
+            plan.block("machine_too_small", problem)
+            return
+    else:
+        return
+    here = resources.machine(manager.settings.data_dir)
+    disk = resources.not_enough_disk(needs, here, cls.display_name)
+    if disk:
+        plan.block("not_enough_disk", disk)
+    memory = resources.low_memory(needs, here, cls.display_name)
+    if memory:
+        plan.warnings.append(memory)
+
+
 def _no_local_engine_message(manager: ProviderManager, kind: JobKind) -> str:
     if kind == JobKind.IMAGE_TO_3D:
         reason = manager.unavailable_reason(LocalAIProvider.key)
@@ -312,14 +346,22 @@ def _choose_ai_provider(
             and cls.capabilities().supports(plan.kind)
             and manager.is_configured(db, cls.key)
         ]
-        if local:
-            plan.provider = local[0]
+        unfit = {cls.key: _too_small_for(manager, cls) for cls in local}
+        fitting = [cls for cls in local if unfit[cls.key] is None]
+        if fitting:
+            plan.provider = fitting[0]
             if plan.processing_mode == ProcessingMode.AUTO:
                 plan.warnings.append(
                     f"Automatic mode chose {plan.provider.display_name}: your photo stays on "
                     "this computer. Choose Cloud for a provider such as Tripo or Meshy."
                 )
             return
+        reasons = [r for r in unfit.values() if r]
+        if reasons and local_only:
+            plan.block("machine_too_small", reasons[0])
+            return
+        if reasons:
+            plan.warnings.append(f"{reasons[0]} Automatic mode uses the cloud instead.")
     if local_only:
         plan.block(
             "no_local_engine",
@@ -364,6 +406,7 @@ def build_plan(
     if project.status == ProjectStatus.ARCHIVED:
         plan.block("project_archived", "Restore the project from the archive to generate models.")
     _choose_provider(db, manager, plan, body.provider)
+    _check_resources(manager, plan)
 
     cls = plan.provider
     if cls is not None:
@@ -655,6 +698,7 @@ def retry_job(
     *,
     cloud_upload_consent: bool,
     idempotency_key: str | None = None,
+    provider: str | None = None,
 ) -> tuple[GenerationJob, bool]:
     original = get_job(db, job_id)
     if original.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
@@ -665,11 +709,21 @@ def retry_job(
         return retry_enhance(db, original, idempotency_key=idempotency_key), True
     if any(item.image_id is None for item in original.inputs):
         raise InvalidInputError("A photo used by this job was deleted; start a new generation.")
+    processing_mode = original.processing_mode
+    if provider is not None and provider != original.provider_key:
+        offered = {a.provider.key for a in _alternatives(db, manager, original)}
+        if provider not in offered:
+            raise InvalidInputError(
+                f"{provider!r} is not an alternative for this job.",
+                details={"alternatives": sorted(offered)},
+            )
+        uploads = manager.provider_class(provider).uploads_images
+        processing_mode = ProcessingMode.CLOUD if uploads else ProcessingMode.LOCAL
     body = GenerationCreate(
         inputs=[{"image_id": item.image_id, "role": item.role} for item in original.inputs],
-        provider=original.provider_key,
+        provider=provider or original.provider_key,
         quality_mode=original.quality_mode,
-        processing_mode=original.processing_mode,
+        processing_mode=processing_mode,
         cloud_upload_consent=cloud_upload_consent,
     )
     return create_generation(
@@ -696,6 +750,31 @@ def list_jobs(db: Session, project_id: uuid.UUID, limit: int = 50) -> list[Gener
             .limit(limit)
         )
     )
+
+
+def _alternatives(
+    db: Session, manager: ProviderManager, job: GenerationJob
+) -> list[JobAlternative]:
+    """Other configured engines that can do this job with the same photos."""
+    if job.kind not in {JobKind.IMAGE_TO_3D, JobKind.MULTI_VIEW_TO_3D}:
+        return []
+    count = len(job.inputs)
+    offers: list[JobAlternative] = []
+    for cls in sorted(manager.registry.all(), key=lambda c: c.uploads_images):
+        if cls.key == job.provider_key or not cls.capabilities().supports(job.kind):
+            continue
+        if cls.uploads_images and job.processing_mode == ProcessingMode.LOCAL:
+            continue  # Local mode never offers the cloud
+        if not manager.is_configured(db, cls.key):
+            continue
+        reason = (
+            f"Sends {count} photo{'s' if count != 1 else ''} to {cls.display_name}; you are "
+            "asked first, and it may charge for the job."
+            if cls.uploads_images
+            else "Runs on this computer; nothing is uploaded or charged."
+        )
+        offers.append(JobAlternative(provider=_summary(cls), reason=reason))
+    return offers
 
 
 def to_read(db: Session, manager: ProviderManager, job: GenerationJob) -> JobRead:
@@ -748,6 +827,7 @@ def to_read(db: Session, manager: ProviderManager, job: GenerationJob) -> JobRea
         result_model_id=result_model_id,
         can_cancel=not job.status.is_terminal and job.status != JobStatus.CANCELLING,
         can_retry=job.status in {JobStatus.FAILED, JobStatus.CANCELLED},
+        alternatives=_alternatives(db, manager, job) if job.status == JobStatus.FAILED else [],
         created_at=job.created_at,
         updated_at=job.updated_at,
         queued_at=job.queued_at,

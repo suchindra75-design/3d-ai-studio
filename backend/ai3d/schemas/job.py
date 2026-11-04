@@ -51,6 +51,8 @@ class ConsentGrant(Schema):
 
 class RetryRequest(Schema):
     cloud_upload_consent: bool = False
+    # Run the same photos with another engine (one of the failed job's alternatives).
+    provider: str | None = Field(default=None, max_length=64)
 
 
 class CostEstimateRead(Schema):
@@ -72,6 +74,13 @@ class ProviderSummary(Schema):
     display_name: str
     kind: ProviderKind
     uploads_images: bool
+
+
+class JobAlternative(Schema):
+    """Another engine that can do the same job, offered when a job failed."""
+
+    provider: ProviderSummary
+    reason: str
 
 
 class PlanIssue(Schema):
@@ -140,6 +149,9 @@ class JobRead(Schema):
     result_model_id: uuid.UUID | None
     can_cancel: bool
     can_retry: bool
+    # Failed jobs: other engines for the same photos (local first). Cloud ones still ask
+    # before uploading; jobs created in Local mode are only offered local engines.
+    alternatives: list[JobAlternative] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     queued_at: datetime | None
