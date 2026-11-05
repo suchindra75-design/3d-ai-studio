@@ -960,9 +960,9 @@ Not planned: billing or subscriptions, public release work.
 | Desktop app is large (670 MB, 184 MB DMG), mostly Pixar USD, OpenCV and SciPy | `--without-usdz` saves ~250 MB; trimming further is future work |
 | Local AI and photogrammetry verified on a 6-core Intel Mac CPU only; CUDA, Apple Silicon, Windows and Linux untested; COLMAP's CUDA dense path never run | Needs that hardware |
 | Provider keys stored encrypted on disk, not in the OS keychain | Later |
-| Several backend processes sharing one PostgreSQL queue: designed for, not tested | When a multi-worker deployment needs it |
+| Several backend processes sharing one queue: tested with independent workers racing (4 claiming 40 jobs; 2 running 6 to the end) on SQLite and in CI's PostgreSQL job; not tested as separate OS processes | Enough for now |
 | Tauri window not automated (no WebDriver on macOS); native Save dialog not clicked through by hand | Linux/Windows CI with tauri-driver |
-| Main JS bundle ≈580 KB (three.js already split out) | Not done |
+| Main JS chunk 601 KB (186 KB gzipped): React 33%, React Router 20%, TanStack Query 8%, app code 8%; 3D code (1.2 MB) loads only in the workspace | Measured 2026-11-05; accepted |
 | Vertex-level editing, texture adjustments, KTX2 textures | Later |
 | Light theme | Not planned |
 
