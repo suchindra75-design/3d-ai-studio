@@ -14,8 +14,15 @@ from typing import Any
 
 from ai3d.models import GenerationJob, ModelVersion
 from ai3d.models.enums import AssetKind, JobEventType, JobStatus
-from ai3d.processing.geometry import HeavyTurn, RemeshSettings, ScaleReference, process
+from ai3d.processing.geometry import (
+    HeavyTurn,
+    RemeshSettings,
+    ScaleReference,
+    UpscaleLimits,
+    process,
+)
 from ai3d.processing.mesh import load_model_scene, validate_mesh_file
+from ai3d.services import resources
 from ai3d.services.models import save_enhanced_version, version_file
 from ai3d.workers import heavy
 from ai3d.workers.runner import JobContext
@@ -96,6 +103,11 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             smoothing=int(job.params.get("smoothing") or 0),
             remesh_settings=_remesh_settings(job.params.get("remesh")),
             upscale=job.params.get("upscale_textures"),
+            upscale_limits=UpscaleLimits(
+                max_input_px=ctx.settings.upscale_max_input_px,
+                tile_px=ctx.settings.upscale_tile_px,
+                available_bytes=resources.machine(ctx.settings.data_dir).memory_available_bytes,
+            ),
         )
     except ValueError as exc:
         raise _FailedError("invalid_input", str(exc)) from exc

@@ -70,6 +70,7 @@ def test_plan_single_image_is_honest_about_inferred_geometry(
     assert plan["inputs"][0]["role"] == "source"
 
 
+@pytest.mark.usefixtures("no_local_ai")
 def test_plan_local_processing_never_routes_to_cloud(
     client: TestClient, make_image_project: MakeImageProject
 ) -> None:
@@ -89,6 +90,7 @@ def test_plan_local_processing_never_routes_to_cloud(
     assert response.json()["error"]["code"] == "local_only"
 
 
+@pytest.mark.usefixtures("no_local_ai")
 def test_auto_mode_says_it_chose_the_cloud(
     client: TestClient, make_image_project: MakeImageProject
 ) -> None:

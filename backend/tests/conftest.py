@@ -112,6 +112,15 @@ def app(settings: Settings) -> FastAPI:
 
 
 @pytest.fixture
+def no_local_ai(app: FastAPI, tmp_path: Path) -> None:
+    """No local AI engine, even when AI3D_LOCAL_AI_DIR points at one (for tests of
+    what happens without it). The app reads the folder when it is created."""
+    from ai3d_engine.local_ai import engine as local_ai_engine  # noqa: PLC0415
+
+    local_ai_engine.configure(tmp_path / "no-local-ai")
+
+
+@pytest.fixture
 def runner(app: FastAPI) -> JobRunner:
     runner: JobRunner = app.state.runner
     return runner

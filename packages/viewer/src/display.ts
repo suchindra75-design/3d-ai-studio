@@ -23,6 +23,12 @@ const WIREFRAME = new THREE.MeshBasicMaterial({
 
 // Surface direction as colour: shows flipped or rough patches at a glance.
 const NORMALS = new THREE.MeshNormalMaterial({ name: 'Normals view' });
+// Files may leave out normals; three's glTF loader then shades their own materials
+// flat, and the view materials must do the same (smooth shading would read the
+// missing attribute as zero: black in Solid, one flat colour in Normals).
+const SOLID_FLAT = SOLID.clone();
+SOLID_FLAT.flatShading = true;
+const NORMALS_FLAT = new THREE.MeshNormalMaterial({ name: 'Normals view', flatShading: true });
 
 /** An 8 × 8 checker with numbered-looking corners, to judge texture stretching and seams. */
 function checkerTexture(): THREE.Texture {
@@ -59,11 +65,13 @@ function uvMaterial(): THREE.MeshBasicMaterial {
 }
 
 function viewMaterial(mesh: THREE.Mesh, mode: Exclude<DisplayMode, 'material'>): THREE.Material {
-  if (mode === 'solid') return SOLID;
+  const smooth = mesh.geometry.getAttribute('normal') !== undefined;
+  if (mode === 'solid') return smooth ? SOLID : SOLID_FLAT;
   if (mode === 'wireframe') return WIREFRAME;
-  if (mode === 'normals') return NORMALS;
+  if (mode === 'normals') return smooth ? NORMALS : NORMALS_FLAT;
   // Parts without texture coordinates cannot show a checker: they show solid.
-  return mesh.geometry.getAttribute('uv') ? uvMaterial() : SOLID;
+  if (mesh.geometry.getAttribute('uv')) return uvMaterial();
+  return smooth ? SOLID : SOLID_FLAT;
 }
 
 const own = new WeakMap<THREE.Mesh, THREE.Material | THREE.Material[]>();

@@ -899,6 +899,67 @@ upscaler installed):
   - a browser test checks the saved file: the texture is grey, the UVs span
     3 × 2 times their range, and the vertex colours are brighter (D54).
 
+## Phase 12 completed (2026-11-05)
+
+An inspection of Phase 12 against its eight items found three real gaps; they
+are closed, and the viewer is now tested on rendered pixels, not only on its
+controls.
+- **Models without normals** (some tools write none): the Solid and Normals
+  views now shade such parts flat, instead of the unlit black or one-colour
+  Normals view they had before.
+- **High-resolution screenshots:** a *Screenshot size* menu (1×, 2× or 4× the
+  view, 2× by default). The view is redrawn once at that size, capped at
+  8192 px and at what the graphics card allows, then put back.
+- **Problem finder memory:** edge keys go into one preallocated numeric array,
+  which brought 3 million triangles from 7.1 s to 5.4 s.
+- **AI texture upscaler limits** (the open item from Phase 14):
+  - the input limit (4096 px) and the tile size (192 px) are settings:
+    `AI3D_UPSCALE_MAX_INPUT_PX` and `AI3D_UPSCALE_TILE_PX`;
+  - before each texture, the job estimates the memory it needs and compares
+    it with the memory that is free. If it is short, the texture is kept and
+    the step says how much was needed and how much was free. Measured peaks
+    were 319 MB (512 → 2048 px) and 326 MB (1024 → 2048 px), and the estimate
+    is about twice that;
+  - memory follows the output size, not 4× the input, because each tile is
+    resized to its share of the output as it is made (as before);
+  - quality is unchanged: a real run with 32 px tiles gives the same image as
+    one 256 px tile (mean difference 0.19 of 255; 99.9% of pixels within 4).
+  - Also fixed: the upscaling script reused the name `tile` inside its loop,
+    which would have broken any tile size other than the default.
+
+**New tests:**
+- `e2e/viewer-rendering.spec.ts` uses a textured box and a sphere saved
+  without normals, and checks screenshots of the real WebGL canvas:
+  - lighting presets change the brightness;
+  - the Solid view shades the bare box flat, with several distinct faces;
+  - the Normals view is more colourful than Solid, with three or more face
+    colours;
+  - the UV checker has more than twice Solid's contrast;
+  - the section plane removes the sphere and keeps the box;
+  - measuring edge to edge across the 1.000-wide box reads 0.97–1.00;
+  - a 2× screenshot is exactly twice the view's pixel size and shows the
+    model;
+  - comparison views move their cameras together.
+- `e2e/viewer.spec.ts`: the 3.1-million-triangle model now also records the
+  JavaScript heap: 163 MB, with a 1.5 GB limit.
+- `test_local_ai.py`: the input limit, the memory guard, the tile size passed
+  to the engine, the settings, and the real tile-equivalence run.
+- Three generation tests assumed no local AI engine was installed and failed
+  when `AI3D_LOCAL_AI_DIR` pointed at one. A `no_local_ai` fixture now
+  removes the engine for them.
+
+Checks run on 2026-11-05 (COLMAP and the real local AI engine configured):
+- **Python:** 348 tests passed, 11 skipped (hardware or tools not present).
+- **Frontend:** 117 unit tests.
+- **Browser tests:** web 28 (12 skipped by design: one-browser-only
+  tests), desktop UI 2, job workflows 2.
+- **Rust:** 14 tests.
+- **Static checks:** ruff, mypy, ESLint, Prettier, tsc, cargo fmt, clippy,
+  API types and builds.
+
+**Still not done:** level of detail or progressive loading. Models above
+about 5 million triangles have not been tried in the browser.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely

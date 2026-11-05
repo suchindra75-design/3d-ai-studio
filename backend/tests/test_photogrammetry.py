@@ -91,6 +91,7 @@ def _plan(client: TestClient, project_id: str, ids: list[str], **body: Any) -> A
 # -- routing ------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("no_local_ai")
 def test_a_single_photo_is_never_sent_to_photogrammetry(
     client: TestClient, make_project: MakeProject, engine_available: Callable[[bool], None]
 ) -> None:

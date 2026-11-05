@@ -16,6 +16,9 @@ export interface ViewRequest {
   nonce: number;
 }
 
+/** Renders the view to a PNG at ``scale`` × its resolution (1 when omitted). */
+export type CaptureFunction = (scale?: number) => Promise<Blob>;
+
 /** studio: image lighting plus a key light; soft: brighter fill, weaker key; flat: no key light. */
 export type LightingPreset = 'studio' | 'soft' | 'flat';
 
@@ -89,7 +92,7 @@ export interface ViewportProps {
   /** Keeps this viewport's camera in step with others sharing the link. */
   cameraLink?: CameraLink;
   /** Receives a function that renders the current view to a PNG. */
-  onCaptureReady?: (capture: () => Promise<Blob>) => void;
+  onCaptureReady?: (capture: CaptureFunction) => void;
 }
 
 const SELECTION_COLOR = new THREE.Color('#0a84ff');
@@ -131,18 +134,40 @@ function RoomLighting({ intensity }: { intensity: number }) {
   return null;
 }
 
-/** Renders the current view to a PNG on request (the canvas keeps no copy otherwise). */
-function Capture({ onReady }: { onReady: (capture: () => Promise<Blob>) => void }) {
+/** Screenshots never exceed this many pixels on a side (and the GPU's own limits). */
+export const MAX_CAPTURE_SIDE = 8192;
+
+/**
+ * Renders the current view to a PNG on request, at ``scale`` × the view's own
+ * resolution (capped by MAX_CAPTURE_SIDE and the GPU). The canvas's on-screen
+ * size never changes; its drawing buffer is resized for one frame and restored.
+ */
+function Capture({ onReady }: { onReady: (capture: CaptureFunction) => void }) {
   const get = useThree((state) => state.get);
   useEffect(() => {
     onReady(
-      () =>
+      (scale = 1) =>
         new Promise<Blob>((resolve, reject) => {
-          const { gl, scene, camera } = get();
-          gl.render(scene, camera);
-          gl.domElement.toBlob((blob) =>
-            blob ? resolve(blob) : reject(new Error('The view could not be captured.')),
+          const { gl, scene, camera, size, invalidate } = get();
+          const context = gl.getContext();
+          const limit = Math.min(
+            MAX_CAPTURE_SIDE,
+            context.getParameter(context.MAX_RENDERBUFFER_SIZE) as number,
+            ...(context.getParameter(context.MAX_VIEWPORT_DIMS) as number[]),
           );
+          const ratio = gl.getPixelRatio();
+          const wanted = ratio * Math.max(1, scale);
+          const capped = Math.min(wanted, limit / Math.max(size.width, size.height, 1));
+          gl.setPixelRatio(capped);
+          try {
+            gl.render(scene, camera);
+            gl.domElement.toBlob((blob) =>
+              blob ? resolve(blob) : reject(new Error('The view could not be captured.')),
+            );
+          } finally {
+            gl.setPixelRatio(ratio);
+            invalidate();
+          }
         }),
     );
   }, [get, onReady]);

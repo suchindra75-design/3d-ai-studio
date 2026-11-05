@@ -168,6 +168,16 @@ as the provider. Quality: Fast/High/Professional extract the surface on a
 160³/256³/320³ grid (High took 82 s on the Intel Mac above, first runs after
 installing are slower while macOS checks the new libraries).
 
+**AI texture upscaling** (Enhance → *Upscale textures*) runs the 4.9 MB
+Real-ESRGAN model on this computer. Its limits:
+- textures over 4096 px on a side are kept (`AI3D_UPSCALE_MAX_INPUT_PX`);
+  a 4096 px input takes about five minutes on a 6-core CPU;
+- the image is processed in 192 px tiles (`AI3D_UPSCALE_TILE_PX`, 32–2048).
+  Smaller tiles use less memory per step and give the same image;
+- before each texture, the memory it needs is estimated (about 0.6 GB plus
+  the image) and compared with what is free. If it does not fit, the texture
+  is kept and the step says so. Measured peaks were about 0.33 GB.
+
 Other models (TRELLIS on NVIDIA ≥16 GB; Stable Fast 3D and Hunyuan3D have
 restrictive licences) are not integrated; see `AI_PIPELINE.md` §8.
 

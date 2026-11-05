@@ -33,6 +33,7 @@ import {
   sourceMaterials,
   webglAvailable,
   type CameraPreset,
+  type CaptureFunction,
   type ViewRequest,
   type ViewportOptions,
 } from '@ai3d/viewer';
@@ -172,8 +173,9 @@ function VersionWorkspace({
   const [link] = useState(() => new CameraLink());
   const [viewNotice, setViewNotice] = useState<string | null>(null);
   const [showProblems, setShowProblems] = useState(false);
-  const capture = useRef<(() => Promise<Blob>) | null>(null);
-  const onCaptureReady = useCallback((fn: () => Promise<Blob>) => {
+  const capture = useRef<CaptureFunction | null>(null);
+  const [screenshotScale, setScreenshotScale] = useState(2);
+  const onCaptureReady = useCallback((fn: CaptureFunction) => {
     capture.current = fn;
   }, []);
   const { desktop } = useStudio();
@@ -222,7 +224,7 @@ function VersionWorkspace({
   async function takeScreenshot() {
     if (!capture.current) return;
     try {
-      const blob = await capture.current();
+      const blob = await capture.current(screenshotScale);
       const name = versionFileName(model.name, version.version_number, 'png');
       const saved = await saveScreenshot(blob, name, desktop);
       if (saved) setViewNotice(`Screenshot saved: ${saved}`);
@@ -495,6 +497,8 @@ function VersionWorkspace({
                     if (!on) setPoints([]);
                   }}
                   onScreenshot={() => void takeScreenshot()}
+                  screenshotScale={screenshotScale}
+                  onScreenshotScale={setScreenshotScale}
                 />
                 <div className="pointer-events-none absolute left-2 top-24 flex flex-col gap-2 sm:top-12">
                   {section && tab !== 'cut' ? (

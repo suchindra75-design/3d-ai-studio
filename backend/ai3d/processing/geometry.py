@@ -275,14 +275,56 @@ def fill_holes(scene: trimesh.Scene) -> Step:
     return Step("holes", title, "skipped", "No small holes that could be closed.")
 
 
-# Measured on a 6-core Intel CPU: 1024 px → 2048 px in 17 s, 2048 px → 4096 px in about a
-# minute; a 4096 px input takes about five. Larger inputs are not upscaled.
-MAX_UPSCALE_INPUT = 4096
+@dataclass(frozen=True, slots=True)
+class UpscaleLimits:
+    """Limits for AI texture upscaling (from settings; see Settings.upscale_*)."""
+
+    # Measured on a 6-core Intel CPU: 1024 px → 2048 px in 17 s, 2048 px → 4096 px in
+    # about a minute; a 4096 px input takes about five.
+    max_input_px: int = 4096
+    tile_px: int = 192
+    # Free memory when the job starts; None = not checked.
+    available_bytes: int | None = None
+
+
+# Engine and model, plus PyTorch's working memory for one tile; the rest scales with
+# the image. Measured peaks: 319 MB for 512 → 2048 px, 326 MB for 1024 → 2048 px; the
+# estimate is about twice that, so a texture is only tried with a safe margin.
+_UPSCALE_BASE_BYTES = 600 * 1024 * 1024
+
+
+def upscale_memory_bytes(width: int, height: int, out_width: int, out_height: int) -> int:
+    """Rough peak memory to upscale one texture: input as float32 RGB, output as bytes
+    (array and image), plus the fixed base."""
+    return _UPSCALE_BASE_BYTES + width * height * 3 * 4 + out_width * out_height * 3 * 2
+
 
 UPSCALE_DETAIL = (
     "AI upscaling makes textures look sharper by inventing plausible fine detail; it does "
     "not recover detail the original texture never had."
 )
+
+
+def _upscale_skip(
+    image: Image.Image, scale: int, max_size: int, limits: UpscaleLimits
+) -> tuple[str, str] | None:
+    """Why a texture is not upscaled: ("", …) big enough already, ("large", size) over
+    the input limit, ("short", text) not enough free memory; None to upscale it."""
+    size = f"{image.width}×{image.height}"
+    if max(image.size) >= max_size:
+        return ("", size)
+    if max(image.size) > limits.max_input_px:
+        return ("large", size)
+    factor = min(scale, max_size / max(image.size))
+    out_w, out_h = round(image.width * factor), round(image.height * factor)
+    need = upscale_memory_bytes(image.width, image.height, out_w, out_h)
+    if limits.available_bytes is not None and need > limits.available_bytes:
+        return (
+            "short",
+            f"{size} needs about {need / 1024**3:.1f} GB, "
+            f"{limits.available_bytes / 1024**3:.1f} GB is free",
+        )
+    return None
 
 
 def upscale_textures(
@@ -292,6 +334,7 @@ def upscale_textures(
     *,
     workdir: Path | None = None,
     cancel: CancelCheck | None = None,
+    limits: UpscaleLimits | None = None,
 ) -> Step:
     """Upscale base-colour textures with the local AI engine (Real-ESRGAN compact).
 
@@ -302,8 +345,10 @@ def upscale_textures(
     problem = local_ai_engine.upscaler_problem()
     if problem is not None:
         return Step("upscale", title, "unavailable", problem)
+    limits = limits or UpscaleLimits()
     done: list[str] = []
     large: list[str] = []
+    short: list[str] = []
     seen: set[int] = set()
     with tempfile.TemporaryDirectory(prefix="upscale-", dir=workdir) as tmp:
         root = Path(tmp)
@@ -314,10 +359,10 @@ def upscale_textures(
                 if not isinstance(image, Image.Image) or id(image) in seen:
                     continue
                 seen.add(id(image))
-                if max(image.size) >= max_size:
-                    continue
-                if max(image.size) > MAX_UPSCALE_INPUT:
-                    large.append(f"{image.width}×{image.height}")
+                reason = _upscale_skip(image, scale, max_size, limits)
+                if reason is not None:
+                    if reason[0]:
+                        (large if reason[0] == "large" else short).append(reason[1])
                     continue
                 n = len(seen)
                 source, output = root / f"in-{n}.png", root / f"out-{n}.png"
@@ -329,6 +374,7 @@ def upscale_textures(
                         root / f"run-{n}",
                         scale=scale,
                         max_size=max_size,
+                        tile=limits.tile_px,
                         cancel=cancel,
                     )
                 except local_ai_engine.LocalAIFailedError as exc:
@@ -337,14 +383,35 @@ def upscale_textures(
                 new.load()
                 setattr(material, attr, new)
                 done.append(f"{image.width}×{image.height} → {new.width}×{new.height}")
+    return _upscale_step(title, done, large, short, limits, seen=bool(seen), max_size=max_size)
+
+
+def _upscale_step(
+    title: str,
+    done: list[str],
+    large: list[str],
+    short: list[str],
+    limits: UpscaleLimits,
+    *,
+    seen: bool,
+    max_size: int,
+) -> Step:
+    kept = []
+    if large:
+        kept.append(
+            f"Textures over {limits.max_input_px} px ({', '.join(large)}) are already detailed "
+            "and would take too long on a CPU; they were kept."
+        )
+    if short:
+        kept.append(
+            f"Not enough free memory ({'; '.join(short)}): close other programs and try "
+            "again. Those textures were kept."
+        )
     if not done:
         if not seen:
             detail = "No texture to upscale."
-        elif large:
-            detail = (
-                f"Textures over {MAX_UPSCALE_INPUT} px ({', '.join(large)}) are already "
-                "detailed and would take too long on a CPU; they were kept."
-            )
+        elif kept:
+            detail = " ".join(kept)
         else:
             detail = f"Textures are already {max_size} px or larger."
         return Step("upscale", title, "skipped", detail)
@@ -352,7 +419,7 @@ def upscale_textures(
         "upscale",
         title,
         "applied",
-        f"Real-ESRGAN (on this computer): {', '.join(done)}. {UPSCALE_DETAIL}",
+        " ".join([f"Real-ESRGAN (on this computer): {', '.join(done)}. {UPSCALE_DETAIL}", *kept]),
     )
 
 
@@ -846,6 +913,7 @@ def process(
     smoothing: int = 0,
     remesh_settings: RemeshSettings | None = None,
     upscale: int | None = None,
+    upscale_limits: UpscaleLimits | None = None,
 ) -> ProcessingResult:
     """Run the profile's steps. ``result.scene`` is the processed scene: usually
     ``scene`` changed in place, but a new scene when the model was baked.
@@ -879,7 +947,12 @@ def process(
         with (heavy_turn or nullcontext)():
             result.steps.append(
                 upscale_textures(
-                    scene, upscale, profile.max_texture, workdir=workdir, cancel=cancel
+                    scene,
+                    upscale,
+                    profile.max_texture,
+                    workdir=workdir,
+                    cancel=cancel,
+                    limits=upscale_limits,
                 )
             )
     result.steps.append(limit_textures(scene, profile.max_texture))

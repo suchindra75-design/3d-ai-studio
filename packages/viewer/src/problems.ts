@@ -94,16 +94,18 @@ export function findProblemEdges(root: THREE.Object3D): ProblemEdges {
   for (let i = ids.length - 1; i >= 0; i -= 1) representative[ids[i]!] = i;
   const base = ids.length + 1;
   // One float64 key per undirected edge: exact while base² < 2^53 (≈ 94 million vertices).
-  const keys: number[] = [];
+  // Written straight into one typed array (no intermediate JS array of ~9 million numbers).
+  const keys = new Float64Array(triangles.length);
+  let used = 0;
   for (let t = 0; t + 2 < triangles.length; t += 3) {
     for (let e = 0; e < 3; e += 1) {
       const a = ids[triangles[t + e]!]!;
       const b = ids[triangles[t + ((e + 1) % 3)]!]!;
       if (a === b) continue; // degenerate
-      keys.push(a < b ? a * base + b : b * base + a);
+      keys[used++] = a < b ? a * base + b : b * base + a;
     }
   }
-  const sorted = Float64Array.from(keys).sort();
+  const sorted = keys.subarray(0, used).sort();
   const boundary: number[] = [];
   const nonManifold: number[] = [];
   const push = (target: number[], key: number) => {

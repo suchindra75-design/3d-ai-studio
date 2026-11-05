@@ -99,6 +99,8 @@ export function ViewportControls({
   measuring,
   onMeasuring,
   onScreenshot,
+  screenshotScale,
+  onScreenshotScale,
 }: {
   options: ViewportOptions;
   /** Receives only the changed setting, so quick successive clicks never undo each other. */
@@ -109,6 +111,8 @@ export function ViewportControls({
   measuring: boolean;
   onMeasuring: (on: boolean) => void;
   onScreenshot: () => void;
+  screenshotScale: number;
+  onScreenshotScale: (scale: number) => void;
 }) {
   const set = <K extends keyof ViewportOptions>(key: K, value: ViewportOptions[K]) =>
     onOptions({ [key]: value });
@@ -168,6 +172,17 @@ export function ViewportControls({
         >
           <Camera className="size-3.5" aria-hidden /> Screenshot
         </button>
+        <select
+          aria-label="Screenshot size"
+          title="Screenshot resolution, relative to the view"
+          className="h-7 rounded bg-transparent px-1 text-xs text-muted-foreground outline-none hover:text-foreground"
+          value={screenshotScale}
+          onChange={(event) => onScreenshotScale(Number(event.target.value))}
+        >
+          <option value={1}>1×</option>
+          <option value={2}>2×</option>
+          <option value={4}>4×</option>
+        </select>
         <button
           type="button"
           className="flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"

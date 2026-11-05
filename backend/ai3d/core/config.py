@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # Default: ~/.local/share/ai3d-studio/tools/local-ai
     local_ai_dir: Path | None = None
     local_ai_timeout_seconds: int = Field(default=30 * 60, ge=60)
+    # AI texture upscaling: textures larger than this (px on a side) are not upscaled
+    # (a 4096 px input takes about five minutes on a 6-core CPU), and the image is
+    # processed in tiles of this size (smaller tiles use less memory per step).
+    upscale_max_input_px: int = Field(default=4096, ge=64, le=16384)
+    upscale_tile_px: int = Field(default=192, ge=32, le=2048)
     # A local reconstruction that has not finished after this many seconds fails.
     reconstruction_timeout_seconds: int = Field(default=4 * 3600, ge=60)
 

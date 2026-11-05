@@ -16,7 +16,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 3 | Tripo & Meshy | 🟡 | Full adapters tested against fakes built from the API docs; no paid key yet |
 | 4 | Local AI generation engine | ✅ | TripoSR (Phase 8), verified end to end on a real photo on a CPU; mirrored/inside-out output found and fixed in Phase 11; GPU and other OSes untested |
 | 5 | Hybrid local/cloud | 🟡 | Automatic keeps photos local when it can and checks the machine first; failed jobs offer the other route with consent (Phase 10). Cloud side tested only with the mock provider |
-| 6 | Professional viewer | 🟡 | Measuring, lighting presets, normals/UV views, section, screenshots and version comparison (Phase 12); 3M-triangle models usable; no level of detail |
+| 6 | Professional viewer | 🟡 | Measuring, lighting presets, normals/UV views, section, screenshots up to 4× and version comparison (Phase 12), tested on rendered pixels; 3M-triangle models usable (163 MB JS heap); no level of detail |
 | 7 | 3D editing | 🟡 | Transforms, delete, mirror, pivot, ground/centre and plane cuts with filled caps (Phase 11), tested on real models; no merge/split or vertex editing |
 | 8 | Geometry refinement & retopology | 🟡 | Clean-up, decimation, smoothing, QuadriFlow/voxel retopology with a measured fidelity check (Phase 13), verified on real models |
 | 9 | Texture & material editing | 🟡 | Material values, texture replace, UV layout (Phase 11); normal and occlusion map baking (Phase 13); no texture adjustments or painting |
@@ -89,6 +89,9 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
   desktop) and side-by-side version comparison. A 3.1-million-triangle model
   opens in seconds and stays responsive (measured in a browser test). Draco
   is tested end to end since Phase 9.
+- **Completed 2026-11-05:** screenshots at 1×, 2× or 4× the view; parts
+  without normals shaded flat; problems shown on the model. Every tool is
+  checked on rendered pixels in `e2e/viewer-rendering.spec.ts`.
 - **Missing:**
   - Level of detail or progressive loading for models far beyond that.
 

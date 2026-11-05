@@ -17,6 +17,7 @@ import trimesh
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from ai3d.core.config import Settings
 from ai3d.processing import geometry
 from ai3d.workers import JobRunner
 from ai3d.workers import local_generation as worker
@@ -434,3 +435,76 @@ def test_real_upscaler_makes_a_real_photo_four_times_larger_and_sharper(tmp_path
         return float(np.abs(np.diff(a, axis=0)).mean() + np.abs(np.diff(a, axis=1)).mean())
 
     assert edges(ai) > edges(lanczos) * 1.1  # sharper than plain resizing
+
+
+def test_upscaling_respects_the_input_limit_free_memory_and_tile_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(geometry.local_ai_engine, "upscaler_problem", lambda: None)
+    monkeypatch.setattr(geometry.local_ai_engine, "upscale", _stand_in_upscaler(calls))
+
+    # Over the configured input limit: kept, and said why.
+    limits = geometry.UpscaleLimits(max_input_px=100)
+    step = geometry.upscale_textures(_textured_box(128), 2, 4096, workdir=tmp_path, limits=limits)
+    assert step.status == "skipped"
+    assert "over 100 px (128×128)" in step.detail
+
+    # Not enough free memory for this texture: kept, with the numbers.
+    need = geometry.upscale_memory_bytes(128, 128, 256, 256)
+    limits = geometry.UpscaleLimits(available_bytes=need - 1)
+    step = geometry.upscale_textures(_textured_box(128), 2, 4096, workdir=tmp_path, limits=limits)
+    assert step.status == "skipped"
+    assert "Not enough free memory (128×128 needs about" in step.detail
+    assert calls == []
+
+    # Enough memory: upscaled with the configured tile size.
+    limits = geometry.UpscaleLimits(tile_px=64, available_bytes=need)
+    step = geometry.upscale_textures(_textured_box(128), 2, 4096, workdir=tmp_path, limits=limits)
+    assert step.status == "applied"
+    assert [c["tile"] for c in calls] == [64]
+    # The estimate grows with the output: a 4096 px result needs about 100 MB more for
+    # the output alone than a 512 px one.
+    small = geometry.upscale_memory_bytes(256, 256, 512, 512)
+    assert geometry.upscale_memory_bytes(1024, 1024, 4096, 4096) > small + 100 * 1024**2
+
+
+def test_upscale_limits_come_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AI3D_UPSCALE_MAX_INPUT_PX", "2048")
+    monkeypatch.setenv("AI3D_UPSCALE_TILE_PX", "128")
+    settings = Settings()
+    assert (settings.upscale_max_input_px, settings.upscale_tile_px) == (2048, 128)
+    monkeypatch.setenv("AI3D_UPSCALE_TILE_PX", "8")  # too small to be useful
+    with pytest.raises(ValueError, match="upscale_tile_px"):
+        Settings()
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    not REAL_ENGINE or engine.upscaler_problem(Path(REAL_ENGINE)) is not None,
+    reason="set AI3D_LOCAL_AI_DIR to an engine with the upscaler (install-upscaler)",
+)
+def test_real_upscaler_gives_the_same_image_with_small_tiles(tmp_path: Path) -> None:
+    """Small tiles (less memory) must not leave seams: same result as one big tile."""
+    photo = _real_photo()
+    assert photo is not None
+    crop = Image.open(photo).convert("RGB").resize((160, 160))
+    source = tmp_path / "crop.png"
+    crop.save(source)
+    engine.configure(Path(REAL_ENGINE))
+    out = {}
+    for tile in (32, 256):
+        engine.upscale(
+            source,
+            tmp_path / f"t{tile}.png",
+            tmp_path / f"run{tile}",
+            scale=2,
+            max_size=4096,
+            tile=tile,
+        )
+        out[tile] = np.asarray(Image.open(tmp_path / f"t{tile}.png").convert("RGB"), float)
+    assert out[32].shape == out[256].shape == (320, 320, 3)
+    diff = np.abs(out[32] - out[256])
+    print(f"\ntile 32 vs 256: mean {diff.mean():.3f}, 99.9th pct {np.percentile(diff, 99.9):.1f}")
+    assert diff.mean() < 0.5
+    assert np.percentile(diff, 99.9) < 8

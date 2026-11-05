@@ -234,6 +234,7 @@ def upscale(
     *,
     scale: int,
     max_size: int,
+    tile: int = 192,
     timeout: float = 1800.0,
     cancel: CancelCheck | None = None,
     on_progress: ProgressCallback | None = None,
@@ -253,6 +254,7 @@ def upscale(
         "output": str(output),
         "scale": int(scale),
         "max_size": int(max_size),
+        "tile": int(tile),
         "weights": str(state.path / manifest.UPSCALER.path),
     }
     return _run_script(

@@ -184,6 +184,22 @@ describe('view-only display modes and large-model bounds', () => {
     expect(mapped.material).toBe(own);
   });
 
+  it('shades parts without normals flat in the Solid and Normals views', () => {
+    const geometry = new THREE.BoxGeometry();
+    geometry.deleteAttribute('normal');
+    const bare = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
+    const normal = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial());
+    const root = new THREE.Group().add(bare, normal);
+    for (const mode of ['solid', 'normals'] as const) {
+      applyDisplayMode(root, mode);
+      expect((bare.material as THREE.MeshStandardMaterial).flatShading).toBe(true);
+      expect((normal.material as THREE.MeshStandardMaterial).flatShading).toBe(false);
+    }
+    bare.geometry.deleteAttribute('uv');
+    applyDisplayMode(root, 'uv');
+    expect((bare.material as THREE.MeshStandardMaterial).flatShading).toBe(true); // solid fallback
+  });
+
   it('measures exactly below the vertex limit and from part boxes above it', () => {
     const small = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
     small.rotation.y = Math.PI / 4;

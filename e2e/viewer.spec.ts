@@ -169,6 +169,17 @@ test('a 3-million-triangle model opens, with shadows off, and stays usable', asy
   // and draws WebGL in software (about 6 s there), so it only guards against hangs.
   expect(interactSeconds).toBeLessThan(process.env.CI ? 30 : 5);
 
+  // Memory: the JS heap holding a 56 MB, 3.1-million-triangle model (Chrome's figure;
+  // GPU buffers are not included). The file is parsed once and kept as typed arrays.
+  const heap = await page.evaluate(
+    () =>
+      (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize,
+  );
+  if (heap !== undefined) {
+    console.log(`large model: JS heap ${(heap / 1e6).toFixed(0)} MB`);
+    expect(heap).toBeLessThan(1.5e9);
+  }
+
   // Finding open and non-manifold edges on 3 million triangles.
   const p0 = Date.now();
   await page.getByRole('tab', { name: 'Quality' }).click();
