@@ -345,3 +345,17 @@ def test_a_remesh_that_drifts_from_the_original_is_not_kept(
     assert "Not kept" in step.detail
     assert "2.00%" in step.detail
     assert result.scene is scene
+
+
+def test_requested_steps_that_did_not_apply_are_reported() -> None:
+    from ai3d.processing.geometry import Step  # noqa: PLC0415
+    from ai3d.workers.enhance import not_applied  # noqa: PLC0415
+
+    steps = [
+        Step("cleanup", "Clean-up", "skipped", "Nothing to clean."),  # routine: not reported
+        Step("smoothing", "Smoothing", "skipped", "Not requested."),
+        Step("retopology", "Retopology", "skipped", "Not kept: too far."),
+        Step("upscale", "Upscaling", "unavailable", "Not installed."),
+        Step("scale", "Real-world scale", "applied", "Y = 100 mm."),
+    ]
+    assert not_applied(steps) == ["Retopology: Not kept: too far.", "Upscaling: Not installed."]

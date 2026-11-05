@@ -960,6 +960,49 @@ Checks run on 2026-11-05 (COLMAP and the real local AI engine configured):
 **Still not done:** level of detail or progressive loading. Models above
 about 5 million triangles have not been tried in the browser.
 
+## Phase 13 completed (2026-11-05)
+
+Phase 13's scope (retopology with a fidelity check, smoothing and remeshing,
+normal and occlusion maps) was all implemented and tested through the API.
+None of it had been run from the app itself. Running it there found one bug:
+- **A rejected retopology looked like "nothing to do."** When QuadriFlow's
+  result was not kept (it strayed more than 1% from the original), the
+  Enhance panel said "Nothing needed changing" and the reason stayed in the
+  job log. Every requested step that does not apply (ground removal,
+  smoothing, retopology, maps, baking, upscaling, scale) is now listed with
+  its reason under the result, whether or not other steps made a new
+  version (D57).
+
+**New tests:**
+- `e2e/enhance-surface.spec.ts` uses a bumpy sphere with orange-top and
+  blue-bottom vertex colours, run from the Enhance tab and checked in the
+  saved GLB:
+  - **smoothing (10 passes):** the bumps are more than halved, the volume is
+    within 5%, and the colours stay where they were;
+  - **QuadriFlow at 300 quads** is rejected, and the panel shows why
+    ("Not kept: … more than the 1% allowed"). No version is created;
+  - **QuadriFlow at 5,000 quads with normal and occlusion maps** is kept:
+    6,000–14,000 triangles, `normalTexture` and `occlusionTexture` in the
+    file, the volume within 5%, and the colours carried over. This part
+    needs Blender, so it is skipped where Blender is missing (as in CI).
+- `test_blender.py`: a rejected retopology reports its reason on the job.
+- `test_processing.py`: only requested steps are reported, not routine ones.
+- `panels.test.tsx`: the panel lists the reasons.
+
+Checks run on 2026-11-05 (COLMAP, Blender and the real local AI engine
+present):
+- **Python:** 350 passed, 11 skipped.
+- **Frontend:** 118 unit tests.
+- **Browser tests:** web 30 (14 skipped by design), desktop UI 2, job
+  workflows 2.
+- **Rust:** 14 tests.
+- **Static checks:** ruff, mypy, ESLint, Prettier, tsc, cargo fmt, clippy,
+  API types and builds.
+
+**Still not done** (unchanged): quads are saved as triangles (GLB holds
+triangles), smoothing does not preserve sharp edges, and there is no Instant
+Meshes (QuadriFlow covers the same need).
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely

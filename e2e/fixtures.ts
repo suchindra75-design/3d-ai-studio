@@ -1,5 +1,7 @@
 import { deflateSync } from 'node:zlib';
 
+import { expect, type APIRequestContext } from '@playwright/test';
+
 /** Minimal PNG encoder for synthetic test photos (no binary fixtures in the repo). */
 function crc32(buffer: Buffer): number {
   let crc = ~0;
@@ -50,4 +52,40 @@ export function texturedPng(width = 900, height = 700, seed = 1, block = 6): Buf
     chunk('IDAT', deflateSync(raw)),
     chunk('IEND', Buffer.alloc(0)),
   ]);
+}
+
+/**
+ * A project with a generated model whose version 2 is ``glb`` (a model made for the
+ * test, saved through the normal versions API and validated like any other).
+ */
+export async function modelWithVersion(request: APIRequestContext, name: string, glb: Buffer) {
+  const project = await (
+    await request.post('/api/v1/projects', {
+      data: { name, input_mode: 'single_image', allow_cloud_upload: true },
+    })
+  ).json();
+  const upload = await request.post(`/api/v1/projects/${project.id}/images`, {
+    multipart: {
+      files: { name: 'p.png', mimeType: 'image/png', buffer: texturedPng(300, 200, 2) },
+    },
+  });
+  const imageId = (await upload.json()).results[0].image.id as string;
+  const job = await (
+    await request.post(`/api/v1/projects/${project.id}/generations`, {
+      data: { inputs: [{ image_id: imageId }], provider: 'mock', cloud_upload_consent: true },
+    })
+  ).json();
+  await expect
+    .poll(async () => (await (await request.get(`/api/v1/jobs/${job.id}`)).json()).status)
+    .toBe('succeeded');
+  const generated = (await (await request.get(`/api/v1/projects/${project.id}/models`)).json())
+    .items[0];
+  const saved = await request.post(`/api/v1/models/${generated.id}/versions`, {
+    multipart: {
+      file: { name: 'm.glb', mimeType: 'model/gltf-binary', buffer: glb },
+      parent_version_id: generated.current_version.id,
+    },
+  });
+  expect(saved.status(), await saved.text()).toBe(201);
+  return { projectId: project.id as string, modelId: generated.id as string };
 }

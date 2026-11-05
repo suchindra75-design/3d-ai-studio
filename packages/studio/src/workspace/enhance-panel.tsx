@@ -394,12 +394,25 @@ export function EnhancePanel({
               </Button>
             </div>
           ) : result.status === 'succeeded' ? (
-            <span>Nothing needed changing, so no new version was created.</span>
+            <span>
+              {result.warnings.length
+                ? 'No new version was created.'
+                : 'Nothing needed changing, so no new version was created.'}
+            </span>
           ) : result.status === 'failed' ? (
             <span className="text-danger">{result.error?.message ?? 'Enhancement failed.'}</span>
           ) : (
             <span>Cancelled.</span>
           )}
+          {result.status === 'succeeded' && result.warnings.length ? (
+            // What was asked for but not applied, with the reason (e.g. a retopology
+            // that did not stay close enough to the original).
+            <ul className="flex flex-col gap-1 text-warning" aria-label="Not applied">
+              {result.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
     </section>

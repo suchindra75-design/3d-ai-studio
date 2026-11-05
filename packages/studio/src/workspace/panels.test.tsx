@@ -95,6 +95,7 @@ const done = {
   progress: 1,
   stage: 'done',
   result_model_version_id: 'v2',
+  warnings: [],
 } as unknown as JobRead;
 
 it('plans, runs and links to the enhanced version', async () => {
@@ -175,6 +176,31 @@ it('asks for smoothing, retopology and baked maps', async () => {
     upscale_textures: 2,
     remesh: { method: 'quadriflow', target_faces: 5000, maps: ['normal'] },
   });
+});
+
+it('says why a requested step was not applied', async () => {
+  const reason = 'Retopology (QuadriFlow, about 300 quads): Not kept: more than the 1% allowed.';
+  const api = fakeApi({
+    models: {
+      enhancePlan: vi
+        .fn()
+        .mockResolvedValue({ quality_mode: 'high_quality', steps: [], notes: [] }),
+      enhance: vi.fn().mockResolvedValue(queued),
+    },
+    jobs: {
+      get: vi
+        .fn()
+        .mockResolvedValue({ ...done, result_model_version_id: null, warnings: [reason] }),
+    },
+  });
+  renderWithStudio(
+    <EnhancePanel projectId="p1" modelId="m1" version={version} dirty={false} onView={vi.fn()} />,
+    api,
+  );
+  await userEvent.click(screen.getByRole('button', { name: /Enhance \(High quality\)/i }));
+  expect(await screen.findByText('No new version was created.')).toBeInTheDocument();
+  expect(within(screen.getByRole('list', { name: 'Not applied' })).getByText(reason)).toBeVisible();
+  expect(screen.queryByText(/Nothing needed changing/)).not.toBeInTheDocument();
 });
 
 const ready: ExportRead = {

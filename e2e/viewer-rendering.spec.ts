@@ -3,9 +3,9 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { texturedPng } from './fixtures';
+import { modelWithVersion } from './fixtures';
 
 // The viewer's tools checked on rendered pixels, not only on their controls.
 // Model: a 1 × 1 × 1 textured box and, beside it, a sphere, both saved WITHOUT
@@ -74,38 +74,6 @@ function stats(png: Buffer, region?: [number, number, number, number]) {
   };
 }
 
-async function setup(request: APIRequestContext, name: string) {
-  const project = await (
-    await request.post('/api/v1/projects', {
-      data: { name, input_mode: 'single_image', allow_cloud_upload: true },
-    })
-  ).json();
-  const upload = await request.post(`/api/v1/projects/${project.id}/images`, {
-    multipart: {
-      files: { name: 'p.png', mimeType: 'image/png', buffer: texturedPng(300, 200, 2) },
-    },
-  });
-  const imageId = (await upload.json()).results[0].image.id as string;
-  const job = await (
-    await request.post(`/api/v1/projects/${project.id}/generations`, {
-      data: { inputs: [{ image_id: imageId }], provider: 'mock', cloud_upload_consent: true },
-    })
-  ).json();
-  await expect
-    .poll(async () => (await (await request.get(`/api/v1/jobs/${job.id}`)).json()).status)
-    .toBe('succeeded');
-  const generated = (await (await request.get(`/api/v1/projects/${project.id}/models`)).json())
-    .items[0];
-  const saved = await request.post(`/api/v1/models/${generated.id}/versions`, {
-    multipart: {
-      file: { name: 'm.glb', mimeType: 'model/gltf-binary', buffer: model() },
-      parent_version_id: generated.current_version.id,
-    },
-  });
-  expect(saved.status(), await saved.text()).toBe(201);
-  return { projectId: project.id as string, modelId: generated.id as string };
-}
-
 async function shot(canvas: Locator, page: Page): Promise<Buffer> {
   await page.waitForTimeout(250); // the view renders on demand
   return canvas.screenshot();
@@ -117,7 +85,7 @@ test('viewer tools change what is rendered, and measuring is accurate', async ({
 }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'one run is enough');
   test.setTimeout(180_000);
-  const { projectId, modelId } = await setup(request, 'E2E rendering');
+  const { projectId, modelId } = await modelWithVersion(request, 'E2E rendering', model());
   await page.goto(`/projects/${projectId}/models/${modelId}`);
   const canvas = page.getByRole('img', { name: /3D view of .*version 2/ });
   await expect(canvas).toBeVisible();
@@ -212,7 +180,7 @@ test('viewer tools change what is rendered, and measuring is accurate', async ({
 
 test('comparison views move their cameras together', async ({ page, request }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'one run is enough');
-  const { projectId, modelId } = await setup(request, 'E2E compare cameras');
+  const { projectId, modelId } = await modelWithVersion(request, 'E2E compare cameras', model());
   await page.goto(`/projects/${projectId}/models/${modelId}`);
   await expect(page.getByRole('img', { name: /3D view of .*version 2/ })).toBeVisible();
   await page.getByRole('tab', { name: 'Versions (2)' }).click();

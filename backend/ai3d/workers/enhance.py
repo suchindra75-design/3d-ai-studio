@@ -18,6 +18,7 @@ from ai3d.processing.geometry import (
     HeavyTurn,
     RemeshSettings,
     ScaleReference,
+    Step,
     UpscaleLimits,
     process,
 )
@@ -122,8 +123,12 @@ def _run(ctx: JobContext, workdir: Path) -> None:
         )
     if ctx.heartbeat():
         raise _CancelledError
+    # What the user asked for but did not happen, with the reason (shown with the result).
+    params = {**job.params, "warnings": not_applied(result.steps)}
     if not result.changed:
-        if ctx.finish(JobStatus.SUCCEEDED, stage="done", progress=1.0, cancel_requested=False):
+        if ctx.finish(
+            JobStatus.SUCCEEDED, stage="done", progress=1.0, cancel_requested=False, params=params
+        ):
             ctx.event(
                 JobEventType.STATUS,
                 "Nothing needed changing, so no new version was created.",
@@ -162,6 +167,7 @@ def _run(ctx: JobContext, workdir: Path) -> None:
         progress=1.0,
         result_model_version_id=version.id,
         cancel_requested=False,
+        params=params,
     ):
         ctx.event(
             JobEventType.STATUS,
@@ -170,6 +176,24 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             progress=1.0,
             data={"model_version_id": str(version.id)},
         )
+
+
+# Steps that run only when asked for; the others are routine checks that may well
+# find nothing to do.
+OPTIONAL_STEPS = frozenset(
+    {"ground", "smoothing", "retopology", "maps", "baking", "upscale", "scale"}
+)
+
+
+def not_applied(steps: list[Step]) -> list[str]:
+    """Requested steps that did not apply, as "Title: reason"."""
+    return [
+        f"{s.title}: {s.detail}"
+        for s in steps
+        if s.code in OPTIONAL_STEPS
+        and s.status in {"skipped", "unavailable"}
+        and s.detail != "Not requested."
+    ]
 
 
 class _CancelledError(Exception):

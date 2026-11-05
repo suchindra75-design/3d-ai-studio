@@ -369,6 +369,27 @@ def test_quadriflow_retopology_through_enhance_keeps_shape_and_colours_and_bakes
     assert colours[bottom, 2].mean() < 0.2
 
 
+def test_a_rejected_retopology_says_why(
+    client: TestClient, runner: JobRunner, make_image_project: MakeImageProject
+) -> None:
+    """Too few quads for a bumpy surface: not kept, and the job says why (not just
+    "nothing needed changing")."""
+    model = _generated_model(client, runner, make_image_project)
+    rng = np.random.default_rng(3)
+    ball = trimesh.creation.icosphere(subdivisions=4, radius=RADIUS)
+    ball.vertices = ball.vertices * (1 + 0.04 * rng.standard_normal(len(ball.vertices)))[:, None]
+    _save(client, model["id"], model["current_version"]["id"], _scene(ball).export(file_type="glb"))
+    body = {"quality_mode": "high_quality", "remesh": {"method": "quadriflow", "target_faces": 300}}
+    job = client.post(f"/api/v1/models/{model['id']}/enhance", json=body).json()
+    assert runner.run_until_idle() == 1
+    final = client.get(f"/api/v1/jobs/{job['id']}").json()
+    assert final["status"] == "succeeded", final["error"]
+    assert final["result_model_version_id"] is None
+    (warning,) = final["warnings"]
+    assert warning.startswith("Retopology (QuadriFlow, about 300 quads): Not kept:")
+    assert "more than the 1% allowed" in warning
+
+
 def test_voxel_remesh_rebakes_the_texture_onto_new_uvs(tmp_path: Path) -> None:
     scene = _scene(_textured_sphere(4, _texture()))
     result = process(
