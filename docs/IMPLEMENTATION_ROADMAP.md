@@ -885,6 +885,19 @@ upscaler installed):
   and axes. An FBX written by the app's own exporter imports back with the
   same triangle count, size and texture. Without Blender, the import says FBX
   needs Blender.
+- **Texture adjustments** (a material's *Adjust colours and tiling* in the
+  inspector):
+  - brightness, contrast, saturation and hue are baked into the texture's
+    pixels, or into the vertex colours when there is no texture (as on local
+    AI models);
+  - repeat, offset and rotation are baked into the texture coordinates, so
+    they survive saving and every export (a glTF texture-transform extension
+    would be dropped by trimesh and by the OBJ, STL, USDZ and FBX exports);
+  - colours preview while dragging (textures at 512 px) and *Apply* records
+    one undoable edit at full resolution; the panel says when only a preview
+    is showing;
+  - a browser test checks the saved file: the texture is grey, the UVs span
+    3 × 2 times their range, and the vertex colours are brighter (D54).
 
 ## Roadmap after the capability audit (2026-11-04)
 
@@ -963,7 +976,7 @@ Not planned: billing or subscriptions, public release work.
 | Several backend processes sharing one queue: tested with independent workers racing (4 claiming 40 jobs; 2 running 6 to the end) on SQLite and in CI's PostgreSQL job; not tested as separate OS processes | Enough for now |
 | Tauri window not automated (no WebDriver on macOS); native Save dialog not clicked through by hand | Linux/Windows CI with tauri-driver |
 | Main JS chunk 601 KB (186 KB gzipped): React 33%, React Router 20%, TanStack Query 8%, app code 8%; 3D code (1.2 MB) loads only in the workspace | Measured 2026-11-05; accepted |
-| Vertex-level editing, texture adjustments, KTX2 textures | Later |
+| Vertex-level editing, KTX2 textures | Later |
 | Light theme | Not planned |
 
 Resolved since the first list: CI runs on every push to GitHub; its six jobs,

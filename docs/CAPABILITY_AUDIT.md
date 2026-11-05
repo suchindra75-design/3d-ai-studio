@@ -125,7 +125,8 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 - **Added in Phase 11:** replace or add a base-colour texture; a UV layout
   view.
 - **Missing:**
-  - Adjusting a texture (brightness, tiling), other maps.
+  - Roughness maps; texture painting. (Colour adjustments and tiling: added
+    2026-11-05.)
   - Generating roughness maps (normal and occlusion maps: Phase 13).
   - Texture painting.
 

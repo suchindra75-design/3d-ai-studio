@@ -28,6 +28,7 @@ import { useMemo, useRef, type ReactNode } from 'react';
 import * as THREE from 'three';
 
 import { provenanceLabel, reportStatusLabel, reportStatusTone } from '../labels';
+import { AdjustControls } from './adjust-controls';
 import { ModelActions, PartActions, TextureControls, type RunEdit } from './edit-tools';
 import { ColorField, LiveSlider, Vec3Field, type Vec3 } from './fields';
 import { scaleOf, sizeLabel } from './scale';
@@ -201,6 +202,13 @@ function MaterialEditor({
         </p>
       ) : null}
       <TextureControls root={root} material={material} onEdit={onEdit} revision={revision} />
+      <AdjustControls
+        root={root}
+        material={material}
+        onEdit={onEdit}
+        onPreview={onPreview}
+        revision={revision}
+      />
     </li>
   );
 }

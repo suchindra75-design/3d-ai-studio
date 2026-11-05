@@ -32,3 +32,18 @@ export {
 export { cutCommand, cutGeometry, type CutResult, type CutSummary } from './cut';
 export { MAX_TEXTURE_SIZE, canTexture, textureCommand, uvTriangles } from './texture';
 export { ClipPreview } from './clip-preview';
+export {
+  NO_ADJUST,
+  NO_TILING,
+  adjustPixels,
+  adjustRgb,
+  adjustedCanvas,
+  colourAdjustCommand,
+  colourTarget,
+  isNeutral,
+  meshesUsing,
+  tilingCommand,
+  transformUv,
+  type ColourAdjust,
+  type Tiling,
+} from './adjust';
