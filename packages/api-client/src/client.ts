@@ -29,6 +29,7 @@ import type {
   ProjectUpdate,
   ProviderList,
   ProviderRead,
+  RetextureRequest,
   RetryRequest,
   SystemInfo,
   UploadResponse,
@@ -261,6 +262,9 @@ export function createApiClient({ baseUrl, token, fetch: fetchImpl }: ApiClientO
         for (const change of changes) form.append('changes', change);
         return request<ModelVersionRead>('POST', `/api/v1/models/${id}/versions`, { form });
       },
+      /** A cloud service re-textures a version (uploads the model; asks first). */
+      retexture: (id: string, body: RetextureRequest) =>
+        request<JobRead>('POST', `/api/v1/models/${id}/retexture`, { body }),
       enhancePlan: (id: string, body: EnhanceRequest) =>
         request<EnhancePlanRead>('POST', `/api/v1/models/${id}/enhance/plan`, { body }),
       /** Starts a background job; the source version is never changed. */

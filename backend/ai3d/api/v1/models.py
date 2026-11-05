@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from ai3d.api.deps import DbDep, ProvidersDep, RunnerDep, SettingsDep, StorageDep
 from ai3d.core.errors import NotFoundError
 from ai3d.models.enums import AssetKind
-from ai3d.schemas.enhance import EnhancePlanRead, EnhanceRequest
+from ai3d.schemas.enhance import EnhancePlanRead, EnhanceRequest, RetextureRequest
 from ai3d.schemas.job import JobRead
 from ai3d.schemas.model3d import (
     ModelList,
@@ -19,6 +19,7 @@ from ai3d.schemas.model3d import (
 from ai3d.services import enhance as enhance_service
 from ai3d.services import jobs as job_service
 from ai3d.services import models as model_service
+from ai3d.services import retexture as retexture_service
 from ai3d.services import transfer as transfer_service
 
 router = APIRouter(tags=["models"])
@@ -226,5 +227,27 @@ def enhance(
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
 ) -> JobRead:
     job = enhance_service.create_enhance_job(db, model_id, body, idempotency_key=idempotency_key)
+    runner.wake()
+    return job_service.to_read(db, providers, job_service.get_job(db, job.id))
+
+
+@router.post(
+    "/models/{model_id}/retexture",
+    response_model=JobRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Re-texture a version with a cloud service (uploads the model)",
+    description="Without `cloud_upload_consent` (or in a local-only project) the job waits "
+    "for permission and nothing is sent. Tripo can only re-texture models it generated. The "
+    "result is a new `enhanced` version; the source version is never changed.",
+)
+def retexture(
+    *,
+    model_id: uuid.UUID,
+    body: RetextureRequest,
+    db: DbDep,
+    providers: ProvidersDep,
+    runner: RunnerDep,
+) -> JobRead:
+    job = retexture_service.create_retexture_job(db, providers, model_id, body)
     runner.wake()
     return job_service.to_read(db, providers, job_service.get_job(db, job.id))

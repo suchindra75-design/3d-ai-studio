@@ -805,6 +805,68 @@ Checks run on 2026-11-04 (COLMAP and Blender installed):
 - Backups over the web app's 520 MB request limit cannot be restored through
   the web app; the desktop app has no such limit.
 
+## Phase 14 — AI enhancement ✅ (cloud re-texturing tested against fakes; local upscaling verified)
+
+**Re-texture with a cloud service** (Enhance tab, `POST /models/{id}/retexture`):
+- An AI service paints new textures for a version. The result is a new
+  `enhanced` version whose notes say the textures are made up and the shape
+  is the service's copy.
+- **Meshy** (Retexture API): any model up to 100 MB, sent as a data URI,
+  with a required description of the texture; PBR maps from High quality.
+- **Tripo** (`POST /models/texture`): only models Tripo generated,
+  referenced by their task id, so nothing new is uploaded. Its documented
+  upload API takes images only, and the texture API lists its own model
+  versions, so none is sent.
+- **Consent** works exactly like sending photos (D52):
+  - the person ticks the upload before the button works;
+  - without that tick, or in a local-only project, the job waits for
+    permission and nothing is sent;
+  - the job list says "send the model" rather than counting photos.
+- Prices: neither service's API docs state a retexture price, so no estimate
+  is shown, only the charge the service reports afterwards.
+- It runs through the same provider pipeline as generation: retries,
+  resuming after a restart, cancelling where the service allows it, and
+  downloading the result immediately.
+
+**Local AI texture upscaling** (Enhance → Surface → *AI texture upscaling* ×2 or
+×4):
+- **The model:** Real-ESRGAN's compact model (`realesr-general-x4v3.pth`,
+  4.9 MB, BSD-3-Clause), downloaded with your approval on 2026-11-04 and
+  pinned by SHA-256 in the local-AI manifest. New installs get it;
+  existing ones add it with `uv run ai3d-local-ai install-upscaler`.
+- **How it runs** (D53): the network (32 conv + PReLU layers, ×4 pixel
+  shuffle) is written out in the engine's script. The weights load as plain
+  tensors, and it runs through the same restricted runner as TripoSR (`-I`,
+  fixed script, offline, minimal environment).
+- **Memory:** tiles are resized to their final size as they are made, so
+  memory follows the output size.
+- **Limits:** base-colour textures up to 4096 px, never beyond the quality
+  mode's texture size; the step uses the heavy-work slot.
+- **Measured** (6-core Intel CPU):
+  - 1024 → 2048 px in 17 s through Enhance;
+  - 2048 → 4096 px in 64 s, and → 8192 px in 72 s.
+  - On the scan's texture (shrunk 4× and brought back), it was sharper than
+    a conventional (Lanczos) upscale: edge energy 12.0 against 9.2, the
+    original 15.8. It was not closer to the original: 22.1 against 22.2 dB.
+- **What the UI and report say:** it invents plausible detail and does not
+  recover real detail.
+
+Checks run on 2026-11-05 (COLMAP, Blender, the local AI engine and the
+upscaler installed):
+- **Python:** 343 tests passed. The real local AI tests ran separately with
+  `AI3D_LOCAL_AI_DIR`: all 12 passed, including TripoSR on a real photo and
+  the real upscaler.
+- **Frontend:** 108 unit tests.
+- **Browser tests:** web 24, desktop UI 2, job workflows 2.
+- **Rust:** 14 tests.
+- **Static checks:** ruff, mypy, ESLint, Prettier, tsc, cargo fmt, clippy
+  and builds.
+
+**Not verified:**
+- Neither retexture API has been called for real (no paid key); like the
+  Phase 2 adapters, they are tested against fakes built from the docs as of
+  2026-11-04.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
@@ -854,9 +916,9 @@ working and adds tests that use real tools and real data.
 - Smoothing and remeshing.
 - Normal and ambient-occlusion map baking.
 
-**Phase 14 — AI enhancement.**
-- Local texture super-resolution (permissive licences only).
-- Optional provider refine/retexture with consent.
+**Phase 14 — AI enhancement ✅ (see above).**
+- Local texture super-resolution (Real-ESRGAN compact, BSD-3-Clause) ✅.
+- Optional provider retexture with consent ✅ (Meshy, Tripo; fakes only).
 
 **Phase 15 — Projects ✅ (see above).**
 - Import existing 3D files (GLB/OBJ/STL/PLY/3MF, ZIPs) as models.

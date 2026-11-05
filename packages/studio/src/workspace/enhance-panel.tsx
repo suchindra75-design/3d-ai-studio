@@ -47,6 +47,7 @@ export function EnhancePanel({
     remesh: useId(),
     faces: useId(),
     resolution: useId(),
+    upscale: useId(),
   };
   const [quality, setQuality] = useState<QualityMode>('high_quality');
   const [removeGround, setRemoveGround] = useState(version.source === 'reconstructed');
@@ -58,6 +59,7 @@ export function EnhancePanel({
   const [targetFaces, setTargetFaces] = useState('20000');
   const [resolution, setResolution] = useState('300');
   const [maps, setMaps] = useState<('normal' | 'occlusion')[]>([]);
+  const [upscale, setUpscale] = useState<0 | 2 | 4>(0);
   const [jobId, setJobId] = useState<string | null>(null);
   const key = useRef(newIdempotencyKey());
 
@@ -70,6 +72,7 @@ export function EnhancePanel({
     remove_ground: removeGround,
     scale: useScale && scaleValid && length ? { axis, length_mm: lengthMm } : null,
     smoothing,
+    upscale_textures: upscale === 0 ? null : upscale,
     remesh:
       remeshMethod === 'none'
         ? null
@@ -163,6 +166,28 @@ export function EnhancePanel({
             <option value={10}>Medium (10 passes)</option>
             <option value={30}>Strong (30 passes)</option>
           </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={ids.upscale} className="text-xs">
+            AI texture upscaling
+          </Label>
+          <select
+            id={ids.upscale}
+            className={selectClass}
+            value={upscale}
+            onChange={(event) => setUpscale(Number(event.target.value) as 0 | 2 | 4)}
+          >
+            <option value={0}>Off</option>
+            <option value={2}>×2 (Real-ESRGAN, on this computer)</option>
+            <option value={4}>×4 (Real-ESRGAN, on this computer)</option>
+          </select>
+          {upscale ? (
+            <p className="text-[11px] leading-relaxed text-subtle-foreground">
+              Makes textures look sharper by inventing plausible fine detail; it does not recover
+              detail the photos never had. Up to the quality mode’s texture size; about a minute for
+              a 2048 px texture.
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor={ids.remesh} className="text-xs">

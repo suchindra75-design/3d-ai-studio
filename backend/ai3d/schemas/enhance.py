@@ -45,6 +45,11 @@ class EnhanceRequest(Schema):
     scale: ScaleReferenceIn | None = None
     smoothing: int = Field(default=0, ge=0, le=50, description="Taubin smoothing passes (0 = off).")
     remesh: RemeshIn | None = None
+    upscale_textures: Literal[2, 4] | None = Field(
+        default=None,
+        description="Enlarge base-colour textures ×2 or ×4 with the local AI upscaler "
+        "(invents plausible detail; within the quality mode's texture size).",
+    )
 
 
 class EnhanceStepPlan(Schema):
@@ -60,3 +65,20 @@ class EnhancePlanRead(Schema):
     quality_mode: QualityMode
     steps: list[EnhanceStepPlan]
     notes: list[str]
+
+
+class RetextureRequest(Schema):
+    """Ask a cloud service to make new textures for an existing version."""
+
+    provider: str = Field(max_length=64)
+    prompt: str = Field(
+        default="", max_length=800, description="What the new texture should look like."
+    )
+    quality_mode: QualityMode = QualityMode.HIGH_QUALITY
+    # Omitted = the model's current version. The source version is never changed.
+    source_version_id: uuid.UUID | None = None
+    cloud_upload_consent: bool = Field(
+        default=False,
+        description="Confirms the model may be uploaded to the provider. Without it the job "
+        "waits for permission and nothing is sent.",
+    )

@@ -24,6 +24,8 @@ class ProviderCapabilitiesRead(Schema):
     reports_progress: bool
     notes: list[str]
     photogrammetry: MultiViewLimitsRead | None = None
+    retexture: bool = False
+    retexture_own_models_only: bool = False
 
 
 class ProviderRead(Schema):

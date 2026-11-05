@@ -183,7 +183,7 @@ def install(root: Path, *, skip_test: bool = False) -> dict[str, object]:
     archive = download(manifest.SOURCE, root)
     source_dir = _extract_source(archive, root)
     archive.unlink()
-    for artifact in manifest.WEIGHTS:
+    for artifact in (*manifest.WEIGHTS, manifest.UPSCALER):
         download(artifact, root)
 
     record: dict[str, object] = {
@@ -195,7 +195,7 @@ def install(root: Path, *, skip_test: bool = False) -> dict[str, object]:
         "versions": _environment_versions(root),
         "artifacts": [
             {"name": a.name, "sha256": a.sha256, "licence": a.licence, "source": a.source}
-            for a in (manifest.SOURCE, *manifest.WEIGHTS)
+            for a in (manifest.SOURCE, *manifest.WEIGHTS, manifest.UPSCALER)
         ],
     }
     # A provisional record lets the test use the normal code path; it is removed on failure.
@@ -225,7 +225,7 @@ def _summary(root: Path) -> str:
         f"This installs the local AI engine ({manifest.ENGINE_NAME}) into {root}:",
         "  • its own Python environment with PyTorch (about 1 GB, from PyPI via uv)",
     ]
-    for a in (manifest.SOURCE, *manifest.WEIGHTS):
+    for a in (manifest.SOURCE, *manifest.WEIGHTS, manifest.UPSCALER):
         size = f", {a.size / 1e6:,.0f} MB" if a.size > 1_000_000 else ""
         lines.append(f"  • {a.name}{size}: {a.licence}, from {a.source}")
     lines.append(
@@ -237,7 +237,7 @@ def _summary(root: Path) -> str:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ai3d-local-ai", description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=["status", "install", "uninstall"])
+    parser.add_argument("command", choices=["status", "install", "install-upscaler", "uninstall"])
     parser.add_argument("--dir", type=Path, default=None, help="engine folder")
     parser.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     parser.add_argument("--skip-test", action="store_true")
@@ -263,6 +263,19 @@ def main(argv: list[str] | None = None) -> None:
         if root.exists():
             shutil.rmtree(root)
             print(f"Removed {root}")
+        return
+    if options.command == "install-upscaler":
+        a = manifest.UPSCALER
+        print(
+            f"This adds {a.name} ({a.size / 1e6:.1f} MB, {a.licence}, from {a.source}) to {root}."
+        )
+        if not options.yes and input("Download it? [y/N] ").strip().lower() not in {"y", "yes"}:
+            print("Nothing was downloaded.")
+            return
+        try:
+            download(a, root)
+        except InstallError as exc:
+            sys.exit(f"Download failed: {exc}")
         return
     print(_summary(root))
     if not options.yes and input("Install? [y/N] ").strip().lower() not in {"y", "yes"}:

@@ -27,6 +27,7 @@ from ai3d_engine.local_ai import manifest
 log = logging.getLogger(__name__)
 
 SCRIPT = Path(__file__).resolve().parent.parent / "local_ai_scripts" / "triposr_generate.py"
+UPSCALE_SCRIPT = SCRIPT.with_name("upscale_texture.py")
 TAIL_LINES = 30
 STAGES = ("starting", "background", "loading", "generating", "meshing")
 
@@ -197,11 +198,92 @@ def generate(
         resolution=resolution,
         device=device,
     )
+    result = _run_script(
+        SCRIPT,
+        request,
+        workdir,
+        state=state,
+        timeout=timeout,
+        cancel=cancel,
+        on_progress=on_progress,
+        poll_seconds=poll_seconds,
+    )
+    result["glb"] = str(workdir / "model.glb")
+    result["prepared_image"] = str(workdir / "prepared.png")
+    return result
+
+
+def upscaler_problem(root: Path | None = None) -> str | None:
+    """Why the texture upscaler cannot run, or None when it can."""
+    state = status(root)
+    if not state.installed:
+        return state.problem
+    weights = state.path / manifest.UPSCALER.path
+    if not weights.is_file() or weights.stat().st_size != manifest.UPSCALER.size:
+        return (
+            "The texture upscaler is not installed. Add it with "
+            "`uv run ai3d-local-ai install-upscaler` (4.9 MB)."
+        )
+    return None
+
+
+def upscale(
+    image: Path,
+    output: Path,
+    workdir: Path,
+    *,
+    scale: int,
+    max_size: int,
+    timeout: float = 1800.0,
+    cancel: CancelCheck | None = None,
+    on_progress: ProgressCallback | None = None,
+    poll_seconds: float = 0.5,
+) -> dict[str, Any]:
+    """Upscale one texture image (×2 or ×4, at most ``max_size`` px) into ``output``.
+
+    Raises LocalAINotInstalledError, LocalAICancelledError or LocalAIFailedError.
+    """
+    problem = upscaler_problem()
+    if problem is not None:
+        raise LocalAINotInstalledError(problem)
+    state = status()
+    workdir.mkdir(parents=True, exist_ok=True)
+    request = {
+        "input": str(image),
+        "output": str(output),
+        "scale": int(scale),
+        "max_size": int(max_size),
+        "weights": str(state.path / manifest.UPSCALER.path),
+    }
+    return _run_script(
+        UPSCALE_SCRIPT,
+        request,
+        workdir,
+        state=state,
+        timeout=timeout,
+        cancel=cancel,
+        on_progress=on_progress,
+        poll_seconds=poll_seconds,
+    )
+
+
+def _run_script(
+    script: Path,
+    request: dict[str, Any],
+    workdir: Path,
+    *,
+    state: EngineStatus,
+    timeout: float,
+    cancel: CancelCheck | None,
+    on_progress: ProgressCallback | None,
+    poll_seconds: float,
+) -> dict[str, Any]:
+    """Run one of the engine's own scripts (fixed interpreter, ``-I``, minimal env)."""
     request_path, result_path = workdir / "request.json", workdir / "result.json"
     log_path = workdir / "local-ai.log"
     result_path.unlink(missing_ok=True)
     request_path.write_text(json.dumps(request), encoding="utf-8")
-    args = [str(env_python(state.path)), "-I", str(SCRIPT), str(request_path), str(result_path)]
+    args = [str(env_python(state.path)), "-I", str(script), str(request_path), str(result_path)]
     started = time.monotonic()
     read_at = 0
     with log_path.open("w", encoding="utf-8", errors="replace") as log_file:
@@ -245,8 +327,6 @@ def generate(
             result = None
     if result and result.get("ok") is True and returncode == 0:
         result["seconds_wall"] = round(time.monotonic() - started, 2)
-        result["glb"] = str(workdir / "model.glb")
-        result["prepared_image"] = str(workdir / "prepared.png")
         return result
     message = (
         str(result["error"])

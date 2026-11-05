@@ -90,6 +90,10 @@ class ProviderCapabilities:
     notes: tuple[str, ...] = ()
     # Measured reconstruction from many overlapping photos (local engines).
     photogrammetry: MultiViewLimits | None = None
+    # Can re-texture an existing model (JobKind.RETEXTURE); the model is uploaded.
+    retexture: bool = False
+    # Only models this provider generated itself can be re-textured.
+    retexture_own_models_only: bool = False
 
     def supports(self, kind: JobKind) -> bool:
         if kind == JobKind.IMAGE_TO_3D:
@@ -98,6 +102,8 @@ class ProviderCapabilities:
             return self.multi_view is not None
         if kind == JobKind.PHOTOGRAMMETRY:
             return self.photogrammetry is not None
+        if kind == JobKind.RETEXTURE:
+            return self.retexture
         return False
 
 

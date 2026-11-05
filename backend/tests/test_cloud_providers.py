@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx2
 import pytest
+import trimesh
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -392,3 +393,131 @@ def test_check_reports_rejected_key(tmp_path: Path, database_url: str, tripo: Fa
         "balance": None,
         "unit": None,
     }
+
+
+# -- re-texturing (JobKind.RETEXTURE) --------------------------------------------
+
+
+def _imported_model(client: TestClient, *, allow_cloud: bool = True) -> tuple[str, dict[str, Any]]:
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": "Retexture", "input_mode": "single_image", "allow_cloud_upload": allow_cloud},
+    ).json()
+    stl = trimesh.creation.box(extents=(20, 20, 20)).export(file_type="stl")
+    model = client.post(
+        f"/api/v1/projects/{project['id']}/models/import",
+        files={"file": ("cube.stl", stl, "model/stl")},
+    ).json()
+    return project["id"], model
+
+
+def _run_jobs(client: TestClient) -> None:
+    runner: JobRunner = client.app.state.runner  # type: ignore[attr-defined]
+    runner.run_until_idle()
+
+
+def test_meshy_retextures_an_uploaded_model_into_a_new_version(
+    cloud_client: TestClient, meshy: FakeMeshy
+) -> None:
+    _, model = _imported_model(cloud_client)
+    response = cloud_client.post(
+        f"/api/v1/models/{model['id']}/retexture",
+        json={"provider": "meshy", "prompt": "weathered bronze", "cloud_upload_consent": True},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["kind"] == "retexture"
+    _run_jobs(cloud_client)
+    job = cloud_client.get(f"/api/v1/jobs/{response.json()['id']}").json()
+    assert job["status"] == "succeeded", job["error"]
+
+    sent = meshy.calls("POST", "/retexture")[0].json()
+    assert sent["model_url"].startswith("data:application/octet-stream;base64,")
+    glb = base64.b64decode(sent["model_url"].split(",", 1)[1])
+    assert glb[:4] == b"glTF"  # the version's own GLB was sent
+    assert sent["text_style_prompt"] == "weathered bronze"
+    assert sent["enable_pbr"] is True
+    assert "prompt" not in sent
+    assert "source_task_id" not in sent
+
+    versions = cloud_client.get(f"/api/v1/models/{model['id']}/versions").json()["items"]
+    assert [v["version_number"] for v in versions] == [2, 1]
+    new = versions[0]
+    assert new["source"] == "enhanced"
+    assert new["parent_version_id"] == versions[1]["id"]
+    assert "Re-textured by Meshy" in new["notes"]
+    assert "weathered bronze" in new["notes"]
+    assert "made up by an AI model" in new["notes"]
+    assert new["surface_provenance"] == "unknown"  # the parent's, unchanged
+
+
+def test_nothing_is_sent_without_permission_and_local_only_projects_must_allow_it(
+    cloud_client: TestClient, meshy: FakeMeshy
+) -> None:
+    _, model = _imported_model(cloud_client, allow_cloud=False)
+    job = cloud_client.post(
+        f"/api/v1/models/{model['id']}/retexture",
+        json={"provider": "meshy", "prompt": "red clay", "cloud_upload_consent": True},
+    ).json()
+    assert job["status"] == "waiting_for_consent"
+    assert job["consent_reason"] == "project_local_only"
+    _run_jobs(cloud_client)
+    assert meshy.calls("POST", "/retexture") == []
+    refused = cloud_client.post(f"/api/v1/jobs/{job['id']}/consent", json={})
+    assert refused.status_code == 409
+    granted = cloud_client.post(
+        f"/api/v1/jobs/{job['id']}/consent", json={"allow_project_cloud_upload": True}
+    )
+    assert granted.status_code == 200, granted.text
+    _run_jobs(cloud_client)
+    assert len(meshy.calls("POST", "/retexture")) == 1
+    assert cloud_client.get(f"/api/v1/jobs/{job['id']}").json()["status"] == "succeeded"
+
+
+def test_tripo_retextures_only_its_own_models_by_task_id(
+    cloud_client: TestClient, tripo: FakeTripo
+) -> None:
+    _, imported = _imported_model(cloud_client)
+    refused = cloud_client.post(
+        f"/api/v1/models/{imported['id']}/retexture",
+        json={"provider": "tripo", "prompt": "gold", "cloud_upload_consent": True},
+    )
+    assert refused.status_code == 422
+    assert "can only re-texture models it generated" in refused.json()["error"]["message"]
+
+    project_id, ids = _project_with_photos(cloud_client, 1)
+    generated = _run(cloud_client, project_id, ids, provider="tripo")
+    assert generated["status"] == "succeeded"
+    model_id = generated["result_model_id"]
+    uploads_before = len(tripo.calls("POST", "/files"))
+    response = cloud_client.post(
+        f"/api/v1/models/{model_id}/retexture",
+        json={"provider": "tripo", "prompt": "", "cloud_upload_consent": True},
+    )
+    assert response.status_code == 201, response.text
+    _run_jobs(cloud_client)
+    job = cloud_client.get(f"/api/v1/jobs/{response.json()['id']}").json()
+    assert job["status"] == "succeeded", job["error"]
+    body = tripo.calls("POST", "/models/texture")[0].json()
+    assert body["input"] == "task-1"  # the generation task: nothing re-uploaded
+    assert body["pbr"] is True
+    assert "texture_prompt" not in body  # no prompt: Tripo uses the original image
+    assert "model" not in body
+    assert len(tripo.calls("POST", "/files")) == uploads_before
+
+
+def test_meshy_needs_a_description(cloud_client: TestClient) -> None:
+    _, model = _imported_model(cloud_client)
+    response = cloud_client.post(
+        f"/api/v1/models/{model['id']}/retexture",
+        json={"provider": "meshy", "prompt": "  ", "cloud_upload_consent": True},
+    )
+    assert response.status_code == 422
+    assert "Describe the texture" in response.json()["error"]["message"]
+
+
+def test_providers_say_whether_they_can_retexture(cloud_client: TestClient) -> None:
+    items = {p["key"]: p for p in cloud_client.get("/api/v1/providers").json()["items"]}
+    assert items["meshy"]["capabilities"]["retexture"] is True
+    assert items["meshy"]["capabilities"]["retexture_own_models_only"] is False
+    assert items["tripo"]["capabilities"]["retexture_own_models_only"] is True
+    assert items["local-triposr"]["capabilities"]["retexture"] is False

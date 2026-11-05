@@ -360,6 +360,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models/{model_id}/retexture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-texture a version with a cloud service (uploads the model)
+         * @description Without `cloud_upload_consent` (or in a local-only project) the job waits for permission and nothing is sent. Tripo can only re-texture models it generated. The result is a new `enhanced` version; the source version is never changed.
+         */
+        post: operations["retexture_api_v1_models__model_id__retexture_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/models/{model_id}/versions": {
         parameters: {
             query?: never;
@@ -855,6 +875,11 @@ export interface components {
             smoothing?: number;
             /** Source Version Id */
             source_version_id?: string | null;
+            /**
+             * Upscale Textures
+             * @description Enlarge base-colour textures ×2 or ×4 with the local AI upscaler (invents plausible detail; within the quality mode's texture size).
+             */
+            upscale_textures?: (2 | 4) | null;
         };
         /** EnhanceStepPlan */
         EnhanceStepPlan: {
@@ -1210,7 +1235,7 @@ export interface components {
          * JobKind
          * @enum {string}
          */
-        JobKind: "image_to_3d" | "multi_view_to_3d" | "photogrammetry" | "enhance" | "quality_check" | "export";
+        JobKind: "image_to_3d" | "multi_view_to_3d" | "photogrammetry" | "enhance" | "retexture" | "quality_check" | "export";
         /** JobList */
         JobList: {
             /** Items */
@@ -1609,6 +1634,16 @@ export interface components {
             photogrammetry: components["schemas"]["MultiViewLimitsRead"] | null;
             /** Reports Progress */
             reports_progress: boolean;
+            /**
+             * Retexture
+             * @default false
+             */
+            retexture: boolean;
+            /**
+             * Retexture Own Models Only
+             * @default false
+             */
+            retexture_own_models_only: boolean;
             /** Single Image */
             single_image: boolean;
             /** Supports Pbr */
@@ -1766,6 +1801,30 @@ export interface components {
          * @enum {string}
          */
         ReportStatus: "pass" | "warn" | "fail";
+        /**
+         * RetextureRequest
+         * @description Ask a cloud service to make new textures for an existing version.
+         */
+        RetextureRequest: {
+            /**
+             * Cloud Upload Consent
+             * @description Confirms the model may be uploaded to the provider. Without it the job waits for permission and nothing is sent.
+             * @default false
+             */
+            cloud_upload_consent?: boolean;
+            /**
+             * Prompt
+             * @description What the new texture should look like.
+             * @default
+             */
+            prompt?: string;
+            /** Provider */
+            provider: string;
+            /** @default high_quality */
+            quality_mode?: components["schemas"]["QualityMode"];
+            /** Source Version Id */
+            source_version_id?: string | null;
+        };
         /** RetryRequest */
         RetryRequest: {
             /**
@@ -1934,6 +1993,7 @@ export type QualityReportRead = components['schemas']['QualityReportRead'];
 export type QualityWarningRead = components['schemas']['QualityWarningRead'];
 export type RemeshIn = components['schemas']['RemeshIn'];
 export type ReportStatus = components['schemas']['ReportStatus'];
+export type RetextureRequest = components['schemas']['RetextureRequest'];
 export type RetryRequest = components['schemas']['RetryRequest'];
 export type ScaleReferenceIn = components['schemas']['ScaleReferenceIn'];
 export type SurfaceProvenance = components['schemas']['SurfaceProvenance'];
@@ -2907,6 +2967,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnhancePlanRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    retexture_api_v1_models__model_id__retexture_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetextureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRead"];
                 };
             };
             /** @description Client error */

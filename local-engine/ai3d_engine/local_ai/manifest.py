@@ -79,6 +79,19 @@ WEIGHTS = (
     ),
 )
 
+# Optional texture upscaler (Enhance → AI texture upscaling). Small, installed with the
+# engine; an existing engine gets it with `ai3d-local-ai install-upscaler`. BSD-3-Clause
+# like the Real-ESRGAN code (checked 2026-11-04).
+UPSCALER = Artifact(
+    name="Real-ESRGAN compact texture upscaler (×4)",
+    url="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
+    sha256="8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292",
+    size=4_885_111,
+    path="models/realesrgan/realesr-general-x4v3.pth",
+    licence="BSD-3-Clause (Real-ESRGAN, Xintao Wang et al.)",
+    source="github.com/xinntao/Real-ESRGAN release v0.2.5.0",
+)
+
 # Installed with uv into the engine's own environment (never the backend's).
 # PyTorch 2.2.2 is the last release with Intel-Mac wheels and needs NumPy 1.x;
 # other platforms get a current PyTorch. Only the Intel-Mac set has been run.

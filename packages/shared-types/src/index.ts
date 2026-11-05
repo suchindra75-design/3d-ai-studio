@@ -67,6 +67,7 @@ export type {
   QualityReportRead,
   QualityWarningRead,
   ReportStatus,
+  RetextureRequest,
   RetryRequest,
   ScaleReferenceIn,
   SurfaceProvenance,

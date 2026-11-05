@@ -37,6 +37,7 @@ from ai3d_engine.blender import (
     check_blender,
     run_blender,
 )
+from ai3d_engine.local_ai import engine as local_ai_engine
 
 log = logging.getLogger(__name__)
 
@@ -272,6 +273,87 @@ def fill_holes(scene: trimesh.Scene) -> Step:
             "colour (that needs texture baking).",
         )
     return Step("holes", title, "skipped", "No small holes that could be closed.")
+
+
+# Measured on a 6-core Intel CPU: 1024 px → 2048 px in 17 s, 2048 px → 4096 px in about a
+# minute; a 4096 px input takes about five. Larger inputs are not upscaled.
+MAX_UPSCALE_INPUT = 4096
+
+UPSCALE_DETAIL = (
+    "AI upscaling makes textures look sharper by inventing plausible fine detail; it does "
+    "not recover detail the original texture never had."
+)
+
+
+def upscale_textures(
+    scene: trimesh.Scene,
+    scale: int,
+    max_size: int,
+    *,
+    workdir: Path | None = None,
+    cancel: CancelCheck | None = None,
+) -> Step:
+    """Upscale base-colour textures with the local AI engine (Real-ESRGAN compact).
+
+    Each distinct texture smaller than ``max_size`` is enlarged ×``scale`` (capped at
+    ``max_size``); UVs are unaffected. Raises LocalAICancelledError when cancelled.
+    """
+    title = f"AI texture upscaling (×{scale})"
+    problem = local_ai_engine.upscaler_problem()
+    if problem is not None:
+        return Step("upscale", title, "unavailable", problem)
+    done: list[str] = []
+    large: list[str] = []
+    seen: set[int] = set()
+    with tempfile.TemporaryDirectory(prefix="upscale-", dir=workdir) as tmp:
+        root = Path(tmp)
+        for _, mesh in _meshes(scene):
+            material = getattr(mesh.visual, "material", None)
+            for attr in ("baseColorTexture", "image"):
+                image = getattr(material, attr, None) if material is not None else None
+                if not isinstance(image, Image.Image) or id(image) in seen:
+                    continue
+                seen.add(id(image))
+                if max(image.size) >= max_size:
+                    continue
+                if max(image.size) > MAX_UPSCALE_INPUT:
+                    large.append(f"{image.width}×{image.height}")
+                    continue
+                n = len(seen)
+                source, output = root / f"in-{n}.png", root / f"out-{n}.png"
+                image.save(source, format="PNG")
+                try:
+                    local_ai_engine.upscale(
+                        source,
+                        output,
+                        root / f"run-{n}",
+                        scale=scale,
+                        max_size=max_size,
+                        cancel=cancel,
+                    )
+                except local_ai_engine.LocalAIFailedError as exc:
+                    return Step("upscale", title, "skipped", f"{exc.message} Textures were kept.")
+                new = Image.open(output)
+                new.load()
+                setattr(material, attr, new)
+                done.append(f"{image.width}×{image.height} → {new.width}×{new.height}")
+    if not done:
+        if not seen:
+            detail = "No texture to upscale."
+        elif large:
+            detail = (
+                f"Textures over {MAX_UPSCALE_INPUT} px ({', '.join(large)}) are already "
+                "detailed and would take too long on a CPU; they were kept."
+            )
+        else:
+            detail = f"Textures are already {max_size} px or larger."
+        return Step("upscale", title, "skipped", detail)
+    return Step(
+        "upscale",
+        title,
+        "applied",
+        f"Real-ESRGAN (on this computer): {', '.join(done)}. {UPSCALE_DETAIL}",
+    )
 
 
 def limit_textures(scene: trimesh.Scene, max_size: int) -> Step:
@@ -763,6 +845,7 @@ def process(
     heavy_turn: HeavyTurn | None = None,
     smoothing: int = 0,
     remesh_settings: RemeshSettings | None = None,
+    upscale: int | None = None,
 ) -> ProcessingResult:
     """Run the profile's steps. ``result.scene`` is the processed scene: usually
     ``scene`` changed in place, but a new scene when the model was baked.
@@ -792,6 +875,13 @@ def process(
         if rebuilt is not None:
             result.scene = scene = rebuilt
             remeshed = True
+    if upscale:
+        with (heavy_turn or nullcontext)():
+            result.steps.append(
+                upscale_textures(
+                    scene, upscale, profile.max_texture, workdir=workdir, cancel=cancel
+                )
+            )
     result.steps.append(limit_textures(scene, profile.max_texture))
     if not remeshed:  # a rebuilt surface already has the face count asked for
         _reduce_steps(result, profile, workdir=workdir, cancel=cancel, heavy_turn=heavy_turn)

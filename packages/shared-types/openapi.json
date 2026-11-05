@@ -446,6 +446,22 @@
               }
             ],
             "title": "Source Version Id"
+          },
+          "upscale_textures": {
+            "anyOf": [
+              {
+                "enum": [
+                  2,
+                  4
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Enlarge base-colour textures \u00d72 or \u00d74 with the local AI upscaler (invents plausible detail; within the quality mode's texture size).",
+            "title": "Upscale Textures"
           }
         },
         "required": [
@@ -1479,6 +1495,7 @@
           "multi_view_to_3d",
           "photogrammetry",
           "enhance",
+          "retexture",
           "quality_check",
           "export"
         ],
@@ -2678,6 +2695,16 @@
             "title": "Reports Progress",
             "type": "boolean"
           },
+          "retexture": {
+            "default": false,
+            "title": "Retexture",
+            "type": "boolean"
+          },
+          "retexture_own_models_only": {
+            "default": false,
+            "title": "Retexture Own Models Only",
+            "type": "boolean"
+          },
           "single_image": {
             "title": "Single Image",
             "type": "boolean"
@@ -2702,7 +2729,9 @@
           "cancel",
           "reports_progress",
           "notes",
-          "photogrammetry"
+          "photogrammetry",
+          "retexture",
+          "retexture_own_models_only"
         ],
         "title": "ProviderCapabilitiesRead",
         "type": "object"
@@ -3092,6 +3121,50 @@
         ],
         "title": "ReportStatus",
         "type": "string"
+      },
+      "RetextureRequest": {
+        "description": "Ask a cloud service to make new textures for an existing version.",
+        "properties": {
+          "cloud_upload_consent": {
+            "default": false,
+            "description": "Confirms the model may be uploaded to the provider. Without it the job waits for permission and nothing is sent.",
+            "title": "Cloud Upload Consent",
+            "type": "boolean"
+          },
+          "prompt": {
+            "default": "",
+            "description": "What the new texture should look like.",
+            "maxLength": 800,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 64,
+            "title": "Provider",
+            "type": "string"
+          },
+          "quality_mode": {
+            "$ref": "#/components/schemas/QualityMode",
+            "default": "high_quality"
+          },
+          "source_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version Id"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "RetextureRequest",
+        "type": "object"
       },
       "RetryRequest": {
         "properties": {
@@ -4672,6 +4745,70 @@
           }
         },
         "summary": "Preview the processing steps an enhancement would run",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/retexture": {
+      "post": {
+        "description": "Without `cloud_upload_consent` (or in a local-only project) the job waits for permission and nothing is sent. Tripo can only re-texture models it generated. The result is a new `enhanced` version; the source version is never changed.",
+        "operationId": "retexture_api_v1_models__model_id__retexture_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetextureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Re-texture a version with a cloud service (uploads the model)",
         "tags": [
           "models"
         ]

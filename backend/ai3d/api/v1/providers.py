@@ -59,6 +59,8 @@ def _read(db: Session, manager: ProviderManager, key: str) -> ProviderRead:
             )
             if caps.photogrammetry
             else None,
+            retexture=caps.retexture,
+            retexture_own_models_only=caps.retexture_own_models_only,
         ),
     )
 

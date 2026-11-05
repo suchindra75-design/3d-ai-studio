@@ -15,7 +15,9 @@ import numpy as np
 import pytest
 import trimesh
 from fastapi.testclient import TestClient
+from PIL import Image
 
+from ai3d.processing import geometry
 from ai3d.workers import JobRunner
 from ai3d.workers import local_generation as worker
 from ai3d_engine.local_ai import LocalAICancelledError, LocalAIFailedError, engine
@@ -342,3 +344,93 @@ def test_real_photo_to_model_with_the_installed_engine(
         assert export["status"] == "ready", (fmt["format"], export.get("error_message"))
         assert export["validation"]["coloured"] is (fmt["format"] != "stl"), fmt["format"]
     print(f"\nreal TripoSR run: {seconds:.0f} s, {len(mesh.faces):,} triangles")
+
+
+# -- AI texture upscaling (Real-ESRGAN compact) ------------------------------------
+
+
+def _textured_box(size: int) -> trimesh.Scene:
+    box = trimesh.creation.box()
+    box.unmerge_vertices()
+    rng = np.random.default_rng(2)
+    box.visual = trimesh.visual.TextureVisuals(
+        uv=rng.random((len(box.vertices), 2)),
+        image=Image.fromarray(rng.integers(0, 255, (size, size, 3), dtype=np.uint8)),
+    )
+    return trimesh.Scene(box)
+
+
+def _stand_in_upscaler(calls: list[dict[str, Any]]) -> Any:
+    def upscale(source: Path, output: Path, workdir: Path, **kw: Any) -> dict[str, Any]:
+        calls.append({"source": source, **kw})
+        image = Image.open(source)
+        side = min(image.width * kw["scale"], kw["max_size"])
+        image.resize((side, side)).save(output)
+        return {"ok": True}
+
+    return upscale
+
+
+def test_upscaling_enlarges_textures_within_the_size_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(geometry.local_ai_engine, "upscaler_problem", lambda: None)
+    monkeypatch.setattr(geometry.local_ai_engine, "upscale", _stand_in_upscaler(calls))
+    scene = _textured_box(64)
+    step = geometry.upscale_textures(scene, 4, 4096, workdir=tmp_path)
+    assert step.status == "applied"
+    assert "64×64 → 256×256" in step.detail
+    assert "does not recover detail" in step.detail
+    (mesh,) = scene.geometry.values()
+    assert mesh.visual.material.image.size == (256, 256)
+
+    big = _textured_box(256)
+    assert geometry.upscale_textures(big, 2, 256, workdir=tmp_path).status == "skipped"
+    plain = trimesh.Scene(trimesh.creation.box())
+    step = geometry.upscale_textures(plain, 2, 4096, workdir=tmp_path)
+    assert step.status == "skipped"
+    assert step.detail == "No texture to upscale."
+    assert len(calls) == 1
+
+
+def test_upscaling_is_unavailable_until_the_upscaler_is_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine, "engine_dir", lambda: tmp_path / "no-engine")
+    step = geometry.upscale_textures(_textured_box(64), 2, 4096, workdir=tmp_path)
+    assert step.status == "unavailable"
+    assert "not installed" in step.detail
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    not REAL_ENGINE or engine.upscaler_problem(Path(REAL_ENGINE)) is not None,
+    reason="set AI3D_LOCAL_AI_DIR to an engine with the upscaler (install-upscaler)",
+)
+def test_real_upscaler_makes_a_real_photo_four_times_larger_and_sharper(tmp_path: Path) -> None:
+    photo = _real_photo()
+    assert photo is not None
+    original = Image.open(photo).convert("RGB")
+    # The most detailed 128-px patch (eyes, seams): a flat patch says nothing.
+    grey = np.asarray(original.convert("L"), float)
+    patches = [
+        (float(np.abs(np.diff(grey[y : y + 128, x : x + 128], axis=0)).mean()), x, y)
+        for y in range(0, original.height - 128, 64)
+        for x in range(0, original.width - 128, 64)
+    ]
+    _, x, y = max(patches)
+    crop = original.crop((x, y, x + 128, y + 128))
+    source = tmp_path / "crop.png"
+    crop.save(source)
+    engine.configure(Path(REAL_ENGINE))
+    result = engine.upscale(source, tmp_path / "big.png", tmp_path / "run", scale=4, max_size=4096)
+    assert (result["width"], result["height"]) == (512, 512)
+    ai = Image.open(tmp_path / "big.png").convert("L")
+    lanczos = crop.resize((512, 512), Image.Resampling.LANCZOS).convert("L")
+
+    def edges(image: Image.Image) -> float:
+        a = np.asarray(image, float)
+        return float(np.abs(np.diff(a, axis=0)).mean() + np.abs(np.diff(a, axis=1)).mean())
+
+    assert edges(ai) > edges(lanczos) * 1.1  # sharper than plain resizing

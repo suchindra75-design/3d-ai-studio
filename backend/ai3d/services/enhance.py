@@ -5,6 +5,7 @@ version (see workers/enhance.py).
 """
 
 import uuid
+from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -14,43 +15,21 @@ from ai3d.core.errors import ConflictError, InvalidInputError
 from ai3d.core.timeutil import utcnow
 from ai3d.models import GenerationJob, ModelVersion
 from ai3d.models.enums import JobEventType, JobKind, JobStatus, ProcessingMode
-from ai3d.processing.geometry import BAKE_MAX_TEXTURE, PROFILES, REMESH_MAX_P95
+from ai3d.processing.geometry import (
+    BAKE_MAX_TEXTURE,
+    PROFILES,
+    REMESH_MAX_P95,
+    UPSCALE_DETAIL,
+)
 from ai3d.schemas.enhance import EnhancePlanRead, EnhanceRequest, EnhanceStepPlan
 from ai3d.services.jobs import add_event
 from ai3d.services.models import QUALITY_LABELS, get_model, get_version
 from ai3d_engine.blender import check_blender
+from ai3d_engine.local_ai import engine as local_ai_engine
 
 
-def build_plan(body: EnhanceRequest) -> EnhancePlanRead:
-    profile = PROFILES[body.quality_mode]
-    steps: list[EnhanceStepPlan] = []
-
-    def step(code: str, title: str, detail: str, *, available: bool = True) -> None:
-        steps.append(
-            EnhanceStepPlan(
-                code=code,
-                title=title,
-                status="will_run" if available else "unavailable",
-                detail=detail,
-            )
-        )
-
-    if body.remove_ground:
-        step(
-            "ground",
-            "Remove ground / table",
-            "Finds a large flat surface under the object and removes it with anything loose.",
-        )
-    step("cleanup", "Clean-up", "Removes zero-area and duplicate triangles.")
-    step(
-        "small_parts",
-        "Remove loose fragments",
-        f"Removes pieces smaller than {profile.min_part_fraction:.1%} of the model.",
-    )
-    if profile.fix_normals:
-        step("normals", "Consistent normals", "Flips triangles that face the wrong way.")
-    if profile.fill_holes:
-        step("holes", "Fill holes", "Closes small holes on untextured, uncoloured meshes.")
+def _surface_steps(body: EnhanceRequest, max_texture: int, step: Callable[..., None]) -> None:
+    """The optional Surface steps: smoothing, retopology, baked maps, AI upscaling."""
     if body.smoothing:
         step(
             "smoothing",
@@ -83,6 +62,49 @@ def build_plan(body: EnhanceRequest) -> EnhancePlanRead:
                 or "Bakes " + " and ".join(names[m] for m in body.remesh.maps) + " in Blender.",
                 available=remesh_problem is None,
             )
+    if body.upscale_textures:
+        problem = local_ai_engine.upscaler_problem()
+        step(
+            "upscale",
+            f"AI texture upscaling (×{body.upscale_textures})",
+            problem
+            or "Real-ESRGAN on this computer enlarges base-colour textures (up to "
+            f"{max_texture} px). {UPSCALE_DETAIL}",
+            available=problem is None,
+        )
+
+
+def build_plan(body: EnhanceRequest) -> EnhancePlanRead:
+    profile = PROFILES[body.quality_mode]
+    steps: list[EnhanceStepPlan] = []
+
+    def step(code: str, title: str, detail: str, *, available: bool = True) -> None:
+        steps.append(
+            EnhanceStepPlan(
+                code=code,
+                title=title,
+                status="will_run" if available else "unavailable",
+                detail=detail,
+            )
+        )
+
+    if body.remove_ground:
+        step(
+            "ground",
+            "Remove ground / table",
+            "Finds a large flat surface under the object and removes it with anything loose.",
+        )
+    step("cleanup", "Clean-up", "Removes zero-area and duplicate triangles.")
+    step(
+        "small_parts",
+        "Remove loose fragments",
+        f"Removes pieces smaller than {profile.min_part_fraction:.1%} of the model.",
+    )
+    if profile.fix_normals:
+        step("normals", "Consistent normals", "Flips triangles that face the wrong way.")
+    if profile.fill_holes:
+        step("holes", "Fill holes", "Closes small holes on untextured, uncoloured meshes.")
+    _surface_steps(body, profile.max_texture, step)
     step("textures", "Texture size", f"Downscales textures larger than {profile.max_texture} px.")
     blender_problem = check_blender() if profile.report_tools else None
     if profile.decimate_to is not None:
@@ -144,6 +166,7 @@ def retry_enhance(
         scale=params.get("scale"),
         smoothing=int(params.get("smoothing") or 0),
         remesh=params.get("remesh"),
+        upscale_textures=params.get("upscale_textures"),
     )
     return create_enhance_job(
         db,
@@ -187,6 +210,7 @@ def create_enhance_job(
             "scale": body.scale.model_dump() if body.scale else None,
             "smoothing": body.smoothing,
             "remesh": body.remesh.model_dump() if body.remesh else None,
+            "upscale_textures": body.upscale_textures,
             "provider_summary": [s.title for s in plan.steps if s.status == "will_run"],
             "warnings": [],
         },

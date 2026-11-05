@@ -506,6 +506,48 @@ def store_checked_version(
     return version
 
 
+def save_retextured_version(
+    db: Session,
+    storage: StorageBackend,
+    *,
+    job: GenerationJob,
+    provider: type[Provider],
+    result: ProviderResult,
+    report: MeshReport,
+) -> ModelVersion:
+    """A cloud service's re-textured copy, saved as a new version of the source's model."""
+    if job.source_model_version_id is None:
+        raise InvalidInputError("The re-textured version no longer exists.")
+    parent = get_version(db, job.source_model_version_id)
+    model = get_model(db, parent.model_id)
+    if result.mesh_format != "glb":
+        raise InvalidInputError(f"{provider.display_name} did not return a GLB file.")
+    prompt = str((job.params.get("provider_settings") or {}).get("prompt") or "")
+    notes = (
+        f"Re-textured by {provider.display_name} (cloud) from version {parent.version_number}"
+        + (f", asked for: “{prompt}”" if prompt else "")
+        + ". The new textures are made up by an AI model, not taken from the object; the "
+        f"shape is {provider.display_name}'s copy of version {parent.version_number}."
+    )
+    return store_checked_version(
+        db,
+        storage,
+        model=model,
+        path=result.mesh_path,
+        size=result.mesh_path.stat().st_size,
+        report=report,
+        parent_id=parent.id,
+        source=ModelVersionSource.ENHANCED,
+        quality_mode=job.quality_mode,
+        provider_key=provider.key,
+        provenance=parent.surface_provenance,
+        stats_extra={"scale": parent.stats["scale"]} if (parent.stats or {}).get("scale") else {},
+        notes=notes,
+        asset_meta={"format": "glb", "origin": "retexture", "provider": provider.key},
+        metrics_extra={"retexture": {"provider": provider.key, "job_id": str(job.id)}},
+    )
+
+
 def add_edited_version(
     db: Session,
     storage: StorageBackend,

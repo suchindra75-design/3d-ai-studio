@@ -139,6 +139,7 @@ Install (needs [uv](https://docs.astral.sh/uv/) and about 4 GB of free disk):
 ```bash
 uv run ai3d-local-ai install      # shows what is downloaded and the licences, then asks
 uv run ai3d-local-ai status
+uv run ai3d-local-ai install-upscaler   # adds the 4.9 MB texture upscaler to an existing engine
 uv run ai3d-local-ai uninstall    # or delete the folder
 ```
 
@@ -152,6 +153,7 @@ the backend cannot share). Everything is pinned and checked:
 | TripoSR weights (1.68 GB, revision `5b521936`) | MIT | huggingface.co/stabilityai/TripoSR |
 | DINO ViT-B/16 configuration | Apache-2.0 | huggingface.co/facebook/dino-vitb16 |
 | U²-Net background removal (176 MB) | Apache-2.0 | github.com/danielgatis/rembg release v0.0.0 |
+| Real-ESRGAN compact texture upscaler (4.9 MB, `realesr-general-x4v3.pth`) | BSD-3-Clause | github.com/xinntao/Real-ESRGAN release v0.2.5.0 |
 | PyTorch 2.2.2 (Intel Mac) / current elsewhere, transformers 4.35, onnxruntime, PyMCubes | BSD / Apache-2.0 / MIT | PyPI |
 
 Every download is checked against its SHA-256; the installer runs a real test

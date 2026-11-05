@@ -6,6 +6,7 @@ import { fakeApi, renderWithStudio } from '../test/render';
 import { EnhancePanel } from './enhance-panel';
 import { ExportPanel } from './export-panel';
 import { QualityPanel } from './quality-panel';
+import { RetexturePanel } from './retexture-panel';
 
 const version = {
   id: 'v1',
@@ -134,6 +135,7 @@ it('plans, runs and links to the enhanced version', async () => {
     remove_ground: true,
     scale: { axis: 'y', length_mm: 120 },
     smoothing: 0,
+    upscale_textures: null,
     remesh: null,
   });
   await userEvent.click(await screen.findByRole('button', { name: 'View the new version' }));
@@ -158,6 +160,8 @@ it('asks for smoothing, retopology and baked maps', async () => {
     api,
   );
   await userEvent.selectOptions(screen.getByLabelText('Smoothing'), '10');
+  await userEvent.selectOptions(screen.getByLabelText('AI texture upscaling'), '2');
+  expect(screen.getByText(/does not recover detail/)).toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText('Retopology'), 'quadriflow');
   expect(screen.getByText(/kept only if it stays within 1%/)).toBeInTheDocument();
   const faces = screen.getByLabelText('About how many quads');
@@ -168,6 +172,7 @@ it('asks for smoothing, retopology and baked maps', async () => {
   await waitFor(() => expect(api.models.enhance).toHaveBeenCalledTimes(1));
   expect(vi.mocked(api.models.enhance).mock.calls[0]![1]).toMatchObject({
     smoothing: 10,
+    upscale_textures: 2,
     remesh: { method: 'quadriflow', target_faces: 5000, maps: ['normal'] },
   });
 });
@@ -237,4 +242,56 @@ it('exports a format and lists the verified file; unavailable formats say why', 
     'href',
     'http://api/api/v1/exports/e1/file',
   );
+});
+
+const provider = (key: string, name: string, own: boolean, configured = true) => ({
+  key,
+  display_name: name,
+  configured,
+  capabilities: { retexture: true, retexture_own_models_only: own },
+});
+
+it('re-textures only after the upload is confirmed and a texture is described', async () => {
+  const api = fakeApi({
+    providers: {
+      list: vi.fn().mockResolvedValue({
+        items: [
+          provider('meshy', 'Meshy', false),
+          provider('tripo', 'Tripo AI', true), // version not made by Tripo: not offered
+          { ...provider('local-triposr', 'Local AI', false), capabilities: { retexture: false } },
+        ],
+      }),
+    },
+    models: { retexture: vi.fn().mockResolvedValue(queued) },
+    jobs: { get: vi.fn().mockResolvedValue(done) },
+  });
+  renderWithStudio(
+    <RetexturePanel projectId="p1" modelId="m1" version={version} onView={vi.fn()} />,
+    api,
+  );
+  const service = await screen.findByLabelText('Service');
+  expect(
+    within(service)
+      .getAllByRole('option')
+      .map((o) => o.textContent),
+  ).toEqual(['Meshy']);
+  const go = screen.getByRole('button', { name: /Re-texture with Meshy/ });
+  expect(go).toBeDisabled();
+  await userEvent.type(screen.getByLabelText(/Describe the texture/), 'bronze');
+  expect(go).toBeDisabled(); // no upload permission yet
+  await userEvent.click(
+    screen.getByRole('checkbox', { name: /Upload version 1 of the model to Meshy/ }),
+  );
+  await userEvent.click(go);
+  await waitFor(() => expect(api.models.retexture).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(api.models.retexture).mock.calls[0]).toEqual([
+    'm1',
+    {
+      provider: 'meshy',
+      prompt: 'bronze',
+      quality_mode: 'high_quality',
+      source_version_id: 'v1',
+      cloud_upload_consent: true,
+    },
+  ]);
 });

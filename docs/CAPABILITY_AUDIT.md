@@ -1,4 +1,4 @@
-# Capability audit (2026-11-04, updated after Phases 8–13 and 15)
+# Capability audit (2026-11-04, updated after Phases 8–15)
 
 An audit of the repository after phases 0–7 (commit `f8ec4af`), against the
 product vision in [PRODUCT_SPECIFICATION.md](PRODUCT_SPECIFICATION.md).
@@ -20,7 +20,7 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 | 7 | 3D editing | 🟡 | Transforms, delete, mirror, pivot, ground/centre and plane cuts with filled caps (Phase 11), tested on real models; no merge/split or vertex editing |
 | 8 | Geometry refinement & retopology | 🟡 | Clean-up, decimation, smoothing, QuadriFlow/voxel retopology with a measured fidelity check (Phase 13), verified on real models |
 | 9 | Texture & material editing | 🟡 | Material values, texture replace, UV layout (Phase 11); normal and occlusion map baking (Phase 13); no texture adjustments or painting |
-| 10 | AI model enhancement | ❌ | "Enhance" is geometric processing; no AI refinement or texture enhancement |
+| 10 | AI model enhancement | 🟡 | Local AI texture upscaling (Real-ESRGAN, verified on real images) and cloud re-texturing with consent (Meshy, Tripo; fakes only) — Phase 14 |
 | 11 | Model quality analysis | ✅ | Run on real AI output, a real photogrammetry scan and Draco files (Phase 9); now flags stray and shattered surfaces |
 | 12 | Version management | ✅ | Immutable versions with provenance, save edits, switch current; tested end to end |
 | 13 | Export | ✅ | Seven formats re-opened and compared, now including per-vertex colours; STL/3MF Z-up; verified on real AI output (Phase 9) |
@@ -130,11 +130,16 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
   - Generating roughness maps (normal and occlusion maps: Phase 13).
   - Texture painting.
 
-### 10. AI model enhancement — ❌
-- No AI step after generation. The candidates:
-  - provider refine/retexture APIs (cloud, needs consent);
-  - local texture super-resolution;
+### 10. AI model enhancement — 🟡
+- **Added in Phase 14:** re-texturing by Meshy (any model up to 100 MB) or
+  Tripo (its own models), with consent; the result is a new version that says
+  its textures are made up.
+- **Also in Phase 14:** local AI texture upscaling (Real-ESRGAN compact,
+  ×2/×4), verified on real images; sharper, not more accurate, as the UI
+  says.
+- **Missing:**
   - AI-assisted completion of photogrammetry holes.
+  - Calls to the real services (no paid key).
 
 ### 11. Model quality analysis — 🟡
 - **Have:**

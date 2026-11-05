@@ -20,6 +20,7 @@ from ai3d.services.models import save_enhanced_version, version_file
 from ai3d.workers import heavy
 from ai3d.workers.runner import JobContext
 from ai3d_engine.blender import BlenderCancelledError
+from ai3d_engine.local_ai.engine import LocalAICancelledError
 
 log = logging.getLogger(__name__)
 
@@ -94,10 +95,11 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             heavy_turn=_heavy_turn(ctx),
             smoothing=int(job.params.get("smoothing") or 0),
             remesh_settings=_remesh_settings(job.params.get("remesh")),
+            upscale=job.params.get("upscale_textures"),
         )
     except ValueError as exc:
         raise _FailedError("invalid_input", str(exc)) from exc
-    except BlenderCancelledError:
+    except (BlenderCancelledError, LocalAICancelledError):
         raise _CancelledError from None
     scene = result.scene
     for step in result.steps:

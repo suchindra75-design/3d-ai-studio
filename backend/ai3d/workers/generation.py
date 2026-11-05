@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from ai3d.core.errors import AppError
 from ai3d.models import GenerationJob, Image
-from ai3d.models.enums import JobEventType, JobStatus
+from ai3d.models.enums import AssetKind, JobEventType, JobKind, JobStatus
 from ai3d.processing.mesh import validate_mesh_file
 from ai3d.providers import Provider
 from ai3d.providers.base import (
@@ -29,7 +29,7 @@ from ai3d.providers.base import (
     TaskStatus,
 )
 from ai3d.services.images import ensure_provider_copy
-from ai3d.services.models import save_generated_model
+from ai3d.services.models import save_generated_model, save_retextured_version, version_file
 from ai3d.services.providers import ProviderNotConfiguredError
 from ai3d.workers.runner import JobContext
 
@@ -251,10 +251,22 @@ def _start_task(
     workdir: Path,
 ) -> str:
     name = provider.display_name
-    ctx.stage("preparing", "Preparing photos.", 0.02)
-    inputs = _prepare_inputs(ctx, job, provider_cls, workdir)
-    count = len(inputs)
-    ctx.stage("submitting", f"Sending {count} photo{'s' if count != 1 else ''} to {name}.", 0.06)
+    if job.kind == JobKind.RETEXTURE:
+        ctx.stage("preparing", "Preparing the model.", 0.02)
+        inputs = [_source_model(ctx, job, workdir)]
+        own = (job.params.get("provider_settings") or {}).get("source_task_id")
+        ctx.stage(
+            "submitting",
+            f"Asking {name} to re-texture its model." if own else f"Sending the model to {name}.",
+            0.06,
+        )
+    else:
+        ctx.stage("preparing", "Preparing photos.", 0.02)
+        inputs = _prepare_inputs(ctx, job, provider_cls, workdir)
+        count = len(inputs)
+        ctx.stage(
+            "submitting", f"Sending {count} photo{'s' if count != 1 else ''} to {name}.", 0.06
+        )
     request = GenerationRequest(
         job_id=job.id,
         kind=job.kind,
@@ -272,6 +284,24 @@ def _start_task(
         data={"provider_task_id": task_id},
     )
     return task_id
+
+
+def _source_model(ctx: JobContext, job: GenerationJob, workdir: Path) -> ProviderInput:
+    """The GLB of the version being re-textured."""
+    if job.source_model_version_id is None:
+        raise JobFailedError("input_missing", "The version to re-texture no longer exists.")
+    with ctx.session() as db:
+        try:
+            _, asset = version_file(db, job.source_model_version_id, AssetKind.MESH)
+        except AppError as exc:
+            raise JobFailedError(
+                "input_missing", "The version to re-texture no longer exists."
+            ) from exc
+        key, sha = asset.storage_key, asset.sha256
+    path = workdir / "source.glb"
+    with ctx.runner.storage.open(key) as src, path.open("wb") as out:
+        shutil.copyfileobj(src, out)
+    return ProviderInput(path=path, mime_type="model/gltf-binary", role="front", sha256=sha)
 
 
 def _finish_task(
@@ -309,15 +339,20 @@ def _finish_task(
             "The model finished before the cancellation took effect, so it was kept.",
         )
     with ctx.session() as db:
-        version = save_generated_model(
-            db,
-            ctx.runner.storage,
-            ctx.settings,
-            job=job,
-            provider=provider_cls,
-            result=result,
-            report=report,
-        )
+        if job.kind == JobKind.RETEXTURE:
+            version = save_retextured_version(
+                db, ctx.runner.storage, job=job, provider=provider_cls, result=result, report=report
+            )
+        else:
+            version = save_generated_model(
+                db,
+                ctx.runner.storage,
+                ctx.settings,
+                job=job,
+                provider=provider_cls,
+                result=result,
+                report=report,
+            )
     if ctx.finish(
         JobStatus.SUCCEEDED,
         stage="done",

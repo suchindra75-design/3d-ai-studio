@@ -69,8 +69,9 @@ function ConsentPrompt({ job, projectId }: { job: JobRead; projectId: string }) 
   return (
     <div className="flex flex-col gap-2.5 rounded-md bg-warning-soft p-3 text-xs leading-relaxed">
       <p>
-        This job will send {pluralize(job.inputs.length, 'photo')} to {name}. Nothing has been
-        uploaded yet.
+        This job will send{' '}
+        {job.kind === 'retexture' ? 'the model' : pluralize(job.inputs.length, 'photo')} to {name}.
+        Nothing has been uploaded yet.
       </p>
       {localOnly ? (
         <label className="flex gap-2">
@@ -145,8 +146,10 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
             {name} · {qualityModeLabel[job.quality_mode]}
           </span>
           <span className="text-xs text-subtle-foreground">
-            {job.kind === 'enhance' ? 'Model version' : pluralize(job.inputs.length, 'photo')} ·{' '}
-            {formatRelativeTime(job.created_at)}
+            {job.kind === 'enhance' || job.kind === 'retexture'
+              ? 'Model version'
+              : pluralize(job.inputs.length, 'photo')}{' '}
+            · {formatRelativeTime(job.created_at)}
           </span>
         </div>
         <Badge variant={jobStatusTone[job.status]}>{jobStatusLabel[job.status]}</Badge>

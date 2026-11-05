@@ -59,6 +59,7 @@ import { HierarchyPanel } from './hierarchy-panel';
 import { InspectorPanel } from './inspector-panel';
 import { useModelFile } from './model-file';
 import { QualityPanel } from './quality-panel';
+import { RetexturePanel } from './retexture-panel';
 import { scaleOf } from './scale';
 import { VersionPanel } from './version-panel';
 import {
@@ -623,13 +624,21 @@ function VersionWorkspace({
             ) : tab === 'quality' ? (
               <QualityPanel version={version} />
             ) : tab === 'enhance' ? (
-              <EnhancePanel
-                projectId={projectId}
-                modelId={model.id}
-                version={version}
-                dirty={edits.dirty}
-                onView={onView}
-              />
+              <>
+                <EnhancePanel
+                  projectId={projectId}
+                  modelId={model.id}
+                  version={version}
+                  dirty={edits.dirty}
+                  onView={onView}
+                />
+                <RetexturePanel
+                  projectId={projectId}
+                  modelId={model.id}
+                  version={version}
+                  onView={onView}
+                />
+              </>
             ) : tab === 'export' ? (
               <ExportPanel modelName={model.name} version={version} dirty={edits.dirty} />
             ) : tab === 'versions' ? (

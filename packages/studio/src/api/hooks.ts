@@ -3,6 +3,7 @@
 import type { ListProjectsParams } from '@ai3d/api-client';
 import type {
   EnhanceRequest,
+  RetextureRequest,
   ExportFormat,
   GenerationCreate,
   JobRead,
@@ -438,6 +439,18 @@ export function useEnhancePlan(modelId: string, body: EnhanceRequest) {
     queryKey: ['models', modelId, 'enhance-plan', body] as const,
     queryFn: () => api.models.enhancePlan(modelId, body),
     placeholderData: (previous) => previous,
+  });
+}
+
+export function useRetexture(projectId: string, modelId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RetextureRequest) => api.models.retexture(modelId, body),
+    onSuccess: (job) => {
+      client.setQueryData(queryKeys.job(job.id), job);
+      void client.invalidateQueries({ queryKey: queryKeys.jobs(projectId) });
+    },
   });
 }
 

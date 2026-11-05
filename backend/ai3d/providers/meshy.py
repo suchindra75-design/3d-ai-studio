@@ -8,6 +8,9 @@ Wire format from https://docs.meshy.ai/en/api (checked 2026-11-03):
   (PENDING|IN_PROGRESS|SUCCEEDED|FAILED|CANCELED), ``progress`` 0–100,
   ``model_urls.glb``, ``thumbnail_url``, ``consumed_credits``, ``task_error``
 * ``DELETE`` on a PENDING task deletes and refunds it; IN_PROGRESS → 409
+* ``POST /retexture`` ``{"model_url": <URL or data URI ≤ 100 MB>, "text_style_prompt",
+  "enable_pbr", "texture_resolution", …}`` → ``{"result": id}``; ``GET /retexture/{id}``
+  as above (checked 2026-11-04; the price per task is not documented)
 * ``GET /balance`` → ``balance``
 * Errors are ``{"message": …}`` with 400/401/402/403/404/422/429/5xx.
 
@@ -47,6 +50,9 @@ MAX_INPUT_BYTES = 20 * 1024 * 1024
 PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 _SINGLE = "image-to-3d"
 _MULTI = "multi-image-to-3d"
+_RETEXTURE = "retexture"
+# Retexture accepts a model as a data URI up to this size (docs, checked 2026-11-04).
+RETEXTURE_MAX_BYTES = 100 * 1024 * 1024
 
 _PROFILES: dict[QualityMode, dict[str, Any]] = {
     QualityMode.FAST: {
@@ -134,6 +140,7 @@ class MeshyProvider(Provider):
             supports_pbr=True,
             cancel="pending_only",
             reports_progress=True,
+            retexture=True,
             notes=(
                 "API access requires a paid Meshy plan.",
                 "Cancelling refunds a task only before Meshy starts it; started tasks are charged.",
@@ -143,6 +150,27 @@ class MeshyProvider(Provider):
 
     @classmethod
     def plan(cls, kind: JobKind, quality_mode: QualityMode) -> ProviderPlan:
+        if kind == JobKind.RETEXTURE:
+            pbr = quality_mode != QualityMode.FAST
+            return ProviderPlan(
+                settings={
+                    "enable_pbr": pbr,
+                    "texture_resolution": "4k"
+                    if quality_mode == QualityMode.PROFESSIONAL
+                    else "2k",
+                    "target_formats": ["glb"],
+                },
+                summary=(
+                    "Meshy Retexture",
+                    "PBR materials" if pbr else "Base colour only",
+                    "4K textures" if quality_mode == QualityMode.PROFESSIONAL else "2K textures",
+                ),
+                estimate=None,
+                notes=(
+                    "Meshy charges credits for retexturing; its API documentation does not "
+                    "state the price (see your Meshy plan). Failed tasks are refunded.",
+                ),
+            )
         profile = _PROFILES[quality_mode]
         summary = [
             "Model meshy-6-lite" if profile["ai_model"] == "meshy-6-lite" else "Latest Meshy model",
@@ -240,7 +268,7 @@ class MeshyProvider(Provider):
     @staticmethod
     def _split(task_ref: str) -> tuple[str, str]:
         endpoint, _, task_id = task_ref.partition(":")
-        if endpoint not in {_SINGLE, _MULTI} or not task_id:
+        if endpoint not in {_SINGLE, _MULTI, _RETEXTURE} or not task_id:
             raise ProviderError(
                 ProviderErrorCode.TASK_FAILED, f"Unrecognised Meshy task reference {task_ref!r}."
             )
@@ -249,9 +277,30 @@ class MeshyProvider(Provider):
     # -- Provider -----------------------------------------------------------
 
     def submit(self, request: GenerationRequest) -> str:
-        if request.kind == JobKind.IMAGE_TO_3D:
+        if request.kind == JobKind.RETEXTURE:
+            endpoint = _RETEXTURE
+            settings = dict(request.settings)
+            prompt = str(settings.pop("prompt", "") or "").strip()
+            settings.pop("source_task_id", None)
+            if not prompt:
+                raise ProviderError(
+                    ProviderErrorCode.INVALID_INPUT, "Describe the texture you want for Meshy."
+                )
+            model = request.inputs[0]
+            if model.path.stat().st_size > RETEXTURE_MAX_BYTES:
+                raise ProviderError(
+                    ProviderErrorCode.INVALID_INPUT,
+                    "Meshy accepts models up to 100 MB sent directly; this one is larger.",
+                )
+            encoded = base64.b64encode(model.path.read_bytes()).decode("ascii")
+            body: dict[str, Any] = {
+                "model_url": f"data:application/octet-stream;base64,{encoded}",
+                "text_style_prompt": prompt[:800],
+                **settings,
+            }
+        elif request.kind == JobKind.IMAGE_TO_3D:
             endpoint = _SINGLE
-            body: dict[str, Any] = {"image_url": _data_uri(request.inputs[0]), **request.settings}
+            body = {"image_url": _data_uri(request.inputs[0]), **request.settings}
         else:
             endpoint = _MULTI
             # The first image is treated as the front view.

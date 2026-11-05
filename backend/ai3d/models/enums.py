@@ -45,6 +45,8 @@ class JobKind(StrEnum):
     MULTI_VIEW_TO_3D = "multi_view_to_3d"
     PHOTOGRAMMETRY = "photogrammetry"
     ENHANCE = "enhance"
+    # A cloud service re-textures an existing version (the model is uploaded).
+    RETEXTURE = "retexture"
     QUALITY_CHECK = "quality_check"
     EXPORT = "export"
 

@@ -96,6 +96,9 @@ class FakeTripo(FakeProviderServer):
             return httpx2.Response(200, json={"code": 0, "data": {"file_token": f"file_{index}"}})
         if request.method == "POST" and path.startswith("/generation/"):
             return httpx2.Response(200, json={"code": 0, "data": {"task_id": "task-1"}})
+        if request.method == "POST" and path == "/models/texture":
+            # Documented 2026-11-04: {"input": task id | file token | URL, ...}.
+            return httpx2.Response(200, json={"code": 0, "data": {"task_id": "task-1"}})
         if request.method == "GET" and path == "/tasks/task-1":
             self.polls += 1
             if self.polls <= self.running_polls:
@@ -130,7 +133,11 @@ class FakeMeshy(FakeProviderServer):
         path = request.url.path.removeprefix("/openapi/v1")
         if request.headers.get("authorization") != "Bearer msy_test_key_123456":
             return httpx2.Response(401, json={"message": "Invalid API key"})
-        if request.method == "POST" and path in {"/image-to-3d", "/multi-image-to-3d"}:
+        if request.method == "POST" and path in {
+            "/image-to-3d",
+            "/multi-image-to-3d",
+            "/retexture",
+        }:
             return httpx2.Response(202, json={"result": "mesh-task-1"})
         if request.method == "GET" and path.endswith("/mesh-task-1"):
             self.polls += 1
