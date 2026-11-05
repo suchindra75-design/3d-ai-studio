@@ -43,7 +43,8 @@ def list_models(db: DbDep, providers: ProvidersDep, project_id: uuid.UUID) -> Mo
     response_model=ModelRead,
     status_code=status.HTTP_201_CREATED,
     summary="Import an existing 3D file as a new model",
-    description="GLB, OBJ, STL, PLY or 3MF, or a ZIP with an OBJ (plus MTL and textures) "
+    description="GLB, OBJ, STL, PLY, 3MF or FBX (converted by Blender), or a ZIP with an OBJ "
+    "(plus MTL and textures) "
     "or a glTF (plus .bin and images). Converted to GLB, re-opened and checked; a file "
     "that fails the checks is rejected (422). The version's origin is recorded as "
     "imported and its accuracy as unknown.",

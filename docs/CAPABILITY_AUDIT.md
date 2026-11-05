@@ -168,7 +168,8 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
   persisted and tested end to end.
 - **Added in Phase 15:** importing GLB/OBJ/STL/PLY/3MF files and ZIPs;
   project backup and restore.
-- **Missing:** FBX import; duplicating a project directly.
+- **Since 2026-11-05:** FBX import (through Blender).
+- **Missing:** duplicating a project directly.
 
 ### 15. Desktop functionality — 🟡
 - **Have:**

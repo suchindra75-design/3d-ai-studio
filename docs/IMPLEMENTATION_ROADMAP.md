@@ -880,6 +880,11 @@ upscaler installed):
     and all parts together, using numeric sorting, not string maps;
   - a box with a missing face shows the same 4 open edges the server reports;
   - 3 million triangles take 7 s.
+- **FBX import:** FBX files (also in ZIPs) are converted by one more fixed
+  Blender command (`import_fbx`); Blender's importer applies the file's units
+  and axes. An FBX written by the app's own exporter imports back with the
+  same triangle count, size and texture. Without Blender, the import says FBX
+  needs Blender.
 
 ## Roadmap after the capability audit (2026-11-04)
 
@@ -958,7 +963,7 @@ Not planned: billing or subscriptions, public release work.
 | Several backend processes sharing one PostgreSQL queue: designed for, not tested | When a multi-worker deployment needs it |
 | Tauri window not automated (no WebDriver on macOS); native Save dialog not clicked through by hand | Linux/Windows CI with tauri-driver |
 | Main JS bundle ≈580 KB (three.js already split out) | Not done |
-| Vertex-level editing, texture adjustments, KTX2 textures; FBX import | Later |
+| Vertex-level editing, texture adjustments, KTX2 textures | Later |
 | Light theme | Not planned |
 
 Resolved since the first list: CI runs on every push to GitHub; its six jobs,

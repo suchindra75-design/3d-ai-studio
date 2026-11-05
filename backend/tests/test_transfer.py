@@ -106,7 +106,7 @@ def test_a_ply_keeps_its_vertex_colours(client: TestClient, project: dict[str, A
 @pytest.mark.parametrize(
     ("name", "data", "message"),
     [
-        ("notes.txt", b"hello", "Import a GLB, OBJ, STL, PLY or 3MF"),
+        ("notes.txt", b"hello", "Import a GLB, OBJ, STL, PLY, 3MF or FBX"),
         ("scene.gltf", b"{}", "needs its .bin and images"),
         ("broken.stl", b"solid nothing here", "no triangles"),
         ("evil.zip", _zip({"../evil.obj": b"v 0 0 0\n"}), "is not allowed"),

@@ -11,7 +11,7 @@ import { routes } from '../routes';
 import { DownloadButton } from './download-button';
 import { ErrorState } from './page';
 
-const ACCEPT = '.glb,.obj,.stl,.ply,.3mf,.zip';
+const ACCEPT = '.glb,.obj,.stl,.ply,.3mf,.fbx,.zip';
 const selectClass =
   'h-9 rounded-md border border-border-strong bg-background px-2 text-sm outline-none focus:border-accent';
 
@@ -58,7 +58,7 @@ export function ImportModelButton({ projectId }: { projectId: string }) {
           if (!next) imported.reset();
         }}
         title="Import a 3D file"
-        description="GLB, OBJ, STL, PLY or 3MF, or a ZIP with an OBJ and its material and textures (or a glTF with its files). It is converted to GLB and checked like every model."
+        description="GLB, OBJ, STL, PLY, 3MF or FBX (FBX needs Blender), or a ZIP with an OBJ and its material and textures (or a glTF with its files). It is converted to GLB and checked like every model."
       >
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">

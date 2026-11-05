@@ -1,9 +1,9 @@
 """Turning an existing 3D file into a GLB the app can store and check.
 
-Accepted: GLB, OBJ, STL, PLY and 3MF files, and ZIP archives holding one model
-with its companions (an OBJ with its MTL and textures, a glTF with its .bin and
-images). Archives are unpacked with limits on entry count and size, and no
-entry may leave the working folder.
+Accepted: GLB, OBJ, STL, PLY, 3MF and FBX (converted by Blender) files, and ZIP
+archives holding one model with its companions (an OBJ with its MTL and textures,
+a glTF with its .bin and images). Archives are unpacked with limits on entry count
+and size, and no entry may leave the working folder.
 
 Units and "up": glTF is metres and Y-up by definition. Other formats say
 neither, so the caller tells: STL and 3MF are usually millimetres and Z-up
@@ -21,6 +21,7 @@ import trimesh
 
 from ai3d.core.errors import InvalidInputError
 from ai3d.processing.mesh import load_model_scene, normalise_vertex_colours
+from ai3d_engine.blender import BlenderFailedError, check_blender, run_blender
 
 Units = Literal["m", "cm", "mm", "in"]
 UpAxis = Literal["y", "z"]
@@ -28,7 +29,7 @@ UpAxis = Literal["y", "z"]
 METRES_PER_UNIT: dict[str, float] = {"m": 1.0, "cm": 0.01, "mm": 0.001, "in": 0.0254}
 UNIT_NAMES = {"m": "metres", "cm": "centimetres", "mm": "millimetres", "in": "inches"}
 
-MODEL_SUFFIXES = (".glb", ".gltf", ".obj", ".stl", ".ply", ".3mf")
+MODEL_SUFFIXES = (".glb", ".gltf", ".obj", ".stl", ".ply", ".3mf", ".fbx")
 # What each format usually means when the caller does not say.
 DEFAULTS: dict[str, tuple[Units, UpAxis]] = {
     ".stl": ("mm", "z"),
@@ -37,6 +38,7 @@ DEFAULTS: dict[str, tuple[Units, UpAxis]] = {
     ".ply": ("m", "y"),
 }
 
+FBX_TIMEOUT = 600.0
 MAX_ARCHIVE_ENTRIES = 500
 MAX_ARCHIVE_BYTES = 1024**3  # unpacked
 
@@ -87,7 +89,9 @@ def _safe_extract(archive: Path, dest: Path) -> list[Path]:
 def _main_model(files: list[Path]) -> Path:
     models = [f for f in files if f.suffix.lower() in MODEL_SUFFIXES and "__MACOSX" not in f.parts]
     if not models:
-        raise InvalidInputError("The archive holds no 3D model (GLB, glTF, OBJ, STL, PLY or 3MF).")
+        raise InvalidInputError(
+            "The archive holds no 3D model (GLB, glTF, OBJ, STL, PLY, 3MF or FBX)."
+        )
     if len(models) > 1:
         names = ", ".join(sorted(m.name for m in models)[:5])
         raise InvalidInputError(f"The archive holds more than one model ({names}); import one.")
@@ -99,6 +103,23 @@ def _to_y_up() -> np.ndarray:
     turn = np.eye(4)
     turn[:3, :3] = [[1, 0, 0], [0, 0, 1], [0, -1, 0]]
     return turn
+
+
+def _convert_fbx(path: Path, glb: Path, workdir: Path, label: str, name: str) -> Converted:
+    """FBX goes through Blender, whose importer applies the file's units and axes."""
+    problem = check_blender()
+    if problem is not None:
+        raise InvalidInputError(f"FBX files are converted with Blender. {problem}")
+    try:
+        run_blender(
+            "import_fbx",
+            {"input": str(path), "output": str(glb)},
+            workdir=workdir,
+            timeout=FBX_TIMEOUT,
+        )
+    except BlenderFailedError as exc:
+        raise InvalidInputError(f"The FBX file could not be converted: {exc.message}") from exc
+    return Converted(glb, label, "metres (from the FBX units)", "Y (from the FBX axes)", name)
 
 
 def convert(
@@ -121,7 +142,8 @@ def convert(
         label = f"{suffix.lstrip('.').upper()} (in a ZIP)"
     elif suffix not in MODEL_SUFFIXES:
         raise InvalidInputError(
-            "Import a GLB, OBJ, STL, PLY or 3MF file, or a ZIP with an OBJ or glTF and its files."
+            "Import a GLB, OBJ, STL, PLY, 3MF or FBX file, or a ZIP with an OBJ or glTF and "
+            "its files."
         )
     elif suffix == ".gltf":
         raise InvalidInputError(
@@ -129,6 +151,8 @@ def convert(
         )
 
     glb = workdir / "imported.glb"
+    if suffix == ".fbx":
+        return _convert_fbx(path, glb, workdir, label, original_name)
     if suffix in {".glb", ".gltf"}:
         try:
             if suffix == ".glb":

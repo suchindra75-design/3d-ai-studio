@@ -13,6 +13,9 @@ never code); the result is written as JSON. Commands:
     triangles, size (in glTF's Y-up axes), image textures that hold pixels.
 ``export_fbx``
     Import a GLB and write an FBX with its textures embedded.
+``import_fbx``
+    Import an FBX (Blender converts its units to metres and its axes) and write
+    it as a GLB with its textures.
 ``bake``
     Import a (textured) GLB, make a reduced copy, give it new UVs and bake the
     original's base colour onto it (Cycles, selected-to-active); write it as GLB.
@@ -39,7 +42,7 @@ import bpy  # type: ignore[import-not-found]
 import numpy as np
 from mathutils.bvhtree import BVHTree  # type: ignore[import-not-found]
 
-COMMANDS = ("inspect", "export_fbx", "bake", "remesh")
+COMMANDS = ("inspect", "export_fbx", "import_fbx", "bake", "remesh")
 
 
 class RequestError(Exception):
@@ -276,6 +279,30 @@ def export_fbx(request: dict[str, Any]) -> dict[str, Any]:
         colors_type="SRGB",  # per-vertex colours, stored as sRGB like other FBX tools expect
     )
     return {"source": _facts(objects), "dropped_colour_factors": dropped}
+
+
+def import_fbx(request: dict[str, Any]) -> dict[str, Any]:
+    source, dest = _path(request, "input"), _path(request, "output")
+    if source.suffix.lower() != ".fbx":
+        raise RequestError("Only FBX files are converted here.")
+    _empty_scene()
+    objects = _import(source)
+    if not objects:
+        raise RequestError("The FBX file contains no meshes.")
+    facts = _facts(objects)
+    bpy.ops.export_scene.gltf(
+        filepath=str(dest),
+        export_format="GLB",
+        use_selection=False,
+        export_yup=True,
+        export_apply=True,
+        export_texcoords=True,
+        export_normals=True,
+        export_materials="EXPORT",
+        export_image_format="AUTO",
+        export_animations=False,
+    )
+    return {"source": facts}
 
 
 def _max_deviation(high: list[Any], low: Any, limit: int = 50_000) -> float:
@@ -805,13 +832,19 @@ def remesh(request: dict[str, Any]) -> dict[str, Any]:
 def main(argv: list[str]) -> int:
     args = argv[argv.index("--") + 1 :] if "--" in argv else []
     if len(args) != 3 or args[0] not in COMMANDS:
-        print("usage: ... -- {inspect|export_fbx|bake|remesh} <request.json> <result.json>")
+        print(
+            "usage: ... -- {inspect|export_fbx|import_fbx|bake|remesh} <request.json> <result.json>"
+        )
         return 2
     command, request_path, result_path = args[0], Path(args[1]), Path(args[2])
     request = json.loads(request_path.read_text(encoding="utf-8"))
-    handler = {"inspect": inspect, "export_fbx": export_fbx, "bake": bake, "remesh": remesh}[
-        command
-    ]
+    handler = {
+        "inspect": inspect,
+        "export_fbx": export_fbx,
+        "import_fbx": import_fbx,
+        "bake": bake,
+        "remesh": remesh,
+    }[command]
     try:
         result: dict[str, Any] = {"ok": True, **handler(request)}
     except RequestError as exc:

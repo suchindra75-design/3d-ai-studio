@@ -391,3 +391,24 @@ def load_model_scene_bytes(data: bytes) -> trimesh.Scene:
         handle.write(data)
         handle.flush()
         return load_model_scene(Path(handle.name))
+
+
+def test_an_fbx_imports_as_a_model_with_its_size_and_texture(
+    client: TestClient, make_project: Any, tmp_path: Path
+) -> None:
+    scene = _scene(_textured_sphere(3, _texture()))
+    fbx = tmp_path / "ball.fbx"
+    exporters.write(scene, ExportFormat.FBX, fbx)
+    project = make_project(input_mode="single_image")
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/models/import",
+        files={"file": ("ball.fbx", fbx.read_bytes(), "application/octet-stream")},
+    )
+    assert response.status_code == 201, response.text
+    version = response.json()["current_version"]
+    metrics = version["quality_report"]["metrics"]
+    assert metrics["triangle_count"] == len(next(iter(scene.geometry.values())).faces)
+    assert metrics["bbox_size"] == pytest.approx(list(scene.extents), rel=1e-3)
+    assert metrics["texture_count"] == 1
+    assert "FBX" in version["notes"]
+    assert "from the FBX units" in version["notes"]
