@@ -931,22 +931,26 @@ working and adds tests that use real tools and real data.
 
 Not planned: billing or subscriptions, public release work.
 
-## Known gaps carried forward
+## Known gaps carried forward (updated 2026-11-05)
 
 | Gap | Status |
 |---|---|
-| Tripo/Meshy never run against the real services | Needs a paid key; smoke test whenever one is available |
-| GitHub Actions (CI and release) have never run; Windows and Linux desktop builds, and the bundle script on those systems, are untested | First push to GitHub |
+| Tripo/Meshy (generation and re-texturing) never run against the real services | Needs a paid key; smoke test whenever one is available |
+| Release workflow (tagged builds for Windows, Linux and macOS) never run; Windows and Linux desktop builds untested | Runs on a `v*` tag; no public release yet, by request |
 | Desktop builds are unsigned; notarization probably needs the engine's `.so`/`.dylib` files signed too (untested) | When a signing certificate is available |
 | Desktop app is large (670 MB, 184 MB DMG), mostly Pixar USD, OpenCV and SciPy | `--without-usdz` saves ~250 MB; trimming further is future work |
-| No local AI generation (Automatic mode chooses photogrammetry or cloud) | Needs a capable NVIDIA GPU to develop and test |
-| Photogrammetry tested only on synthetic photos; dense (CUDA) path never run | Needs real captures and an NVIDIA machine |
-| Baking transfers base colour only (no normal/roughness/emissive maps); no retopology; without Blender, textured models over budget are not reduced | Later |
+| Local AI and photogrammetry verified on a 6-core Intel Mac CPU only; CUDA, Apple Silicon, Windows and Linux untested; COLMAP's CUDA dense path never run | Needs that hardware |
 | Provider keys stored encrypted on disk, not in the OS keychain | Later |
 | Several backend processes sharing one PostgreSQL queue: designed for, not tested | When a multi-worker deployment needs it |
 | Tauri window not automated (no WebDriver on macOS); native Save dialog not clicked through by hand | Linux/Windows CI with tauri-driver |
-| Draco-compressed GLBs: untested end to end. trimesh (the backend's file check) has no glTF Draco support, so such provider output would likely be rejected | Later |
 | Main JS bundle ≈580 KB (three.js already split out) | Not done |
-| Vertex-level editing, texture settings, KTX2 textures | Later |
-| Viewer e2e runs in local Chrome; WebGL in CI's headless Chromium is unverified | First CI run |
+| Vertex-level editing, texture adjustments, KTX2 textures; FBX import | Later |
+| Quality-report problems are listed but not shown on the model | Later |
 | Light theme | Not planned |
+
+Resolved since the first list: CI runs on every push to GitHub; its six jobs,
+including the browser tests with real WebGL in headless Chromium, passed
+through Phase 11. From Phase 12 one timing check failed there: CI draws WebGL
+in software, and the check is now CI-aware. Also resolved: local AI
+generation (Phase 8), real photogrammetry captures (Phases 9 and 9b), Draco
+GLBs (Phase 9), normal and occlusion baking and retopology (Phase 13).
