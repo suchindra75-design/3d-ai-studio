@@ -168,4 +168,47 @@ test('a 3-million-triangle model opens, with shadows off, and stays usable', asy
   // 0.8–0.9 s on a Mac with a GPU (2.8 s before D45). CI's headless Chromium has no GPU
   // and draws WebGL in software (about 6 s there), so it only guards against hangs.
   expect(interactSeconds).toBeLessThan(process.env.CI ? 30 : 5);
+
+  // Finding open and non-manifold edges on 3 million triangles.
+  const p0 = Date.now();
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('switch', { name: 'Show problems on the model' }).click();
+  await expect(page.getByText(/as shown, including unsaved edits/)).toBeVisible({
+    timeout: 120_000,
+  });
+  console.log(`problem edges on the large model: ${((Date.now() - p0) / 1000).toFixed(1)} s`);
+});
+
+function boxWithAHole(): Buffer {
+  const script = [
+    'import sys, trimesh',
+    'box = trimesh.creation.box(extents=(1, 1, 1))',
+    'box.update_faces([i for i in range(len(box.faces)) if i not in (0, 1)])',
+    "sys.stdout.buffer.write(trimesh.Scene(box).export(file_type='glb'))",
+  ].join('\n');
+  return execFileSync('.venv/bin/python', ['-I', '-c', script]);
+}
+
+test('problems from the quality report are drawn on the model', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'one run is enough');
+  const { projectId, model } = await mockModel(request, 'E2E problems');
+  const saved = await request.post(`/api/v1/models/${model.id}/versions`, {
+    multipart: {
+      file: { name: 'hole.glb', mimeType: 'model/gltf-binary', buffer: boxWithAHole() },
+      parent_version_id: model.current_version.id,
+    },
+  });
+  expect(saved.status(), await saved.text()).toBe(201);
+  expect((await saved.json()).quality_report.metrics.boundary_edges).toBe(4);
+
+  await page.goto(`/projects/${projectId}/models/${model.id}`);
+  await expect(page.getByRole('img', { name: /3D view of .*version 2/ })).toBeVisible();
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  await page.getByRole('switch', { name: 'Show problems on the model' }).click();
+  await expect(page.getByRole('status').filter({ hasText: '4 open edges (red)' })).toBeVisible();
+  await page.getByRole('switch', { name: 'Show problems on the model' }).click();
+  await expect(page.getByText('4 open edges (red)')).toHaveCount(0);
 });

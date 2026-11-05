@@ -91,7 +91,6 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
   is tested end to end since Phase 9.
 - **Missing:**
   - Level of detail or progressive loading for models far beyond that.
-  - Quality problems highlighted on the model.
 
 ### 7. Actual 3D editing — 🟡
 - **Have:** move, rotate and scale per part (gizmo and numbers); material
@@ -147,11 +146,11 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
     inside-out surfaces (Phase 11), volume, UV range, texture sizes,
     provenance and scale status.
   - Photo quality and overlap measurement.
-  - All tested on generated, scanned and broken meshes.
+  - All tested on generated, scanned and broken meshes; very large meshes
+    (6 million triangles) and Draco files since Phase 12 and Phase 9.
+  - Open and non-manifold edges drawn on the model (2026-11-05).
 - **Missing:**
-  - Never run on real provider output: PBR materials, Draco, very large
-    meshes.
-  - Problems are listed but not highlighted on the model.
+  - Never run on real provider output (PBR materials from Tripo/Meshy).
 
 ### 12. Model version management — ✅
 - **Have:** immutable versions, provenance and notes; edited and enhanced

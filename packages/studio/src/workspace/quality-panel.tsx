@@ -1,9 +1,9 @@
 'use client';
 
 import type { ModelVersionRead } from '@ai3d/shared-types';
-import { Badge, cn } from '@ai3d/ui';
+import { Badge, Switch, cn } from '@ai3d/ui';
 import { formatBytes } from '@ai3d/utilities';
-import { formatCount } from '@ai3d/viewer';
+import { formatCount, type ProblemEdges } from '@ai3d/viewer';
 import { CircleCheck, CircleMinus, CircleX, Info, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -58,7 +58,18 @@ interface StepRecord {
 }
 
 /** The version's quality report: facts about the stored file, not about the real object. */
-export function QualityPanel({ version }: { version: ModelVersionRead }) {
+export function QualityPanel({
+  version,
+  showProblems = false,
+  onShowProblems,
+  problems = null,
+}: {
+  version: ModelVersionRead;
+  /** Draw open and non-manifold edges on the model (see ProblemOverlay). */
+  showProblems?: boolean;
+  onShowProblems?: (show: boolean) => void;
+  problems?: ProblemEdges | null;
+}) {
   const report = version.quality_report;
   if (!report) {
     return <p className="px-4 py-4 text-xs text-subtle-foreground">This version has no report.</p>;
@@ -79,6 +90,35 @@ export function QualityPanel({ version }: { version: ModelVersionRead }) {
           Report v{report.report_version} · checked by re-opening the stored file
         </span>
       </div>
+      {onShowProblems ? (
+        <div className="flex flex-col gap-1.5 border-b border-border px-4 py-3 text-xs">
+          <label className="flex items-center justify-between gap-3">
+            <span>Show problems on the model</span>
+            <Switch
+              checked={showProblems}
+              onCheckedChange={onShowProblems}
+              aria-label="Show problems on the model"
+            />
+          </label>
+          {showProblems && problems ? (
+            <p role="status" className="leading-relaxed text-muted-foreground">
+              {problems.boundaryCount === 0 && problems.nonManifoldCount === 0
+                ? 'No open or non-manifold edges in the model as shown.'
+                : [
+                    problems.boundaryCount > 0
+                      ? `${formatCount(problems.boundaryCount)} open edges (red)`
+                      : null,
+                    problems.nonManifoldCount > 0
+                      ? `${formatCount(problems.nonManifoldCount)} non-manifold edges (orange)`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+              . Drawn through the surface; measured on the model as shown, including unsaved edits.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <Group
         title="Geometry"
         rows={[

@@ -867,6 +867,20 @@ upscaler installed):
   Phase 2 adapters, they are tested against fakes built from the docs as of
   2026-11-04.
 
+## After the roadmap (2026-11-05)
+
+- **CI:** GitHub Actions had been running on every push. From Phase 12 one
+  browser timing check failed there: CI's headless Chromium draws WebGL in
+  software, about 6 s against a 5 s limit. The check is CI-aware now. Every
+  other job passed, including the browser tests with WebGL.
+- **Problems on the model** (Quality tab → *Show problems on the model*):
+  - open edges (used by one triangle) are drawn in red, and non-manifold
+    edges (three or more) in orange, through the surface;
+  - the browser finds them the way the server check does: positions welded
+    and all parts together, using numeric sorting, not string maps;
+  - a box with a missing face shows the same 4 open edges the server reports;
+  - 3 million triangles take 7 s.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
@@ -945,7 +959,6 @@ Not planned: billing or subscriptions, public release work.
 | Tauri window not automated (no WebDriver on macOS); native Save dialog not clicked through by hand | Linux/Windows CI with tauri-driver |
 | Main JS bundle ≈580 KB (three.js already split out) | Not done |
 | Vertex-level editing, texture adjustments, KTX2 textures; FBX import | Later |
-| Quality-report problems are listed but not shown on the model | Later |
 | Light theme | Not planned |
 
 Resolved since the first list: CI runs on every push to GitHub; its six jobs,

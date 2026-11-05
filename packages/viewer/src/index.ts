@@ -33,3 +33,5 @@ export {
   type ViewportProps,
 } from './viewport';
 export { MeasureMarkers } from './measure';
+export { findProblemEdges, type ProblemEdges } from './problems';
+export { ProblemOverlay } from './problem-overlay';

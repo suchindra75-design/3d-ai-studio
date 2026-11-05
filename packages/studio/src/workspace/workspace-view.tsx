@@ -23,8 +23,10 @@ import {
   CameraLink,
   DEFAULT_VIEWPORT_OPTIONS,
   MeasureMarkers,
+  ProblemOverlay,
   Viewport,
   buildHierarchy,
+  findProblemEdges,
   formatCount,
   measure,
   sceneStats,
@@ -169,6 +171,7 @@ function VersionWorkspace({
   const [compareId, setCompareId] = useState<string | null>(null);
   const [link] = useState(() => new CameraLink());
   const [viewNotice, setViewNotice] = useState<string | null>(null);
+  const [showProblems, setShowProblems] = useState(false);
   const capture = useRef<(() => Promise<Blob>) | null>(null);
   const onCaptureReady = useCallback((fn: () => Promise<Blob>) => {
     capture.current = fn;
@@ -198,6 +201,11 @@ function VersionWorkspace({
       root ? Math.max(measure(root).getBoundingSphere(new THREE.Sphere()).radius, 1e-3) * 0.012 : 0,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-measure after edits
     [root, edits.version],
+  );
+  const problems = useMemo(
+    () => (showProblems && root ? findProblemEdges(root) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-measure after edits
+    [showProblems, root, edits.version],
   );
   const compareVersion = versions.find((v) => v.id === compareId && v.id !== version.id) ?? null;
 
@@ -460,6 +468,7 @@ function VersionWorkspace({
                   onCaptureReady={onCaptureReady}
                   label={`3D view of ${model.name}, version ${version.version_number}`}
                 >
+                  {problems ? <ProblemOverlay edges={problems} /> : null}
                   {points.length > 0 ? (
                     <MeasureMarkers
                       points={points}
@@ -622,7 +631,12 @@ function VersionWorkspace({
                 />
               ) : null
             ) : tab === 'quality' ? (
-              <QualityPanel version={version} />
+              <QualityPanel
+                version={version}
+                showProblems={showProblems}
+                onShowProblems={setShowProblems}
+                problems={problems}
+              />
             ) : tab === 'enhance' ? (
               <>
                 <EnhancePanel
