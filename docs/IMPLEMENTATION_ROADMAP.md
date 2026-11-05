@@ -1003,6 +1003,28 @@ present):
 triangles), smoothing does not preserve sharp edges, and there is no Instant
 Meshes (QuadriFlow covers the same need).
 
+## Phases 14 and 15 checked (2026-11-05)
+
+**Phase 14 (AI enhancement):**
+- Both items were done. The open item, upscaler memory and size limits, was
+  closed with Phase 12 above (D56).
+- New: `e2e/local-ai.spec.ts` now also runs AI upscaling from the Enhance tab
+  with the real Real-ESRGAN engine. The test texture is a 256 px patch of a
+  real photo. The step reports "256×256 → 512×512" with its caveat, and the
+  saved GLB's texture is 512 px. It runs when `AI3D_LOCAL_AI_DIR` points at
+  an installed engine; with it, both local AI browser tests pass (1.2 min).
+- Still not verified: cloud re-texturing against the real Meshy and Tripo
+  services. That needs a paid key; the adapters are tested against fakes
+  built from the documentation.
+
+**Phase 15 (Projects):** nothing outstanding in its scope.
+- Import (now including FBX), backup and restore all have browser tests
+  (`e2e/transfer.spec.ts`) and backend tests with damaged and unsafe files.
+- Left as before:
+  - Duplicating a project: backup and restore does the same.
+  - The web app cannot restore backups over its 520 MB request limit; the
+    desktop app has no such limit.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
