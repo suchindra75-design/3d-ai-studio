@@ -29,6 +29,7 @@ import trimesh
 from PIL import Image
 
 from ai3d.models.enums import QualityMode
+from ai3d.processing import quads
 from ai3d.processing.mesh import duplicate_face_count, load_model_scene
 from ai3d_engine.blender import (
     BlenderFailedError,
@@ -718,35 +719,170 @@ def apply_scale(scene: trimesh.Scene, reference: ScaleReference) -> tuple[Step, 
     return step, info
 
 
-def smooth(scene: trimesh.Scene, iterations: int) -> Step:
-    """Taubin smoothing (alternating shrink and inflate, so the volume is kept).
+SmoothingMethod = Literal["sharp", "taubin"]
 
-    Runs on the shape with texture seams merged, then moves every original vertex
-    with its merged position, so UVs, colours and seams are untouched.
+# Bilateral normal filtering: how different two face normals may be and still be
+# averaged (|n1 - n2|, Gaussian width). Across a 90° edge |n1 - n2| ≈ 1.41, which
+# gets a weight of ~3e-4: edges and corners stay. Chosen on noisy test shapes (a
+# cube, a cylinder, a sphere): 0.2 leaves noise, 0.5 starts rounding edges after
+# many passes (docs/BENCHMARKS.md).
+SHARP_NORMAL_SIGMA = 0.35
+# Pairs of faces processed at a time when weighting (bounds temporary memory).
+_PAIR_CHUNK = 2_000_000
+
+
+def _face_normals(vertices: np.ndarray, faces: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    corners = vertices[faces]
+    cross = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    double_area = np.linalg.norm(cross, axis=1)
+    normals = cross / np.maximum(double_area, 1e-30)[:, None]
+    return normals, double_area / 2
+
+
+def _sharp_smooth(vertices: np.ndarray, faces: np.ndarray, passes: int) -> np.ndarray:
+    """Feature-preserving smoothing (bilateral normal filtering, Zheng et al. 2011).
+
+    Each face normal becomes a weighted mean of the normals of faces sharing a
+    vertex with it: near faces count more, and faces whose normal differs a lot
+    (the other side of an edge) hardly at all. The vertices are then moved to fit
+    the filtered normals (Sun et al. 2007). Noise goes; edges and corners stay.
+    """
+    from scipy import sparse  # noqa: PLC0415 - only needed here
+
+    count = len(vertices)
+    face_count = len(faces)
+    incidence = sparse.csr_matrix(
+        (
+            np.ones(face_count * 3, dtype=np.float32),
+            (np.repeat(np.arange(face_count, dtype=np.int32), 3), faces.ravel().astype(np.int32)),
+        ),
+        shape=(face_count, count),
+    )
+    neighbours = (incidence @ incidence.T).tocoo()
+    del incidence
+    rows = neighbours.row.astype(np.int32)
+    cols = neighbours.col.astype(np.int32)
+    del neighbours
+    normals, area = _face_normals(vertices, faces)
+    centres = vertices[faces].mean(axis=1)
+    spatial = np.empty(len(rows), dtype=np.float64)
+    gaps = 0.0
+    for start in range(0, len(rows), _PAIR_CHUNK):
+        r, c = rows[start : start + _PAIR_CHUNK], cols[start : start + _PAIR_CHUNK]
+        distance = np.linalg.norm(centres[r] - centres[c], axis=1)
+        spatial[start : start + _PAIR_CHUNK] = distance
+        gaps += float(distance.sum())
+    sigma = gaps / max(len(rows) - face_count, 1) or 1.0  # mean gap between neighbours
+    for start in range(0, len(rows), _PAIR_CHUNK):
+        d = spatial[start : start + _PAIR_CHUNK]
+        spatial[start : start + _PAIR_CHUNK] = area[cols[start : start + _PAIR_CHUNK]] * np.exp(
+            -(d * d) / (2 * sigma * sigma)
+        )
+    weights = np.empty_like(spatial)
+    for _ in range(passes):
+        for start in range(0, len(rows), _PAIR_CHUNK):
+            r, c = rows[start : start + _PAIR_CHUNK], cols[start : start + _PAIR_CHUNK]
+            difference = 2.0 - 2.0 * np.einsum("ij,ij->i", normals[r], normals[c])
+            weights[start : start + _PAIR_CHUNK] = spatial[start : start + _PAIR_CHUNK] * np.exp(
+                -difference / (2 * SHARP_NORMAL_SIGMA**2)
+            )
+        filtered = sparse.csr_matrix((weights, (rows, cols)), shape=(face_count, face_count))
+        normals = filtered @ normals
+        normals /= np.maximum(np.linalg.norm(normals, axis=1), 1e-30)[:, None]
+    del rows, cols, spatial, weights
+    moved = vertices.astype(np.float64).copy()
+    valence = np.maximum(np.bincount(faces.ravel(), minlength=count), 1).astype(np.float64)
+    for _ in range(passes + 10):
+        corners = moved[faces]
+        offset = np.einsum("fj,fkj->fk", normals, corners.mean(axis=1)[:, None, :] - corners)
+        step = np.zeros_like(moved)
+        for k in range(3):
+            push = normals * offset[:, k : k + 1]
+            for axis in range(3):
+                step[:, axis] += np.bincount(faces[:, k], weights=push[:, axis], minlength=count)
+        moved += step / valence[:, None]
+    return moved
+
+
+# Scene metadata key: quad pairs from retopology ({geometry name: (P, 2) face indices}).
+QUAD_PAIRS = "quad_pairs"
+
+# Working memory of feature-preserving smoothing per triangle, beyond the loaded
+# model (measured: 10 million triangles peaked 6.3 GB above loading; see
+# docs/BENCHMARKS.md), with some margin.
+SHARP_SMOOTHING_BYTES_PER_TRIANGLE = 700
+
+
+def smooth(
+    scene: trimesh.Scene,
+    iterations: int,
+    method: SmoothingMethod = "sharp",
+    *,
+    available_bytes: int | None = None,
+) -> Step:
+    """Smooth the surface; ``iterations`` sets the strength (3, 10, 30 in the app).
+
+    ``sharp`` (default): bilateral normal filtering, which removes noise but keeps
+    sharp edges and corners (see :func:`_sharp_smooth`). ``taubin``: Taubin smoothing
+    (alternating shrink and inflate), which rounds edges. Both keep the volume.
+
+    Both run on the shape with texture seams merged, then move every original
+    vertex with its merged position, so UVs, colours and seams are untouched.
     """
     title = "Smoothing"
     if iterations <= 0:
         return Step("smoothing", title, "skipped", "Not requested.")
+    if method == "sharp" and available_bytes is not None:
+        need = _face_count(scene) * SHARP_SMOOTHING_BYTES_PER_TRIANGLE
+        if need > available_bytes:
+            return Step(
+                "smoothing",
+                title,
+                "skipped",
+                f"Keeping sharp edges on {_face_count(scene):,} triangles needs about "
+                f"{need / 1024**3:.1f} GB of memory and {available_bytes / 1024**3:.1f} GB is "
+                "free. Close other programs, or choose Round them off (much lighter).",
+            )
     diagonal = float(np.linalg.norm(scene.extents)) or 1.0
     moved: list[np.ndarray] = []
+    volume_before = volume_after = 0.0
+    closed = True
     for _, mesh in _meshes(scene):
         unique, inverse = trimesh.grouping.unique_rows(mesh.vertices)  # type: ignore[no-untyped-call]
         shape = trimesh.Trimesh(
             vertices=mesh.vertices[unique], faces=inverse[mesh.faces], process=False
         )
-        trimesh.smoothing.filter_taubin(shape, lamb=0.5, nu=0.53, iterations=iterations)  # type: ignore[no-untyped-call]
+        closed = closed and shape.is_watertight
+        if closed:
+            volume_before += abs(float(shape.volume))
+        if method == "taubin":
+            trimesh.smoothing.filter_taubin(shape, lamb=0.5, nu=0.53, iterations=iterations)  # type: ignore[no-untyped-call]
+        else:
+            shape.vertices = _sharp_smooth(
+                np.asarray(shape.vertices), np.asarray(shape.faces), iterations
+            )
+        if closed:
+            volume_after += abs(float(shape.volume))
         new = np.asarray(shape.vertices)[inverse]
         moved.append(np.linalg.norm(new - mesh.vertices, axis=1) / diagonal)
         mesh.vertices = new
     if not moved:
         return Step("smoothing", title, "skipped", "No triangle meshes to smooth.")
     distance = np.concatenate(moved)
+    how = (
+        "keeps sharp edges and corners" if method == "sharp" else "Taubin, which rounds sharp edges"
+    )
+    volume = (
+        f" Volume changed by {100 * (volume_after / volume_before - 1):+.2f}%."
+        if closed and volume_before > 0
+        else ""
+    )
     return Step(
         "smoothing",
         title,
         "applied",
-        f"{iterations} passes (Taubin, which keeps the volume): vertices moved "
-        f"{distance.mean():.2%} of the model's size on average, at most {distance.max():.2%}.",
+        f"{iterations} passes ({how}): vertices moved {distance.mean():.2%} of the model's "
+        f"size on average, at most {distance.max():.2%}.{volume}",
     )
 
 
@@ -789,12 +925,18 @@ def remesh(
             "resolution": settings.resolution,
             "maps": list(settings.maps),
             "texture_size": texture_size,
+            "quads_output": str(root / "quads.npy"),
         }
         try:
             info = run_blender(
                 "remesh", request, workdir=root, timeout=REMESH_TIMEOUT, cancel=cancel
             )
             result = load_model_scene(output)
+            corners_path = root / "quads.npy"
+            if corners_path.exists():
+                pairs = quads.pair_triangles(result, np.load(corners_path))
+                if pairs:
+                    result.metadata[QUAD_PAIRS] = pairs
         except (BlenderFailedError, BlenderNotFoundError) as exc:
             reason = exc.message if isinstance(exc, BlenderFailedError) else str(exc)
             log.warning("remesh failed", extra={"reason": reason})
@@ -816,8 +958,14 @@ def remesh(
                 "was kept as it was; a higher face count or resolution follows it more closely.",
             )
         ]
+    paired = sum(len(p) for p in result.metadata.get(QUAD_PAIRS, {}).values())
+    kept = (
+        f"; the GLB holds triangles only, the OBJ and FBX exports keep {paired:,} quads"
+        if paired
+        else ""
+    )
     faces = (
-        f"{info['quads_after']:,} quads ({info['triangles_after']:,} triangles in the file)"
+        f"{info['quads_after']:,} quads ({info['triangles_after']:,} triangles in the file{kept})"
         if info["quads_after"] == info["faces_after"]
         else f"{info['faces_after']:,} faces ({info['triangles_after']:,} triangles)"
     )
@@ -911,6 +1059,7 @@ def process(
     cancel: CancelCheck | None = None,
     heavy_turn: HeavyTurn | None = None,
     smoothing: int = 0,
+    smoothing_method: SmoothingMethod = "sharp",
     remesh_settings: RemeshSettings | None = None,
     upscale: int | None = None,
     upscale_limits: UpscaleLimits | None = None,
@@ -931,7 +1080,14 @@ def process(
     if profile.fill_holes:
         result.steps.append(fill_holes(scene))
     if smoothing:
-        result.steps.append(smooth(scene, smoothing))
+        result.steps.append(
+            smooth(
+                scene,
+                smoothing,
+                smoothing_method,
+                available_bytes=upscale_limits.available_bytes if upscale_limits else None,
+            )
+        )
     remeshed = False
     if remesh_settings is not None:
         size = bake_texture_size(scene, profile.max_texture)

@@ -34,8 +34,13 @@ def _surface_steps(body: EnhanceRequest, max_texture: int, step: Callable[..., N
         step(
             "smoothing",
             "Smoothing",
-            f"{body.smoothing} passes of Taubin smoothing (keeps the volume); the report says "
-            "how far the surface moved.",
+            f"{body.smoothing} passes, "
+            + (
+                "keeping sharp edges and corners"
+                if body.smoothing_method == "sharp"
+                else "rounding sharp edges (Taubin)"
+            )
+            + "; keeps the volume. The report says how far the surface moved.",
         )
     remesh_problem = check_blender() if body.remesh else None
     if body.remesh:
@@ -165,6 +170,8 @@ def retry_enhance(
         remove_ground=bool(params.get("remove_ground")),
         scale=params.get("scale"),
         smoothing=int(params.get("smoothing") or 0),
+        # Jobs from before the choice existed used Taubin.
+        smoothing_method=params.get("smoothing_method") or "taubin",
         remesh=params.get("remesh"),
         upscale_textures=params.get("upscale_textures"),
     )
@@ -209,6 +216,7 @@ def create_enhance_job(
             "remove_ground": body.remove_ground,
             "scale": body.scale.model_dump() if body.scale else None,
             "smoothing": body.smoothing,
+            "smoothing_method": body.smoothing_method,
             "remesh": body.remesh.model_dump() if body.remesh else None,
             "upscale_textures": body.upscale_textures,
             "provider_summary": [s.title for s in plan.steps if s.status == "will_run"],

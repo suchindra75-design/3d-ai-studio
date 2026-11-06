@@ -1,6 +1,7 @@
 """3D models and their versions."""
 
 import hashlib
+import io
 import logging
 import re
 import shutil
@@ -9,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any, BinaryIO
 
+import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -323,8 +325,12 @@ def save_enhanced_version(
     report: MeshReport,
     steps: list[dict[str, str]],
     scale: dict[str, Any] | None,
+    quad_pairs: dict[str, np.ndarray] | None = None,
 ) -> ModelVersion:
-    """Store a processed GLB as a new ``enhanced`` version; the parent is kept."""
+    """Store a processed GLB as a new ``enhanced`` version; the parent is kept.
+
+    ``quad_pairs`` (from retopology): which triangles form quads, kept as a file so
+    OBJ and FBX exports can be written with quads (D60)."""
     model = get_model(db, parent.model_id)
     number = _next_version_number(db, model.id)
     key = model_asset_key(model.project_id, model.id, number, "model.glb")
@@ -348,10 +354,14 @@ def save_enhanced_version(
         f"{caveat}{size}"
     )
     storage.save_file(key, glb_path)
+    saved_keys: list[str] = []
     try:
         stats: dict[str, Any] = {k: report.metrics.get(k) for k in _STAT_KEYS}
         if known_scale:
             stats["scale"] = known_scale
+        quad_count = sum(len(p) for p in (quad_pairs or {}).values())
+        if quad_count:
+            stats["quads"] = quad_count
         version = ModelVersion(
             model_id=model.id,
             version_number=number,
@@ -377,6 +387,24 @@ def save_enhanced_version(
             meta={"format": "glb", "origin": "enhance"},
         )
         db.add(mesh)
+        if quad_count:
+            buffer = io.BytesIO()
+            np.savez_compressed(buffer, **(quad_pairs or {}))  # type: ignore[arg-type]
+            quad_key = model_asset_key(model.project_id, model.id, number, "quads.npz")
+            saved_keys.append(quad_key)
+            storage.save_bytes(quad_key, buffer.getvalue())
+            db.add(
+                Asset(
+                    project_id=model.project_id,
+                    model_version_id=version.id,
+                    kind=AssetKind.QUAD_TOPOLOGY,
+                    storage_key=quad_key,
+                    mime_type="application/octet-stream",
+                    size_bytes=len(buffer.getvalue()),
+                    sha256=hashlib.sha256(buffer.getvalue()).hexdigest(),
+                    meta={"quads": quad_count, "geometries": sorted(quad_pairs or {})},
+                )
+            )
         db.add(
             QualityReport(
                 model_version_id=version.id,
@@ -394,7 +422,8 @@ def save_enhanced_version(
         db.commit()
     except BaseException:
         db.rollback()
-        storage.delete(key)
+        for stored in (key, *saved_keys):
+            storage.delete(stored)
         raise
     return version
 

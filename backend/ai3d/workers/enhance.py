@@ -12,9 +12,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import trimesh
+
 from ai3d.models import GenerationJob, ModelVersion
 from ai3d.models.enums import AssetKind, JobEventType, JobStatus
+from ai3d.processing import quads
 from ai3d.processing.geometry import (
+    QUAD_PAIRS,
     HeavyTurn,
     RemeshSettings,
     ScaleReference,
@@ -102,6 +107,7 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             cancel=ctx.heartbeat,  # polled while Blender runs (texture baking)
             heavy_turn=_heavy_turn(ctx),
             smoothing=int(job.params.get("smoothing") or 0),
+            smoothing_method=job.params.get("smoothing_method") or "taubin",
             remesh_settings=_remesh_settings(job.params.get("remesh")),
             upscale=job.params.get("upscale_textures"),
             upscale_limits=UpscaleLimits(
@@ -159,6 +165,7 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             report=report,
             steps=[step.to_dict() for step in result.steps],
             scale=result.scale,
+            quad_pairs=_checked_quads(scene),
         )
         number = version.version_number
     if ctx.finish(
@@ -176,6 +183,19 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             progress=1.0,
             data={"model_version_id": str(version.id)},
         )
+
+
+def _checked_quads(scene: trimesh.Scene) -> dict[str, np.ndarray] | None:
+    """Quad pairs from retopology that still match the final mesh (D60)."""
+    pairs = scene.metadata.get(QUAD_PAIRS) or {}
+    checked = {}
+    for name, found in pairs.items():
+        mesh = scene.geometry.get(name)
+        if isinstance(mesh, trimesh.Trimesh):
+            kept = quads.check_pairs(mesh, found)
+            if len(kept):
+                checked[name] = kept
+    return checked or None
 
 
 # Steps that run only when asked for; the others are routine checks that may well

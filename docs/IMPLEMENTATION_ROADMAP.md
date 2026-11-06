@@ -1067,6 +1067,71 @@ benchmarks.
 - **Not done:** cross-fading between levels (switching uses a ±25% margin so it
   does not flicker); levels for parts edited after loading.
 
+### Feature-preserving smoothing ✅ (D59)
+- **Smoothing → Sharp edges** in the Enhance tab: *Keep sharp edges and
+  corners* (default) or *Round them off (Taubin)*, at Light, Medium or Strong
+  (3, 10, 30 passes). The report gives the method, how far vertices moved and
+  the volume change; *Compare before/after* opens the result beside the version
+  it came from, with the cameras linked. The source version is unchanged, as for
+  every enhancement.
+- **Method:** bilateral normal filtering. A first attempt that locked edges over
+  40° failed: on a noisy cube (noise 0.4% of its size) noise alone made thousands
+  of edges that sharp, so almost nothing was smoothed.
+- **Compared with Taubin** on noisy shapes with known true surfaces (distance
+  to the true surface, ×10⁻³ of the size: root mean square for "overall", mean
+  for edges, corners and rims; Medium / Strong):
+
+  | Shape | Noisy | Keep sharp edges | Taubin |
+  |---|---|---|---|
+  | Cube, overall | 3.99 | 0.89 / 0.57 | 1.83 / 1.50 |
+  | Cube, near edges | 3.23 | 0.86 / 0.62 | 1.59 / 1.62 |
+  | Cube, corners | | 1.07 / 0.77 | 1.70 / 2.01 |
+  | Cylinder (even mesh), rims | 3.17 | 0.78 / 0.63 | 2.00 / 2.66 |
+  | Sphere, overall | 4.01 | 0.74 / 0.50 | 1.51 / 1.23 |
+
+  At Light (3 passes) the two are alike. Volume stays within 0.1% for both.
+- **Where Taubin is better:** bumps as large as the triangles themselves (a
+  sphere with 4% random bumps): keeping edges leaves 91% of the roughness at
+  Medium, Taubin 45%. With moderate noise (0.8%) it is the other way round: 17%
+  against 45%. The panel says so.
+- **Test-mesh finding:** a cylinder made by subdividing trimesh's cylinder has
+  slivers 0.0003 wide on its side; filtering did worse than Taubin there, and
+  better on an evenly meshed cylinder. Real scans are closer to the even mesh.
+
+### Quad topology in OBJ and FBX exports ✅ (D60)
+- **The limitation:** glTF (and so GLB, the app's working format) stores only
+  triangles. QuadriFlow made real quads in Blender, but they became two
+  triangles each the moment the result was saved, and every export started from
+  that file.
+- **Now:** Blender reports the corners of every quad it made; the backend
+  finds the two saved triangles that cover each quad (by position, so face order
+  and split vertices do not matter) and stores those pairs with the version.
+  The GLB is unchanged, so viewing, editing and every other format work as
+  before.
+  - **OBJ:** each pair is written as one four-corner face, in the triangles'
+    winding.
+  - **FBX:** Blender imports the GLB, joins each pair by dissolving the edge
+    the two triangles share, and writes real quads.
+  - Both files are re-opened and their quads counted (the FBX in Blender); the
+    export lists "N quads in the file", and a note if any could not be joined.
+  - The Quality tab shows "Quads (from retopology): N: the GLB stores each as
+    two triangles; OBJ and FBX exports keep them as quads".
+- **Measured:** a QuadriFlow result of 1,467 quads exports as 1,467 quads in
+  both OBJ and FBX (and 2,934 triangles in GLB and STL); in the browser test,
+  a 5,000-quad target gives an OBJ with only quads, as many as the Quality tab
+  shows.
+- **Not kept:** quads of a version edited in the browser or enhanced again
+  without retopology (those are saved as triangles, and their exports say so by
+  showing no quads); quads in GLB, glTF, STL, 3MF and USDZ (triangles only in
+  this app's writers); quads in imported files (they are read as triangles).
+
+### Real Tripo and Meshy checks prepared
+- `backend/tests/test_real_providers.py` (marker `real_provider`), apart from
+  the fake-service tests and never using the mock provider; levels and costs in
+  [AI_PROVIDERS.md](AI_PROVIDERS.md#checking-against-the-real-services).
+- Run: the free wrong-key check, against both real services (both refused the
+  key; both adapters reported an authentication failure). No paid call was made.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
@@ -1131,11 +1196,11 @@ working and adds tests that use real tools and real data.
 
 Not planned: billing or subscriptions, public release work.
 
-## Known gaps carried forward (updated 2026-11-05)
+## Known gaps carried forward (updated 2026-11-06)
 
 | Gap | Status |
 |---|---|
-| Tripo/Meshy (generation and re-texturing) never run against the real services | Needs a paid key; smoke test whenever one is available |
+| Tripo/Meshy generation and re-texturing never run against the real services (only a wrong key was sent, 2026-11-06: refused and mapped correctly) | Opt-in checks ready in `test_real_providers.py`: free with a key (balance), paid only for providers named in `AI3D_ALLOW_PAID_PROVIDER_CALLS` |
 | Release workflow (tagged builds for Windows, Linux and macOS) never run; Windows and Linux desktop builds untested | Runs on a `v*` tag; no public release yet, by request |
 | Desktop builds are unsigned; notarization probably needs the engine's `.so`/`.dylib` files signed too (untested) | When a signing certificate is available |
 | Desktop app is large (670 MB, 184 MB DMG), mostly Pixar USD, OpenCV and SciPy | `--without-usdz` saves ~250 MB; trimming further is future work |

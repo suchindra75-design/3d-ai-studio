@@ -123,6 +123,14 @@ export function QualityPanel({
         title="Geometry"
         rows={[
           ['Triangles', formatCount(num(m.triangle_count) ?? 0)],
+          ...(num(version.stats?.quads) // quads are kept beside the GLB's triangles (D60)
+            ? ([
+                [
+                  'Quads (from retopology)',
+                  `${formatCount(num(version.stats?.quads)!)}: the GLB stores each as two triangles; OBJ and FBX exports keep them as quads`,
+                ],
+              ] as [string, string][])
+            : []),
           ['Vertices', formatCount(num(m.vertex_count) ?? 0)],
           [
             'Separate pieces',

@@ -314,9 +314,79 @@ def test_smoothing_calms_noise_keeps_volume_and_texture_coordinates() -> None:
     welded = mesh.copy()
     welded.merge_vertices(merge_tex=True, merge_norm=True)
     assert welded.is_watertight  # seams moved together: no cracks
-    assert abs(welded.volume / noisy.volume - 1) < 0.03  # Taubin keeps the volume
+    assert abs(welded.volume / noisy.volume - 1) < 0.03  # the volume is kept
     assert np.array_equal(mesh.visual.uv, uv_before)
     assert geometry.smooth(scene, 0).status == "skipped"
+
+
+def _box_distance(points: np.ndarray, half: float = 0.5) -> np.ndarray:
+    """Distance to the surface of an axis-aligned cube (signed distance, absolute)."""
+    q = np.abs(points) - half
+    outside = np.linalg.norm(np.maximum(q, 0), axis=1)
+    return np.abs(outside + np.minimum(q.max(axis=1), 0))
+
+
+def _noisy_cube() -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
+    box = trimesh.creation.box(extents=(1, 1, 1))
+    vertices, faces = trimesh.remesh.subdivide_to_size(box.vertices, box.faces, max_edge=0.03)
+    clean = trimesh.Trimesh(vertices, faces)
+    clean.merge_vertices()
+    noisy = clean.copy()
+    rng = np.random.default_rng(7)
+    noisy.vertices = noisy.vertices + rng.normal(0, 0.004, noisy.vertices.shape)
+    return clean, noisy
+
+
+@pytest.mark.parametrize("passes", [3, 10, 30])
+def test_sharp_smoothing_keeps_edges_and_corners_that_taubin_rounds(passes: int) -> None:
+    """A noisy cube (noise 0.4% of its size): both methods remove noise, but only the
+    feature-preserving one keeps the edges and corners where they were."""
+    clean, noisy = _noisy_cube()
+    near_edge = np.sort(np.abs(clean.vertices), axis=1)[:, 1] > 0.45  # two coords at a face
+    corner = np.all(np.abs(clean.vertices) > 0.45, axis=1)
+    results = {}
+    for method in ("sharp", "taubin"):
+        scene = _scene(noisy.copy())
+        step = geometry.smooth(scene, passes, method)
+        assert step.status == "applied"
+        (mesh,) = scene.geometry.values()
+        distance = _box_distance(mesh.vertices)
+        results[method] = {
+            "rms": float(np.sqrt((distance**2).mean())),
+            "edges": float(distance[near_edge].mean()),
+            "corners": float(distance[corner].mean()),
+            "volume": float(mesh.volume),
+            "detail": step.detail,
+        }
+    noise = float(np.sqrt((_box_distance(noisy.vertices) ** 2).mean()))
+    sharp, taubin = results["sharp"], results["taubin"]
+    assert sharp["rms"] < 0.9 * noise  # noise removed…
+    assert taubin["rms"] < 0.9 * noise
+    # Light (3 passes): the two are alike. From Medium on (measured: about half of
+    # Taubin's error at 10 passes, 38% at 30), edges and corners stay sharp.
+    if passes >= 10:
+        assert sharp["rms"] < 0.6 * taubin["rms"]
+        assert sharp["edges"] < 0.6 * taubin["edges"]
+        assert sharp["corners"] < 0.7 * taubin["corners"]
+    assert abs(sharp["volume"] - 1) < 0.01  # the volume is kept
+    assert "keeps sharp edges and corners" in sharp["detail"]
+    assert "Volume changed by" in sharp["detail"]
+    assert "Taubin, which rounds sharp edges" in taubin["detail"]
+
+
+def test_sharp_smoothing_keeps_texture_coordinates() -> None:
+    _, noisy = _noisy_cube()
+    noisy.unmerge_vertices()  # seams everywhere, like a textured model
+    rng = np.random.default_rng(3)
+    noisy.visual = trimesh.visual.TextureVisuals(uv=rng.random((len(noisy.vertices), 2)))
+    uv_before = noisy.visual.uv.copy()
+    scene = _scene(noisy)
+    geometry.smooth(scene, 10, "sharp")
+    (mesh,) = scene.geometry.values()
+    assert np.array_equal(mesh.visual.uv, uv_before)
+    welded = mesh.copy()
+    welded.merge_vertices(merge_tex=True, merge_norm=True)
+    assert welded.is_watertight  # seams moved together: no cracks
 
 
 def test_a_remesh_that_drifts_from_the_original_is_not_kept(

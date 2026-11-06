@@ -75,6 +75,33 @@ returns a fixed placeholder sphere and is never offered in normal use.
 | Limits | 20 req/s; concurrent tasks 10–100+ by plan |
 | Output rights | free plan outputs CC BY 4.0 (attribution required); paid plans: customer-owned |
 
+## Checking against the real services
+
+The adapters (generation and re-texturing) are tested in CI against fakes that
+follow each service's documentation (`test_cloud_providers.py`). Checks against
+the real services live apart from those, in `backend/tests/test_real_providers.py`.
+They never run by default or in CI, and they never use the mock provider.
+
+| Level | Needs | Cost | What it checks |
+|---|---|---|---|
+| Wrong key | `AI3D_REAL_PROVIDER_CHECKS=1` | free | a deliberately invalid key is refused, and the service's current error format maps to "authentication failed" |
+| Key and balance | `AI3D_REAL_TRIPO_API_KEY` and/or `AI3D_REAL_MESHY_API_KEY` | free (reads the balance) | your key is accepted and the balance is read |
+| Generation and re-texture | the key, `AI3D_ALLOW_PAID_PROVIDER_CALLS=tripo` or `meshy` (or both, comma-separated), `AI3D_REAL_PROVIDER_PHOTO` | **paid**: one image-to-3D task and one re-texture task per provider named | through the app's own API: upload, generation with consent, a validated version, then a re-texture of that version into a new validated, textured version; prints the credits each task consumed as the service reports them |
+
+```bash
+AI3D_REAL_PROVIDER_CHECKS=1 uv run pytest backend/tests/test_real_providers.py -m real_provider
+```
+
+Paid tasks run only for providers named in `AI3D_ALLOW_PAID_PROVIDER_CALLS`;
+setting a key alone never spends credits. Neither service documents the price
+of a re-texture task, so the test reports what was charged rather than
+expecting a number. Tripo re-textures only models it generated itself (its
+upload API takes images), which is why the paid test generates first.
+
+**Run so far (2026-11-06):** the wrong-key level, against both real services:
+both refused the key, and both adapters reported it as an authentication
+failure. The key/balance and paid levels have not been run (no keys here).
+
 ## Local engines
 
 | Engine | Cost | Requirements |

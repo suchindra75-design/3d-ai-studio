@@ -100,6 +100,9 @@ test('smoothing from the Enhance tab smooths the saved surface and keeps its col
   await expect(page.getByRole('img', { name: /3D view of .*version 2/ })).toBeVisible();
   await page.getByRole('tab', { name: 'Enhance' }).click();
   await page.getByLabel('Smoothing', { exact: true }).selectOption('10');
+  // Heavy random bumps on an organic shape: rounding (Taubin) is the method for this.
+  // Keeping sharp edges takes the bumps for features and removes less of them.
+  await page.getByLabel('Sharp edges').selectOption('taubin');
   await expect(
     page.getByRole('list', { name: 'Enhancement steps' }).getByText('Smoothing'),
   ).toBeVisible();
@@ -111,6 +114,93 @@ test('smoothing from the Enhance tab smooths the saved surface and keeps its col
   expect(facts.roughness).toBeLessThan(before.roughness * 0.5); // bumps flattened
   expect(Math.abs(facts.volume / before.volume - 1)).toBeLessThan(0.05); // volume kept
   expectOrangeTopBlueBottom(facts);
+});
+
+function noisyCube(): Buffer {
+  const script = [
+    'import sys, numpy as np, trimesh',
+    'box = trimesh.creation.box(extents=(1, 1, 1))',
+    'v, f = trimesh.remesh.subdivide_to_size(box.vertices, box.faces, max_edge=0.03)',
+    'cube = trimesh.Trimesh(v, f); cube.merge_vertices()',
+    'cube.vertices = cube.vertices + np.random.default_rng(7).normal(0, 0.004, cube.vertices.shape)',
+    "scene = trimesh.Scene(); scene.add_geometry(cube, geom_name='Cube', node_name='Cube')",
+    "sys.stdout.buffer.write(scene.export(file_type='glb'))",
+  ].join('\n');
+  return execFileSync(PY, ['-I', '-c', script]);
+}
+
+/** Mean distance to the true unit cube: everywhere, and near its edges. */
+function cubeError(glb: Buffer): { all: number; edges: number } {
+  const path = join(mkdtempSync(join(tmpdir(), 'ai3d-cube-')), 'saved.glb');
+  writeFileSync(path, glb);
+  const script = [
+    'import sys, json, numpy as np',
+    'from pathlib import Path',
+    'from ai3d.processing.mesh import load_model_scene',
+    'scene = load_model_scene(Path(sys.argv[1]))',
+    'v = np.concatenate([g.vertices for g in scene.geometry.values()])',
+    '# built centred on the origin; no re-centring (noise would shift a bounding box)',
+    'q = np.abs(v) - 0.5',
+    'd = np.abs(np.linalg.norm(np.maximum(q, 0), axis=1) + np.minimum(q.max(1), 0))',
+    'edge = np.sort(np.abs(v), axis=1)[:, 1] > 0.45',
+    "print(json.dumps({'all': float(d.mean()), 'edges': float(d[edge].mean())}))",
+  ].join('\n');
+  return JSON.parse(execFileSync(PY, ['-I', '-c', script, path]).toString());
+}
+
+test('smoothing that keeps sharp edges, compared before and after', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'one run is enough');
+  test.setTimeout(180_000);
+  const { projectId, modelId } = await modelWithVersion(request, 'E2E noisy cube', noisyCube());
+  const latest = async () =>
+    (await (await request.get(`/api/v1/models/${modelId}/versions`)).json()).items[0];
+  const v2 = await latest();
+  const noisy = cubeError(await (await request.get(v2.file_url)).body());
+
+  await page.goto(`/projects/${projectId}/models/${modelId}`);
+  await expect(page.getByRole('img', { name: /3D view of .*version 2/ })).toBeVisible();
+  await page.getByRole('tab', { name: 'Enhance' }).click();
+  await page.getByLabel('Smoothing', { exact: true }).selectOption('10');
+  await expect(page.getByLabel('Sharp edges')).toHaveValue('sharp');
+  await page.getByRole('button', { name: /^Enhance \(/ }).click();
+  // Before/after: the new version beside the one it was made from.
+  await page.getByRole('button', { name: 'Compare before/after' }).click({ timeout: 120_000 });
+  await expect(page.getByRole('img', { name: /3D view of .*version 3/ })).toBeVisible();
+  await expect(
+    page.getByRole('img', { name: '3D view of version 2, for comparison' }),
+  ).toBeVisible();
+
+  const sharp = await latest();
+  expect(sharp.notes).toContain('Smoothing');
+  const sharpError = cubeError(await (await request.get(sharp.file_url)).body());
+
+  // The same strength, rounding edges (Taubin), from version 2 through the API.
+  const job = await (
+    await request.post(`/api/v1/models/${modelId}/enhance`, {
+      data: {
+        quality_mode: 'high_quality',
+        source_version_id: v2.id,
+        smoothing: 10,
+        smoothing_method: 'taubin',
+      },
+    })
+  ).json();
+  await expect
+    .poll(async () => (await (await request.get(`/api/v1/jobs/${job.id}`)).json()).status, {
+      timeout: 120_000,
+    })
+    .toBe('succeeded');
+  const taubin = cubeError(await (await request.get((await latest()).file_url)).body());
+
+  testInfo.annotations.push({
+    type: 'mean distance to the true cube (noisy, sharp, taubin)',
+    description: JSON.stringify({ noisy, sharp: sharpError, taubin }),
+  });
+  expect(sharpError.all).toBeLessThan(noisy.all * 0.5); // noise removed
+  expect(sharpError.edges).toBeLessThan(taubin.edges * 0.7); // edges kept sharper
 });
 
 test('QuadriFlow retopology with normal and occlusion maps, from the Enhance tab', async ({
@@ -156,4 +246,34 @@ test('QuadriFlow retopology with normal and occlusion maps, from the Enhance tab
   expect(facts.textures).toEqual(expect.arrayContaining(['normalTexture', 'occlusionTexture']));
   expect(Math.abs(facts.volume / before.volume - 1)).toBeLessThan(0.05); // same shape
   expectOrangeTopBlueBottom(facts); // colours carried over
+
+  // The quads are kept beside the GLB's triangles, and an OBJ export holds them.
+  const quadCount = latest.stats.quads as number;
+  expect(quadCount * 2).toBe(facts.triangles);
+  await page.getByRole('tab', { name: 'Quality' }).click();
+  await expect(
+    page.getByText(`${quadCount.toLocaleString('en-US')}: the GLB stores each as two triangles`),
+  ).toBeVisible();
+  await page.getByRole('tab', { name: 'Export' }).click();
+  await page.getByRole('button', { name: 'Export as OBJ' }).click();
+  const files = page.getByRole('list', { name: 'Exported files' });
+  await expect(
+    files.getByText(`${quadCount.toLocaleString('en-US')} quads in the file`, { exact: false }),
+  ).toBeVisible({ timeout: 120_000 });
+  const exported = await (await request.get(`/api/v1/model-versions/${latest.id}/exports`)).json();
+  const obj = exported.items.find((e: { format: string }) => e.format === 'obj');
+  const zip = await (await request.get(obj.file_url)).body();
+  const folder = mkdtempSync(join(tmpdir(), 'ai3d-quads-'));
+  writeFileSync(join(folder, 'model.zip'), zip);
+  const faces = execFileSync(PY, [
+    '-I',
+    '-c',
+    'import sys, zipfile; t = zipfile.ZipFile(sys.argv[1]).read("model.obj").decode(); ' +
+      'f = [l.split() for l in t.splitlines() if l.startswith("f ")]; ' +
+      'print(sum(len(x) == 5 for x in f), sum(len(x) == 4 for x in f))',
+    join(folder, 'model.zip'),
+  ])
+    .toString()
+    .trim();
+  expect(faces).toBe(`${quadCount} 0`); // only quads, no triangles
 });

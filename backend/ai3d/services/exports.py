@@ -1,12 +1,15 @@
 """Exports of a model version: convert, re-open to validate, store, list."""
 
 import hashlib
+import io
 import logging
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
 
+import numpy as np
+import trimesh
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,7 +18,7 @@ from ai3d.core.errors import InvalidInputError, NotFoundError
 from ai3d.core.timeutil import utcnow
 from ai3d.models import Asset, Export, ModelVersion
 from ai3d.models.enums import AssetKind, ExportFormat, ExportStatus
-from ai3d.processing import exporters
+from ai3d.processing import exporters, quads
 from ai3d.processing.mesh import load_model_scene
 from ai3d.schemas.export import ExportFormatRead, ExportRead
 from ai3d.services.models import download_filename, get_model, get_version, version_file
@@ -55,6 +58,36 @@ def _notes(fmt: ExportFormat, version: ModelVersion) -> list[str]:
     return notes
 
 
+# Formats that can hold quads (the others are triangles only).
+QUAD_FORMATS = {ExportFormat.OBJ, ExportFormat.FBX}
+
+
+def _quad_pairs(
+    db: Session, storage: StorageBackend, version_id: uuid.UUID, scene: trimesh.Scene
+) -> dict[str, np.ndarray] | None:
+    """The version's quad pairs (from retopology) that still match ``scene``'s meshes."""
+    asset = db.scalar(
+        select(Asset).where(
+            Asset.model_version_id == version_id, Asset.kind == AssetKind.QUAD_TOPOLOGY
+        )
+    )
+    if asset is None or not storage.exists(asset.storage_key):
+        return None
+    with storage.open(asset.storage_key) as handle:
+        stored = dict(np.load(io.BytesIO(handle.read())))
+    meshes = {n: g for n, g in scene.geometry.items() if isinstance(g, trimesh.Trimesh)}
+    if set(stored) - set(meshes) and len(stored) == 1 and len(meshes) == 1:
+        # One mesh, renamed on the way through the GLB.
+        stored = {next(iter(meshes)): next(iter(stored.values()))}
+    checked = {}
+    for name, pairs in stored.items():
+        if name in meshes:
+            kept = quads.check_pairs(meshes[name], pairs)
+            if len(kept):
+                checked[name] = kept
+    return checked or None
+
+
 def create_export(
     db: Session,
     storage: StorageBackend,
@@ -91,8 +124,15 @@ def create_export(
         scene = load_model_scene(source)
         facts = exporters.scene_facts(scene)
         out = workdir / f"export.{info.extension}"
-        file_notes = exporters.write(scene, fmt, out) or []
-        validation = exporters.validate(out, fmt, facts)
+        pairs = _quad_pairs(db, storage, version.id, scene) if fmt in QUAD_FORMATS else None
+        expected = sum(len(p) for p in (pairs or {}).values())
+        file_notes = exporters.write(scene, fmt, out, quad_pairs=pairs) or []
+        validation = exporters.validate(out, fmt, facts, quads_expected=expected)
+        if expected and validation["quads"] < expected:
+            file_notes.append(
+                f"{validation['quads']:,} of the {expected:,} quads from retopology were "
+                "kept; the rest are written as triangles."
+            )
         if file_notes:
             export.options = {
                 **(export.options or {}),

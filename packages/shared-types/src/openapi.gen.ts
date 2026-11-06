@@ -907,10 +907,17 @@ export interface components {
             scale?: components["schemas"]["ScaleReferenceIn"] | null;
             /**
              * Smoothing
-             * @description Taubin smoothing passes (0 = off).
+             * @description Smoothing strength in passes (0 = off).
              * @default 0
              */
             smoothing?: number;
+            /**
+             * Smoothing Method
+             * @description sharp: removes noise but keeps sharp edges and corners (bilateral normal filtering); taubin: rounds edges. Both keep the volume.
+             * @default sharp
+             * @enum {string}
+             */
+            smoothing_method?: "sharp" | "taubin";
             /** Source Version Id */
             source_version_id?: string | null;
             /**

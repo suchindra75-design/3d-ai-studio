@@ -121,9 +121,13 @@ with real-world data · 🟠 partially implemented · ❌ not implemented
 - **Added in Phase 13:** Taubin smoothing; QuadriFlow and voxel remeshing
   kept only when a measured fidelity check passes; colours carried over and
   textures rebaked; normal and ambient-occlusion maps.
+- **Added 2026-11-06:** smoothing that keeps sharp edges and corners
+  (bilateral normal filtering, compared with Taubin on shapes with known true
+  surfaces; D59); quads from retopology kept in OBJ and FBX exports, counted
+  after re-opening (D60).
 - **Missing:**
-  - Quads are not kept in the stored files (GLB holds triangles).
-  - Sharp-edge-preserving smoothing; Instant Meshes.
+  - Quads inside the GLB itself (glTF has none), and in versions edited after
+    retopology; Instant Meshes.
 
 ### 9. Texture and material editing — 🟡
 - **Have:** material values (above); texture size limits in Enhance;

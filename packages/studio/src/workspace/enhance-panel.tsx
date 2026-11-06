@@ -37,13 +37,14 @@ export function EnhancePanel({
   modelId: string;
   version: ModelVersionRead;
   dirty: boolean;
-  onView: (versionId: string, notice?: string) => void;
+  onView: (versionId: string, notice?: string, compareWith?: string) => void;
 }) {
   const ids = {
     quality: useId(),
     axis: useId(),
     length: useId(),
     smoothing: useId(),
+    edges: useId(),
     remesh: useId(),
     faces: useId(),
     resolution: useId(),
@@ -55,6 +56,7 @@ export function EnhancePanel({
   const [axis, setAxis] = useState<Axis>('y');
   const [length, setLength] = useState('');
   const [smoothing, setSmoothing] = useState(0);
+  const [smoothingMethod, setSmoothingMethod] = useState<'sharp' | 'taubin'>('sharp');
   const [remeshMethod, setRemeshMethod] = useState<'none' | 'quadriflow' | 'voxel'>('none');
   const [targetFaces, setTargetFaces] = useState('20000');
   const [resolution, setResolution] = useState('300');
@@ -72,6 +74,7 @@ export function EnhancePanel({
     remove_ground: removeGround,
     scale: useScale && scaleValid && length ? { axis, length_mm: lengthMm } : null,
     smoothing,
+    smoothing_method: smoothingMethod,
     upscale_textures: upscale === 0 ? null : upscale,
     remesh:
       remeshMethod === 'none'
@@ -167,6 +170,28 @@ export function EnhancePanel({
             <option value={30}>Strong (30 passes)</option>
           </select>
         </div>
+        {smoothing ? (
+          <div className="flex flex-col gap-1">
+            <Label htmlFor={ids.edges} className="text-xs">
+              Sharp edges
+            </Label>
+            <select
+              id={ids.edges}
+              className={selectClass}
+              value={smoothingMethod}
+              onChange={(event) => setSmoothingMethod(event.target.value as 'sharp' | 'taubin')}
+            >
+              <option value="sharp">Keep sharp edges and corners</option>
+              <option value="taubin">Round them off (Taubin)</option>
+            </select>
+            <p className="text-[11px] leading-relaxed text-subtle-foreground">
+              {smoothingMethod === 'sharp'
+                ? 'Removes noise from flat and curved areas but leaves creases and corners where they are. Very rough surfaces (bumps as large as the triangles) smooth better when rounded off. Slower on very large models.'
+                : 'Smooths everything evenly, edges included; suits organic shapes.'}{' '}
+              Both keep the volume, texture coordinates and colours.
+            </p>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-1">
           <Label htmlFor={ids.upscale} className="text-xs">
             AI texture upscaling
@@ -391,6 +416,19 @@ export function EnhancePanel({
                 }
               >
                 View the new version
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  onView(
+                    result.result_model_version_id!,
+                    `Enhanced from version ${version.version_number}, which is unchanged.`,
+                    version.id,
+                  )
+                }
+              >
+                Compare before/after
               </Button>
             </div>
           ) : result.status === 'succeeded' ? (

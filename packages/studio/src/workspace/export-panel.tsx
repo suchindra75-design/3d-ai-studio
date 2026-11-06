@@ -46,6 +46,7 @@ function ExportRow({
       {v ? (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           {formatCount(Number(v.triangles))} triangles ·{' '}
+          {Number(v.quads) > 0 ? `${formatCount(Number(v.quads))} quads in the file · ` : ''}
           {(v.size as number[]).map((n) => Number(n.toPrecision(4))).join(' × ')} {String(v.units)}
           {v.textured ? ' · textured' : ''} · re-opened with {String(v.reopened_with)}
         </p>

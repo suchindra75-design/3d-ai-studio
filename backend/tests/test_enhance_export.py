@@ -197,8 +197,8 @@ def test_a_file_that_does_not_match_is_never_offered(
 ) -> None:
     real_write = exporters.write
 
-    def broken(scene: trimesh.Scene, fmt: ExportFormat, dest: Any) -> None:
-        real_write(scene, fmt, dest)
+    def broken(scene: trimesh.Scene, fmt: ExportFormat, dest: Any, **kwargs: Any) -> None:
+        real_write(scene, fmt, dest, **kwargs)
         dest.write_bytes(trimesh.creation.box().export(file_type="glb"))  # wrong geometry
 
     monkeypatch.setattr(exporters, "write", broken)

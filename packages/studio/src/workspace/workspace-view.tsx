@@ -137,7 +137,9 @@ interface VersionWorkspaceProps {
   projectId: string;
   projectName: string;
   notice: string | null;
-  onView: (versionId: string, notice?: string) => void;
+  /** Show this version side by side from the start (before/after an enhancement). */
+  initialCompareId?: string | null;
+  onView: (versionId: string, notice?: string, compareWith?: string) => void;
 }
 
 function VersionWorkspace({
@@ -147,6 +149,7 @@ function VersionWorkspace({
   projectId,
   projectName,
   notice,
+  initialCompareId = null,
   onView,
 }: VersionWorkspaceProps) {
   const api = useApi();
@@ -171,7 +174,7 @@ function VersionWorkspace({
   const [measuring, setMeasuring] = useState(false);
   const [points, setPoints] = useState<THREE.Vector3[]>([]);
   const [section, setSection] = useState<SectionState | null>(null);
-  const [compareId, setCompareId] = useState<string | null>(null);
+  const [compareId, setCompareId] = useState<string | null>(initialCompareId);
   const [link] = useState(() => new CameraLink());
   const [viewNotice, setViewNotice] = useState<string | null>(null);
   const [showProblems, setShowProblems] = useState(false);
@@ -831,9 +834,11 @@ export default function WorkspaceView({
   projectName: string;
 }) {
   const versions = useModelVersions(model.id);
-  const [viewing, setViewing] = useState<{ id: string; notice: string | null } | null>(
-    model.current_version ? { id: model.current_version.id, notice: null } : null,
-  );
+  const [viewing, setViewing] = useState<{
+    id: string;
+    notice: string | null;
+    compareWith?: string;
+  } | null>(model.current_version ? { id: model.current_version.id, notice: null } : null);
 
   if (versions.isError) {
     return (
@@ -865,7 +870,8 @@ export default function WorkspaceView({
       projectId={projectId}
       projectName={projectName}
       notice={viewing.notice}
-      onView={(id, notice) => setViewing({ id, notice: notice ?? null })}
+      initialCompareId={viewing.compareWith ?? null}
+      onView={(id, notice, compareWith) => setViewing({ id, notice: notice ?? null, compareWith })}
     />
   );
 }

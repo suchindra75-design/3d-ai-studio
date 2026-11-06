@@ -39,6 +39,8 @@ from typing import Any
 
 import bmesh  # type: ignore[import-not-found]
 import bpy  # type: ignore[import-not-found]
+import mathutils  # type: ignore[import-not-found]
+import mathutils.kdtree  # type: ignore[import-not-found]
 import numpy as np
 from mathutils.bvhtree import BVHTree  # type: ignore[import-not-found]
 
@@ -159,6 +161,8 @@ def _facts(objects: list[Any]) -> dict[str, Any]:
         "textured_objects": textured_objects,
         # Meshes with per-vertex colours (e.g. from local AI generation).
         "coloured_objects": sum(1 for o in objects if _has_colours(o)),
+        # Four-sided faces (a file that keeps quads; GLB never does).
+        "quads": sum(sum(1 for p in o.data.polygons if len(p.vertices) == 4) for o in objects),
     }
 
 
@@ -257,6 +261,9 @@ def export_fbx(request: dict[str, Any]) -> dict[str, Any]:
         raise RequestError("The model contains no meshes.")
     dropped = _direct_base_colour_textures(objects)
     _name_packed_images()
+    joined = (
+        _join_quads(objects, _path(request, "quad_centres")) if request.get("quad_centres") else 0
+    )
     bpy.ops.export_scene.fbx(
         filepath=str(dest),
         use_selection=False,
@@ -278,7 +285,7 @@ def export_fbx(request: dict[str, Any]) -> dict[str, Any]:
         embed_textures=True,
         colors_type="SRGB",  # per-vertex colours, stored as sRGB like other FBX tools expect
     )
-    return {"source": _facts(objects), "dropped_colour_factors": dropped}
+    return {"source": _facts(objects), "dropped_colour_factors": dropped, "quads_joined": joined}
 
 
 def import_fbx(request: dict[str, Any]) -> dict[str, Any]:
@@ -750,6 +757,64 @@ def _bake_maps(
     return list(images)
 
 
+def _write_quad_corners(obj: Any, path: Path) -> None:
+    """Every quad's four corners, in order, in world space and glTF axes: (Q, 4, 3).
+
+    The GLB stores each quad as two triangles; the backend finds them by these
+    corners and keeps the pairing, so OBJ and FBX exports can be written with quads.
+    """
+    matrix = np.array(obj.matrix_world)
+    count = len(obj.data.vertices)
+    flat = np.empty(count * 3, dtype=np.float64)
+    obj.data.vertices.foreach_get("co", flat)
+    world = flat.reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3]
+    gltf = np.stack([world[:, 0], world[:, 2], -world[:, 1]], axis=1)
+    quads = [list(p.vertices) for p in obj.data.polygons if len(p.vertices) == 4]
+    corners = gltf[np.array(quads, dtype=np.int64)] if quads else np.zeros((0, 4, 3))
+    np.save(path, corners)
+
+
+def _join_quads(objects: list[Any], centres_path: Path) -> int:
+    """Join triangle pairs into quads; pairs are given by their two triangles' centres
+    (world space, glTF axes). Only pairs that share an edge are joined."""
+    centres = np.load(centres_path)
+    if centres.size == 0:
+        return 0
+    blender = np.stack([centres[..., 0], -centres[..., 2], centres[..., 1]], axis=-1)
+    lo, hi = _bounds(objects)
+    tolerance = float(np.linalg.norm(hi - lo)) * 1e-5
+    joined = 0
+    for obj in objects:
+        matrix = obj.matrix_world
+        mesh = bmesh.new()
+        mesh.from_mesh(obj.data)
+        mesh.faces.ensure_lookup_table()
+        tree = mathutils.kdtree.KDTree(len(mesh.faces))
+        for face in mesh.faces:
+            tree.insert(matrix @ face.calc_center_median(), face.index)
+        tree.balance()
+        edges = []
+        for first, second in blender:
+            hits = []
+            for point in (first, second):
+                _, index, distance = tree.find(mathutils.Vector(point))
+                if index is None or distance > tolerance:
+                    break
+                hits.append(mesh.faces[index])
+            if len(hits) != 2 or any(len(f.verts) != 3 for f in hits):
+                continue
+            shared = [e for e in hits[0].edges if e in hits[1].edges]
+            if len(shared) == 1:
+                edges.append(shared[0])
+        if edges:
+            bmesh.ops.dissolve_edges(mesh, edges=list(set(edges)), use_verts=False)
+            joined += len(set(edges))
+        mesh.to_mesh(obj.data)
+        mesh.free()
+        obj.data.update()
+    return joined
+
+
 def remesh(request: dict[str, Any]) -> dict[str, Any]:
     source_path, dest = _path(request, "input"), _path(request, "output")
     maps = set(request.get("maps", []))
@@ -797,6 +862,8 @@ def remesh(request: dict[str, Any]) -> dict[str, Any]:
     baked_at = time.monotonic()
 
     bpy.data.objects.remove(source, do_unlink=True)
+    if request.get("quads_output"):
+        _write_quad_corners(low, _path(request, "quads_output"))
     _select_only([low])
     bpy.ops.export_scene.gltf(
         filepath=str(dest),

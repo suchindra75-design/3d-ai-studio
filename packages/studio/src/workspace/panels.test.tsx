@@ -136,6 +136,7 @@ it('plans, runs and links to the enhanced version', async () => {
     remove_ground: true,
     scale: { axis: 'y', length_mm: 120 },
     smoothing: 0,
+    smoothing_method: 'sharp',
     upscale_textures: null,
     remesh: null,
   });
@@ -160,7 +161,11 @@ it('asks for smoothing, retopology and baked maps', async () => {
     <EnhancePanel projectId="p1" modelId="m1" version={version} dirty={false} onView={vi.fn()} />,
     api,
   );
+  expect(screen.queryByLabelText('Sharp edges')).not.toBeInTheDocument(); // only with smoothing
   await userEvent.selectOptions(screen.getByLabelText('Smoothing'), '10');
+  expect(screen.getByLabelText('Sharp edges')).toHaveValue('sharp');
+  await userEvent.selectOptions(screen.getByLabelText('Sharp edges'), 'taubin');
+  expect(screen.getByText(/suits organic shapes/)).toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText('AI texture upscaling'), '2');
   expect(screen.getByText(/does not recover detail/)).toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText('Retopology'), 'quadriflow');
@@ -173,6 +178,7 @@ it('asks for smoothing, retopology and baked maps', async () => {
   await waitFor(() => expect(api.models.enhance).toHaveBeenCalledTimes(1));
   expect(vi.mocked(api.models.enhance).mock.calls[0]![1]).toMatchObject({
     smoothing: 10,
+    smoothing_method: 'taubin',
     upscale_textures: 2,
     remesh: { method: 'quadriflow', target_faces: 5000, maps: ['normal'] },
   });
@@ -268,6 +274,42 @@ it('exports a format and lists the verified file; unavailable formats say why', 
     'href',
     'http://api/api/v1/exports/e1/file',
   );
+});
+
+it('tells quads from triangles: stored quads, and quads found in an exported file', async () => {
+  const quadVersion = {
+    ...version,
+    stats: { ...version.stats, quads: 4426 },
+  } as unknown as ModelVersionRead;
+  renderWithStudio(<QualityPanel version={quadVersion} />);
+  const report = screen.getByLabelText('Quality report');
+  expect(within(report).getByText('Quads (from retopology)').nextSibling).toHaveTextContent(
+    '4,426: the GLB stores each as two triangles; OBJ and FBX exports keep them as quads',
+  );
+
+  const obj = {
+    ...ready,
+    id: 'e2',
+    format: 'obj',
+    validation: { ...ready.validation, quads: 4426, triangles: 8852 },
+  } as ExportRead;
+  const api = fakeApi({
+    exports: {
+      formats: vi.fn().mockResolvedValue({ items: [] }),
+      list: vi.fn().mockResolvedValue({ items: [obj, ready] }),
+    },
+  });
+  renderWithStudio(<ExportPanel modelName="Mug" version={quadVersion} dirty={false} />, api);
+  const files = await screen.findByRole('list', { name: 'Exported files' });
+  expect(
+    within(files).getByText(/8,852 triangles · 4,426 quads in the file ·/),
+  ).toBeInTheDocument();
+  expect(within(files).queryAllByText(/quads in the file/)).toHaveLength(1); // the STL has none
+});
+
+it('has no quad row for a triangle model', () => {
+  renderWithStudio(<QualityPanel version={version} />);
+  expect(screen.queryByText('Quads (from retopology)')).not.toBeInTheDocument();
 });
 
 const provider = (key: string, name: string, own: boolean, configured = true) => ({

@@ -32,6 +32,7 @@ from PIL import Image
 from trimesh.exchange.obj import export_obj
 
 from ai3d.models.enums import ExportFormat
+from ai3d.processing import quads
 from ai3d.processing.mesh import normalise_vertex_colours
 from ai3d_engine.blender import (
     BlenderFailedError,
@@ -430,21 +431,34 @@ def _blender_error(action: str, exc: Exception) -> ExportError:
     return ExportError(f"Blender could not {action}: Blender was not found.")
 
 
-def _write_fbx(scene: trimesh.Scene, dest: Path) -> list[str]:
+def _quads_note(count: int) -> str:
+    return (
+        f"{count:,} quads from retopology are kept as quads (the GLB stores each as two triangles)."
+    )
+
+
+def _write_fbx(
+    scene: trimesh.Scene, dest: Path, quad_pairs: dict[str, np.ndarray] | None = None
+) -> list[str]:
     """GLB → Blender (glTF importer) → FBX with embedded textures. Returns extra notes."""
     with tempfile.TemporaryDirectory(prefix="fbx-", dir=dest.parent) as tmp:
         source = Path(tmp) / "source.glb"
         source.write_bytes(scene.export(file_type="glb"))  # type: ignore[no-untyped-call]
+        request = {"input": str(source), "output": str(dest.resolve())}
+        if quad_pairs:
+            centres = Path(tmp) / "quad-centres.npy"
+            np.save(centres, quads.pair_centres(scene, quad_pairs))
+            request["quad_centres"] = str(centres)
         try:
             result = run_blender(
                 "export_fbx",
-                {"input": str(source), "output": str(dest.resolve())},
+                request,
                 workdir=Path(tmp),
                 timeout=BLENDER_TIMEOUT,
             )
         except (BlenderFailedError, BlenderNotFoundError) as exc:
             raise _blender_error("write the FBX file", exc) from exc
-    notes = []
+    notes = [_quads_note(result["quads_joined"])] if result.get("quads_joined") else []
     for dropped in result.get("dropped_colour_factors", []):
         rgb = ", ".join(f"{c:g}" for c in dropped["factor"])
         notes.append(
@@ -454,8 +468,35 @@ def _write_fbx(scene: trimesh.Scene, dest: Path) -> list[str]:
     return notes
 
 
-def write(scene: trimesh.Scene, fmt: ExportFormat, dest: Path) -> list[str]:
-    """Write ``scene`` as ``fmt`` to ``dest``; returns notes specific to this file."""
+def _write_obj(
+    scene: trimesh.Scene, dest: Path, quad_pairs: dict[str, np.ndarray] | None
+) -> list[str]:
+    """OBJ, MTL and textures, zipped; quads from retopology joined back (D60)."""
+    result = export_obj(  # type: ignore[no-untyped-call]
+        _srgb_colour_scene(scene),
+        include_texture=True,
+        return_texture=True,
+        mtl_name="model.mtl",
+    )
+    text, extra = result if isinstance(result, tuple) else (result, {})
+    joined = 0
+    if quad_pairs:
+        text, joined = quads.obj_with_quads(text, scene, quad_pairs)
+    dest.write_bytes(_zip({"model.obj": text.encode(), **extra}))
+    return [_quads_note(joined)] if joined else []
+
+
+def write(
+    scene: trimesh.Scene,
+    fmt: ExportFormat,
+    dest: Path,
+    *,
+    quad_pairs: dict[str, np.ndarray] | None = None,
+) -> list[str]:
+    """Write ``scene`` as ``fmt`` to ``dest``; returns notes specific to this file.
+
+    ``quad_pairs`` (from retopology, D60): OBJ and FBX files join those triangle
+    pairs into quads; other formats hold triangles only."""
     info = format_info(fmt)
     if not info.available:
         raise ExportError(info.reason or f"{info.label} export is not available.")
@@ -465,14 +506,7 @@ def write(scene: trimesh.Scene, fmt: ExportFormat, dest: Path) -> list[str]:
         files = scene.export(file_type="gltf")  # type: ignore[no-untyped-call]
         dest.write_bytes(_zip(files))
     elif fmt == ExportFormat.OBJ:
-        result = export_obj(  # type: ignore[no-untyped-call]
-            _srgb_colour_scene(scene),
-            include_texture=True,
-            return_texture=True,
-            mtl_name="model.mtl",
-        )
-        text, extra = result if isinstance(result, tuple) else (result, {})
-        dest.write_bytes(_zip({"model.obj": text.encode(), **extra}))
+        return _write_obj(scene, dest, quad_pairs)
     elif fmt == ExportFormat.STL:
         dest.write_bytes(_as_bytes(_for_printing(scene).export(file_type="stl")))
     elif fmt == ExportFormat.THREE_MF:
@@ -484,7 +518,7 @@ def write(scene: trimesh.Scene, fmt: ExportFormat, dest: Path) -> list[str]:
     elif fmt == ExportFormat.USDZ:
         _write_usdz(scene, dest)
     elif fmt == ExportFormat.FBX:
-        return _write_fbx(scene, dest)
+        return _write_fbx(scene, dest, quad_pairs)
     else:  # pragma: no cover - every format is handled above
         raise ExportError(f"{info.label} export is not implemented.")
     return []
@@ -564,6 +598,7 @@ def _fbx_facts(path: Path) -> Facts:
         extra={
             "reader": f"Blender {found.get('blender', '')} FBX importer".replace("  ", " "),
             "textured_meshes": int(found.get("textured_objects", 0)),
+            "quads": int(found.get("quads", 0)),
         },
         coloured=int(found.get("coloured_objects", 0)) > 0,
     )
@@ -580,10 +615,15 @@ def read_back(path: Path, fmt: ExportFormat) -> Facts:
             scene = _read_zip_scene(path, "model.gltf")
         elif fmt == ExportFormat.OBJ:
             scene = _read_zip_scene(path, "model.obj")
+            with zipfile.ZipFile(path) as archive:
+                obj_text = archive.read("model.obj").decode("utf-8", "replace")
+            quad_count, _ = quads.count_obj_faces(obj_text)
         else:
             file_type = {"glb": "glb", "stl": "stl", "3mf": "3mf"}[fmt.value]
             scene = _as_scene(trimesh.load(path, file_type=file_type, force="scene", process=False))
         facts = scene_facts(normalise_vertex_colours(scene))
+        if fmt == ExportFormat.OBJ:
+            facts.extra["quads"] = quad_count
         if fmt == ExportFormat.THREE_MF:
             # trimesh reads 3MF geometry but not colour groups; those are checked in the XML.
             facts.coloured = _threemf_colours(path)
@@ -594,8 +634,13 @@ def read_back(path: Path, fmt: ExportFormat) -> Facts:
     return facts
 
 
-def validate(path: Path, fmt: ExportFormat, source: Facts) -> dict[str, Any]:
-    """Re-open ``path`` and compare it with the source. Raises ExportError on mismatch."""
+def validate(
+    path: Path, fmt: ExportFormat, source: Facts, *, quads_expected: int = 0
+) -> dict[str, Any]:
+    """Re-open ``path`` and compare it with the source. Raises ExportError on mismatch.
+
+    ``quads_expected``: quads from retopology the file should hold; the result says
+    how many the re-opened file actually has (never more than were made)."""
     info = format_info(fmt)
     found = read_back(path, fmt)
     printing = fmt in {ExportFormat.STL, ExportFormat.THREE_MF}
@@ -619,6 +664,7 @@ def validate(path: Path, fmt: ExportFormat, source: Facts) -> dict[str, Any]:
         )
     if info.keeps_colour and source.coloured and not found.coloured:
         problems.append("the colours are missing")
+    found_quads = int(found.extra.get("quads", 0))
     if problems:
         raise ExportError("The exported file does not match the model: " + "; ".join(problems))
     reader = found.extra.get("reader") or ("Pixar USD" if fmt == ExportFormat.USDZ else "trimesh")
@@ -631,4 +677,7 @@ def validate(path: Path, fmt: ExportFormat, source: Facts) -> dict[str, Any]:
         "coloured": found.coloured,
         "axes": "Z up" if printing else "Y up",
         "file_bytes": path.stat().st_size,
+        # Four-sided faces in the re-opened file (OBJ and FBX can keep quads).
+        "quads": found_quads,
+        "quads_expected": quads_expected,
     }

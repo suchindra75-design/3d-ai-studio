@@ -43,7 +43,14 @@ class EnhanceRequest(Schema):
         description="Remove a supporting surface under the object (photogrammetry scans).",
     )
     scale: ScaleReferenceIn | None = None
-    smoothing: int = Field(default=0, ge=0, le=50, description="Taubin smoothing passes (0 = off).")
+    smoothing: int = Field(
+        default=0, ge=0, le=50, description="Smoothing strength in passes (0 = off)."
+    )
+    smoothing_method: Literal["sharp", "taubin"] = Field(
+        default="sharp",
+        description="sharp: removes noise but keeps sharp edges and corners (bilateral normal "
+        "filtering); taubin: rounds edges. Both keep the volume.",
+    )
     remesh: RemeshIn | None = None
     upscale_textures: Literal[2, 4] | None = Field(
         default=None,

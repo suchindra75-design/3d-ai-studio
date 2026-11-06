@@ -429,11 +429,21 @@
           },
           "smoothing": {
             "default": 0,
-            "description": "Taubin smoothing passes (0 = off).",
+            "description": "Smoothing strength in passes (0 = off).",
             "maximum": 50.0,
             "minimum": 0.0,
             "title": "Smoothing",
             "type": "integer"
+          },
+          "smoothing_method": {
+            "default": "sharp",
+            "description": "sharp: removes noise but keeps sharp edges and corners (bilateral normal filtering); taubin: rounds edges. Both keep the volume.",
+            "enum": [
+              "sharp",
+              "taubin"
+            ],
+            "title": "Smoothing Method",
+            "type": "string"
           },
           "source_version_id": {
             "anyOf": [

@@ -1,7 +1,9 @@
 """Features that run Blender: FBX export (re-opened in a separate Blender run) and
 texture baking. Skipped when Blender is not installed."""
 
+import io
 import tempfile
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -367,6 +369,61 @@ def test_quadriflow_retopology_through_enhance_keeps_shape_and_colours_and_bakes
     assert colours[top, 0].mean() < 0.2
     assert colours[bottom, 0].mean() > 0.6
     assert colours[bottom, 2].mean() < 0.2
+
+
+def test_quads_from_retopology_are_kept_in_obj_and_fbx_exports(
+    client: TestClient, runner: JobRunner, make_image_project: MakeImageProject
+) -> None:
+    """QuadriFlow's quads are stored with the version (the GLB holds triangles) and
+    written as quads in OBJ and FBX files, counted again after re-opening them (D60)."""
+    model = _generated_model(client, runner, make_image_project)
+    coloured = _scene(_coloured_sphere()).export(file_type="glb")
+    _save(client, model["id"], model["current_version"]["id"], coloured)
+    body = {
+        "quality_mode": "high_quality",
+        "remesh": {"method": "quadriflow", "target_faces": 1500, "maps": []},
+    }
+    job = client.post(f"/api/v1/models/{model['id']}/enhance", json=body).json()
+    assert runner.run_until_idle() == 1
+    assert client.get(f"/api/v1/jobs/{job['id']}").json()["status"] == "succeeded"
+    version = client.get(f"/api/v1/models/{model['id']}").json()["current_version"]
+    quads = version["stats"]["quads"]
+    triangles = version["stats"]["triangle_count"]
+    assert quads > 1000
+    assert quads * 2 == triangles  # QuadriFlow made only quads; the GLB has two each
+    steps = {s["code"]: s for s in version["quality_report"]["metrics"]["enhancement"]}
+    assert f"the OBJ and FBX exports keep {quads:,} quads" in steps["retopology"]["detail"]
+
+    exports = {}
+    for fmt in ("obj", "fbx", "glb", "stl"):
+        exported = client.post(
+            f"/api/v1/model-versions/{version['id']}/exports", json={"format": fmt}
+        ).json()
+        assert exported["status"] == "ready", (fmt, exported.get("error_message"))
+        exports[fmt] = exported
+    assert exports["obj"]["validation"]["quads"] == quads
+    assert exports["fbx"]["validation"]["quads"] == quads, exports["fbx"]  # re-opened in Blender
+    assert exports["glb"]["validation"]["quads"] == 0  # triangles only
+    assert exports["stl"]["validation"]["quads"] == 0
+    for fmt in ("obj", "fbx"):
+        assert any("quads from retopology are kept" in n for n in exports[fmt]["notes"])
+        assert exports[fmt]["validation"]["triangles"] == triangles  # same surface
+    # The OBJ text itself: one "f" line per quad.
+    archive = zipfile.ZipFile(io.BytesIO(client.get(exports["obj"]["file_url"]).content))
+    text = archive.read("model.obj").decode()
+    face_lines = [line for line in text.splitlines() if line.startswith("f ")]
+    assert sum(len(line.split()) == 5 for line in face_lines) == quads
+    assert len(face_lines) == quads
+
+    # A version saved from the browser (triangles) has no quads to keep.
+    edited = _save(
+        client, model["id"], version["id"], client.get(version["file_url"]).content
+    ).json()
+    assert "quads" not in edited["stats"]
+    plain = client.post(
+        f"/api/v1/model-versions/{edited['id']}/exports", json={"format": "obj"}
+    ).json()
+    assert plain["validation"]["quads"] == 0
 
 
 def test_a_rejected_retopology_says_why(
