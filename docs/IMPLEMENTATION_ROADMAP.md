@@ -1025,6 +1025,48 @@ Meshes (QuadriFlow covers the same need).
   - The web app cannot restore backups over its 520 MB request limit; the
     desktop app has no such limit.
 
+## Advanced geometry, performance and reconstruction quality (from 2026-11-06)
+
+An audit of the three remaining geometry limitations, in the order taken:
+1. **Levels of detail:** none existed; a model loaded as one full GLB, and the only
+   large-model measure was turning shadows off above 1.5 million triangles.
+2. **Smoothing:** Taubin only, which keeps volume, UVs and colours but rounds every
+   sharp edge.
+3. **Quads:** QuadriFlow made real quads in Blender, but the result was saved only
+   as a GLB (triangles), and every export was written from that GLB.
+
+Then: preparing real Tripo/Meshy re-texture checks (no paid calls), and
+benchmarks.
+
+### Levels of detail ✅ (D58)
+- **Built on the backend** the first time a version over 500,000 triangles is
+  opened, and stored as extra files of the version; the version's own file is
+  never changed.
+  - Each level has a quarter of the previous one's triangles, down to 30,000.
+  - Quadric edge collapse with open borders kept, so texture seams keep their
+    outlines; each new vertex averages the UVs, colours and normals of the
+    original vertices that collapsed into it.
+  - Triangle soups (every triangle stored separately, as in STL) are joined
+    where position, UV and colour agree first; otherwise nothing could be
+    simplified.
+  - A level that moves the model's bounds by more than 1% of its diagonal, or
+    its vertices by more than 3% on average, is dropped (found on a UV sphere,
+    where 400 triangles meet at each pole and the simplifier fails at 1/64).
+  - Level files carry the base-colour texture at 1024 px at most.
+- **Drawn in the viewer** instead of the full parts when the model would get
+  more than about two front-facing triangles per pixel (*Detail: Auto*), or at
+  a level chosen by hand. The full parts move to a render layer the camera does
+  not draw; they remain what is picked, measured, edited, exported and saved.
+  Each simplified part follows its full part's transform, material (display
+  modes, colour edits, section plane) and visibility; a part whose geometry is
+  edited is drawn in full from then on. Screenshots always render full detail.
+- **Progressive loading:** once a version has levels, the coarsest is shown,
+  labelled as a simplified preview, while the full file downloads.
+- **Memory:** levels add about a third to the geometry drawn (¼ + 1/16 + …);
+  textures are shared with the full model, not duplicated.
+- **Not done:** cross-fading between levels (switching uses a ±25% margin so it
+  does not flicker); levels for parts edited after loading.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely

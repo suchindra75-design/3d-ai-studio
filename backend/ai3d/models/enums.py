@@ -111,6 +111,8 @@ class SurfaceProvenance(StrEnum):
 
 class AssetKind(StrEnum):
     MESH = "mesh"
+    # A simplified copy of a version's mesh for viewing (levels of detail).
+    LOD_MESH = "lod_mesh"
     TEXTURE = "texture"
     POINT_CLOUD = "point_cloud"
     PREVIEW_IMAGE = "preview_image"

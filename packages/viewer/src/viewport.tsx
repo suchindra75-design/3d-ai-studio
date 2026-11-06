@@ -1,14 +1,15 @@
 'use client';
 
 import { Grid, OrbitControls } from '@react-three/drei';
-import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber';
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
+import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 import { frameBox, gridCellSize, type CameraPreset } from './camera';
 import { applyDisplayMode, type DisplayMode } from './display';
 import { measure } from './inspect';
+import { ModelLod, chooseLevel, projectedArea, type DetailMode, type LodSource } from './lod';
 
 export interface ViewRequest {
   preset: CameraPreset;
@@ -93,6 +94,12 @@ export interface ViewportProps {
   cameraLink?: CameraLink;
   /** Receives a function that renders the current view to a PNG. */
   onCaptureReady?: (capture: CaptureFunction) => void;
+  /** Simplified versions of ``model`` for drawing it when full detail is not visible. */
+  lod?: { fullTriangles: number; sources: LodSource[] } | null;
+  /** 'auto' (by on-screen size) or a fixed level; 0 = full detail. */
+  detail?: DetailMode;
+  /** Called when the level drawn changes. */
+  onDetailLevel?: (level: number) => void;
 }
 
 const SELECTION_COLOR = new THREE.Color('#0a84ff');
@@ -142,7 +149,13 @@ export const MAX_CAPTURE_SIDE = 8192;
  * resolution (capped by MAX_CAPTURE_SIDE and the GPU). The canvas's on-screen
  * size never changes; its drawing buffer is resized for one frame and restored.
  */
-function Capture({ onReady }: { onReady: (capture: CaptureFunction) => void }) {
+function Capture({
+  onReady,
+  lod,
+}: {
+  onReady: (capture: CaptureFunction) => void;
+  lod: MutableRefObject<ModelLod | null>;
+}) {
   const get = useThree((state) => state.get);
   useEffect(() => {
     onReady(
@@ -159,6 +172,9 @@ function Capture({ onReady }: { onReady: (capture: CaptureFunction) => void }) {
           const wanted = ratio * Math.max(1, scale);
           const capped = Math.min(wanted, limit / Math.max(size.width, size.height, 1));
           gl.setPixelRatio(capped);
+          // Screenshots always show full detail.
+          const level = lod.current?.level ?? 0;
+          lod.current?.update(0);
           try {
             gl.render(scene, camera);
             gl.domElement.toBlob((blob) =>
@@ -166,11 +182,12 @@ function Capture({ onReady }: { onReady: (capture: CaptureFunction) => void }) {
             );
           } finally {
             gl.setPixelRatio(ratio);
+            lod.current?.update(level);
             invalidate();
           }
         }),
     );
-  }, [get, onReady]);
+  }, [get, onReady, lod]);
   return null;
 }
 
@@ -219,6 +236,61 @@ function Section({ plane }: { plane: THREE.Plane }) {
     };
   }, [get, plane]);
   return null;
+}
+
+/** Draws simplified copies of the model when full detail would not be visible. */
+function LodLayer({
+  model,
+  lod,
+  detail,
+  box,
+  onLevel,
+  handleRef,
+}: {
+  model: THREE.Object3D;
+  lod: { fullTriangles: number; sources: LodSource[] };
+  detail: DetailMode;
+  box: THREE.Box3;
+  onLevel?: (level: number) => void;
+  handleRef: MutableRefObject<ModelLod | null>;
+}) {
+  const raycaster = useThree((state) => state.raycaster);
+  const invalidate = useThree((state) => state.invalidate);
+  // Creating it has no side effects (copies share the loaded geometry); only the
+  // effect below changes the scene, and undoing that (dispose) can be repeated.
+  const modelLod = useMemo(() => new ModelLod(model, lod.fullTriangles, lod.sources), [model, lod]);
+  useEffect(() => {
+    // Hidden full parts stay pickable: they are what is measured and selected.
+    raycaster.layers.enableAll();
+    handleRef.current = modelLod;
+    invalidate();
+    return () => {
+      handleRef.current = null;
+      modelLod.dispose();
+      invalidate();
+    };
+  }, [modelLod, raycaster, handleRef, invalidate]);
+  useEffect(() => invalidate(), [detail, invalidate]);
+  const reported = useRef(-1);
+  useFrame((state) => {
+    let level = typeof detail === 'number' ? detail : 0;
+    if (detail === 'auto' && !box.isEmpty()) {
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const area = projectedArea(
+        sphere.center,
+        sphere.radius,
+        state.camera,
+        state.size.height * state.gl.getPixelRatio(),
+      );
+      level = chooseLevel(modelLod.triangles, area, modelLod.level);
+    }
+    modelLod.update(level);
+    if (modelLod.level !== reported.current) {
+      reported.current = modelLod.level;
+      onLevel?.(modelLod.level);
+    }
+  });
+  return <primitive object={modelLod.group} />;
 }
 
 function KeyLight({
@@ -273,7 +345,11 @@ function Scene({
   clipPlane,
   cameraLink,
   onCaptureReady,
+  lod,
+  detail = 'auto',
+  onDetailLevel,
 }: Omit<ViewportProps, 'label' | 'className'>) {
+  const lodHandle = useRef<ModelLod | null>(null);
   const get = useThree((state) => state.get);
   const invalidate = useThree((state) => state.invalidate);
   const controls = useThree((state) => state.controls) as unknown as {
@@ -335,8 +411,18 @@ function Scene({
       <KeyLight box={box} shadows={options.shadows} intensity={light.key} />
       {clipPlane ? <Section plane={clipPlane} /> : null}
       {cameraLink ? <LinkedCamera link={cameraLink} /> : null}
-      {onCaptureReady ? <Capture onReady={onCaptureReady} /> : null}
+      {onCaptureReady ? <Capture onReady={onCaptureReady} lod={lodHandle} /> : null}
       <primitive object={model} onClick={handleClick} />
+      {lod && lod.sources.length > 0 ? (
+        <LodLayer
+          model={model}
+          lod={lod}
+          detail={detail}
+          box={box}
+          onLevel={onDetailLevel}
+          handleRef={lodHandle}
+        />
+      ) : null}
       {options.shadows && light.key > 0 ? (
         <mesh rotation-x={-Math.PI / 2} position={[center.x, floor, center.z]} receiveShadow>
           <planeGeometry args={[radius * 8, radius * 8]} />

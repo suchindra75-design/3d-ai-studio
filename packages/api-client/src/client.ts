@@ -8,6 +8,7 @@ import type {
   ExportFormatList,
   ExportList,
   ExportRead,
+  LodRead,
   GenerationCreate,
   GenerationPlanRead,
   HealthResponse,
@@ -273,6 +274,14 @@ export function createApiClient({ baseUrl, token, fetch: fetchImpl }: ApiClientO
           body,
           headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
         }),
+    },
+    lod: {
+      /** Levels of detail for viewing a large version (status "missing" until built). */
+      get: (versionId: string) =>
+        request<LodRead>('GET', `/api/v1/model-versions/${versionId}/lod`),
+      /** Builds them once; can take seconds for models of millions of triangles. */
+      build: (versionId: string) =>
+        request<LodRead>('POST', `/api/v1/model-versions/${versionId}/lod`),
     },
     exports: {
       formats: () => request<ExportFormatList>('GET', '/api/v1/exports/formats'),

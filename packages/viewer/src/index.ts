@@ -34,6 +34,16 @@ export {
   type ViewportOptions,
   type ViewportProps,
 } from './viewport';
+export {
+  HIDDEN_LAYER,
+  ModelLod,
+  TRIANGLES_PER_PIXEL,
+  chooseLevel,
+  matchParts,
+  projectedArea,
+  type DetailMode,
+  type LodSource,
+} from './lod';
 export { MeasureMarkers } from './measure';
 export { findProblemEdges, type ProblemEdges } from './problems';
 export { ProblemOverlay } from './problem-overlay';

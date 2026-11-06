@@ -34,6 +34,7 @@ import {
   webglAvailable,
   type CameraPreset,
   type CaptureFunction,
+  type DetailMode,
   type ViewRequest,
   type ViewportOptions,
 } from '@ai3d/viewer';
@@ -60,6 +61,7 @@ import { EnhancePanel } from './enhance-panel';
 import { ExportPanel } from './export-panel';
 import { HierarchyPanel } from './hierarchy-panel';
 import { InspectorPanel } from './inspector-panel';
+import { useLevelsOfDetail } from './lod';
 import { useModelFile } from './model-file';
 import { QualityPanel } from './quality-panel';
 import { RetexturePanel } from './retexture-panel';
@@ -184,6 +186,24 @@ function VersionWorkspace({
 
   const loaded = file.status === 'ready' ? file.model : null;
   const root = loaded?.root ?? null;
+  // Asked for at once: a stored coarse level can be shown while the full file loads.
+  const lodState = useLevelsOfDetail(api, version.id, webgl);
+  const [detail, setDetail] = useState<DetailMode>('auto');
+  const [detailLevel, setDetailLevel] = useState(0);
+  // Levels are matched to the model's parts as loaded, so they are only used if they
+  // arrive before the first edit (edits after that are followed part by part).
+  const lodSources = lodState.status === 'ready' ? lodState.sources : null;
+  const [lodTaken, setLodTaken] = useState<{ sources: unknown; usable: boolean } | null>(null);
+  if (lodSources && lodTaken?.sources !== lodSources) {
+    setLodTaken({ sources: lodSources, usable: edits.version === 0 });
+  }
+  const lodForView = useMemo(
+    () =>
+      lodState.status === 'ready' && lodTaken?.usable && lodTaken.sources === lodState.sources
+        ? { fullTriangles: lodState.fullTriangles, sources: lodState.sources }
+        : null,
+    [lodState, lodTaken],
+  );
   // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read after edits (deleted parts)
   const tree = useMemo(() => (root ? buildHierarchy(root) : null), [root, edits.version]);
   const selected =
@@ -433,7 +453,36 @@ function VersionWorkspace({
           )}
         >
           <div className="relative min-h-0 min-w-0 flex-1">
-            {file.status === 'loading' ? (
+            {file.status === 'loading' && webgl && lodState.status === 'ready' ? (
+              // Progressive loading: the coarsest stored level while the full file loads.
+              <div className="relative size-full">
+                <CanvasBoundary>
+                  <Viewport
+                    className="size-full"
+                    model={lodState.sources[lodState.sources.length - 1]!.root}
+                    revision={0}
+                    options={options}
+                    selectedId={null}
+                    onSelect={() => {}}
+                    view={view}
+                    label={`Simplified preview of ${model.name}, version ${version.version_number}`}
+                  />
+                </CanvasBoundary>
+                <div
+                  role="status"
+                  className="absolute inset-x-2 bottom-2 flex flex-col gap-1.5 rounded-md bg-background/85 px-2.5 py-2 text-[11px] text-muted-foreground sm:right-auto sm:w-72"
+                >
+                  <span>
+                    Simplified preview (
+                    {lodState.sources[lodState.sources.length - 1]!.triangles.toLocaleString()} of{' '}
+                    {lodState.fullTriangles.toLocaleString()} triangles). Opening the full model…
+                  </span>
+                  {file.progress === null ? null : (
+                    <Progress value={file.progress * 100} aria-label="Download progress" />
+                  )}
+                </div>
+              </div>
+            ) : file.status === 'loading' ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
                 <p className="text-xs text-muted-foreground">Opening the 3D file…</p>
                 <div className="w-48">
@@ -468,6 +517,9 @@ function VersionWorkspace({
                   clipPlane={tab === 'cut' ? null : sectionClip}
                   cameraLink={compareVersion ? link : undefined}
                   onCaptureReady={onCaptureReady}
+                  lod={lodForView}
+                  detail={detail}
+                  onDetailLevel={setDetailLevel}
                   label={`3D view of ${model.name}, version ${version.version_number}`}
                 >
                   {problems ? <ProblemOverlay edges={problems} /> : null}
@@ -499,6 +551,19 @@ function VersionWorkspace({
                   onScreenshot={() => void takeScreenshot()}
                   screenshotScale={screenshotScale}
                   onScreenshotScale={setScreenshotScale}
+                  detail={
+                    lodForView
+                      ? {
+                          mode: detail,
+                          onMode: setDetail,
+                          triangles: [
+                            lodForView.fullTriangles,
+                            ...lodForView.sources.map((source) => source.triangles),
+                          ],
+                          current: detailLevel,
+                        }
+                      : undefined
+                  }
                 />
                 <div className="pointer-events-none absolute left-2 top-24 flex flex-col gap-2 sm:top-12">
                   {section && tab !== 'cut' ? (
@@ -517,6 +582,21 @@ function VersionWorkspace({
                       measured={version.surface_provenance === 'measured'}
                       onClear={() => setPoints([])}
                     />
+                  ) : null}
+                  {lodState.status === 'preparing' ? (
+                    <p
+                      role="status"
+                      className="max-w-64 rounded-md bg-background/85 px-2 py-1 text-[11px] text-muted-foreground"
+                    >
+                      Preparing simplified views of this large model (once)…
+                    </p>
+                  ) : lodState.status === 'unavailable' ? (
+                    <p
+                      role="status"
+                      className="max-w-64 rounded-md bg-background/85 px-2 py-1 text-[11px] text-muted-foreground"
+                    >
+                      Shown in full detail only: {lodState.message}
+                    </p>
                   ) : null}
                   {viewNotice ? (
                     <p

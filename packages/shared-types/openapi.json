@@ -1950,6 +1950,94 @@
         "title": "LocalDeviceRead",
         "type": "object"
       },
+      "LodLevelRead": {
+        "properties": {
+          "file_url": {
+            "title": "File Url",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "max_shift": {
+            "title": "Max Shift",
+            "type": "number"
+          },
+          "mean_shift": {
+            "title": "Mean Shift",
+            "type": "number"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "triangles": {
+            "title": "Triangles",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "level",
+          "triangles",
+          "mean_shift",
+          "max_shift",
+          "size_bytes",
+          "file_url"
+        ],
+        "title": "LodLevelRead",
+        "type": "object"
+      },
+      "LodRead": {
+        "properties": {
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/LodLevelRead"
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "status": {
+            "enum": [
+              "not_needed",
+              "missing",
+              "ready",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "triangles": {
+            "title": "Triangles",
+            "type": "integer"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "status",
+          "triangles",
+          "levels",
+          "message"
+        ],
+        "title": "LodRead",
+        "type": "object"
+      },
       "MeshFileRead": {
         "properties": {
           "format": {
@@ -4394,6 +4482,169 @@
           }
         },
         "summary": "Download the version's 3D file (GLB)",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/model-versions/{version_id}/lod": {
+      "get": {
+        "operationId": "get_lod_api_v1_model_versions__version_id__lod_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LodRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Levels of detail for viewing a large version",
+        "tags": [
+          "models"
+        ]
+      },
+      "post": {
+        "description": "Simplified copies (about a quarter of the triangles each) for drawing the model when full detail would not be visible. The version's own file is unchanged.",
+        "operationId": "build_lod_api_v1_model_versions__version_id__lod_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LodRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Build the levels of detail (once; can take seconds for large models)",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/model-versions/{version_id}/lod/{level}/file": {
+      "get": {
+        "operationId": "get_lod_file_api_v1_model_versions__version_id__lod__level__file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "level",
+            "required": true,
+            "schema": {
+              "title": "Level",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "model/gltf-binary": {}
+            },
+            "description": "GLB file"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Download one level of detail (GLB)",
         "tags": [
           "models"
         ]

@@ -287,6 +287,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/model-versions/{version_id}/lod": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Levels of detail for viewing a large version */
+        get: operations["get_lod_api_v1_model_versions__version_id__lod_get"];
+        put?: never;
+        /**
+         * Build the levels of detail (once; can take seconds for large models)
+         * @description Simplified copies (about a quarter of the triangles each) for drawing the model when full detail would not be visible. The version's own file is unchanged.
+         */
+        post: operations["build_lod_api_v1_model_versions__version_id__lod_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-versions/{version_id}/lod/{level}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download one level of detail (GLB) */
+        get: operations["get_lod_file_api_v1_model_versions__version_id__lod__level__file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/model-versions/{version_id}/preview": {
         parameters: {
             query?: never;
@@ -1372,6 +1410,40 @@ export interface components {
             /** Ram Total Bytes */
             ram_total_bytes: number | null;
         };
+        /** LodLevelRead */
+        LodLevelRead: {
+            /** File Url */
+            file_url: string;
+            /** Level */
+            level: number;
+            /** Max Shift */
+            max_shift: number;
+            /** Mean Shift */
+            mean_shift: number;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Triangles */
+            triangles: number;
+        };
+        /** LodRead */
+        LodRead: {
+            /** Levels */
+            levels: components["schemas"]["LodLevelRead"][];
+            /** Message */
+            message: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "not_needed" | "missing" | "ready" | "unavailable";
+            /** Triangles */
+            triangles: number;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
         /** MeshFileRead */
         MeshFileRead: {
             /** Format */
@@ -1962,6 +2034,8 @@ export type JobList = components['schemas']['JobList'];
 export type JobRead = components['schemas']['JobRead'];
 export type JobStatus = components['schemas']['JobStatus'];
 export type LocalDeviceRead = components['schemas']['LocalDeviceRead'];
+export type LodLevelRead = components['schemas']['LodLevelRead'];
+export type LodRead = components['schemas']['LodRead'];
 export type MeshFileRead = components['schemas']['MeshFileRead'];
 export type ModelList = components['schemas']['ModelList'];
 export type ModelRead = components['schemas']['ModelRead'];
@@ -2703,6 +2777,127 @@ export interface operations {
             header?: never;
             path: {
                 version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description GLB file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "model/gltf-binary": unknown;
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_lod_api_v1_model_versions__version_id__lod_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LodRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    build_lod_api_v1_model_versions__version_id__lod_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LodRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_lod_file_api_v1_model_versions__version_id__lod__level__file_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+                level: number;
             };
             cookie?: never;
         };

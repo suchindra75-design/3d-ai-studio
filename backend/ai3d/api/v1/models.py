@@ -9,6 +9,7 @@ from ai3d.core.errors import NotFoundError
 from ai3d.models.enums import AssetKind
 from ai3d.schemas.enhance import EnhancePlanRead, EnhanceRequest, RetextureRequest
 from ai3d.schemas.job import JobRead
+from ai3d.schemas.lod import LodRead
 from ai3d.schemas.model3d import (
     ModelList,
     ModelRead,
@@ -18,6 +19,7 @@ from ai3d.schemas.model3d import (
 )
 from ai3d.services import enhance as enhance_service
 from ai3d.services import jobs as job_service
+from ai3d.services import lod as lod_service
 from ai3d.services import models as model_service
 from ai3d.services import retexture as retexture_service
 from ai3d.services import transfer as transfer_service
@@ -198,6 +200,47 @@ def get_version_file(db: DbDep, storage: StorageDep, version_id: uuid.UUID) -> R
 )
 def get_version_preview(db: DbDep, storage: StorageDep, version_id: uuid.UUID) -> Response:
     return _serve(db, storage, version_id, AssetKind.PREVIEW_IMAGE, attachment=False)
+
+
+@router.get(
+    "/model-versions/{version_id}/lod",
+    response_model=LodRead,
+    summary="Levels of detail for viewing a large version",
+)
+def get_lod(db: DbDep, version_id: uuid.UUID) -> LodRead:
+    return lod_service.get_lod(db, version_id)
+
+
+@router.post(
+    "/model-versions/{version_id}/lod",
+    response_model=LodRead,
+    summary="Build the levels of detail (once; can take seconds for large models)",
+    description="Simplified copies (about a quarter of the triangles each) for drawing the "
+    "model when full detail would not be visible. The version's own file is unchanged.",
+)
+def build_lod(
+    db: DbDep, storage: StorageDep, settings: SettingsDep, version_id: uuid.UUID
+) -> LodRead:
+    return lod_service.build_lod(db, storage, settings, version_id)
+
+
+@router.get(
+    "/model-versions/{version_id}/lod/{level}/file",
+    summary="Download one level of detail (GLB)",
+    response_class=Response,
+    responses={200: {"content": {"model/gltf-binary": {}}, "description": "GLB file"}},
+)
+def get_lod_file(db: DbDep, storage: StorageDep, version_id: uuid.UUID, level: int) -> Response:
+    asset = lod_service.lod_file(db, version_id, level)
+    if not storage.exists(asset.storage_key):
+        raise NotFoundError("File not found in storage.")
+    headers = {"Cache-Control": _IMMUTABLE, "ETag": f'"{asset.sha256}"'}
+    path = storage.local_path(asset.storage_key)
+    if path is not None:
+        return FileResponse(path, media_type=asset.mime_type, headers=headers)
+    return StreamingResponse(
+        storage.open(asset.storage_key), media_type=asset.mime_type, headers=headers
+    )
 
 
 @router.post(

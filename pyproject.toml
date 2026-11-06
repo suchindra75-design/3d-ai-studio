@@ -51,7 +51,7 @@ mypy_path = ["backend", "local-engine"]
 exclude = ["migrations/versions/"]
 
 [[tool.mypy.overrides]]
-module = ["cv2", "cv2.*", "open3d", "open3d.*", "pxr", "pxr.*", "boto3", "boto3.*", "botocore", "botocore.*"]
+module = ["cv2", "cv2.*", "fast_simplification", "open3d", "open3d.*", "pxr", "pxr.*", "boto3", "boto3.*", "botocore", "botocore.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

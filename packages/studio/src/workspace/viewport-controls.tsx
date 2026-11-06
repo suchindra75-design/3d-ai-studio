@@ -6,6 +6,7 @@ import {
   CAMERA_PRESETS,
   LIGHTING_PRESETS,
   type CameraPreset,
+  type DetailMode,
   type DisplayMode,
   type LightingPreset,
   type ViewportOptions,
@@ -84,6 +85,13 @@ const DISPLAY: { value: DisplayMode; label: string; hint?: string }[] = [
   { value: 'uv', label: 'UV', hint: 'Checker texture: shows stretching and seams' },
 ];
 
+/** 5,242,880 → "5.2M", 81,920 → "82K" triangles. */
+function formatTriangles(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${Math.round(count / 1_000)}K`;
+  return String(count);
+}
+
 const GIZMO: { value: GizmoMode; label: string; hint: string }[] = [
   { value: 'translate', label: 'Move', hint: 'Move (W)' },
   { value: 'rotate', label: 'Rotate', hint: 'Rotate (E)' },
@@ -101,6 +109,7 @@ export function ViewportControls({
   onScreenshot,
   screenshotScale,
   onScreenshotScale,
+  detail,
 }: {
   options: ViewportOptions;
   /** Receives only the changed setting, so quick successive clicks never undo each other. */
@@ -113,6 +122,15 @@ export function ViewportControls({
   onScreenshot: () => void;
   screenshotScale: number;
   onScreenshotScale: (scale: number) => void;
+  /** Level-of-detail choice, when the model has simplified levels. */
+  detail?: {
+    mode: DetailMode;
+    onMode: (mode: DetailMode) => void;
+    /** Triangles per level, full detail first. */
+    triangles: number[];
+    /** The level being drawn now. */
+    current: number;
+  };
 }) {
   const set = <K extends keyof ViewportOptions>(key: K, value: ViewportOptions[K]) =>
     onOptions({ [key]: value });
@@ -162,6 +180,31 @@ export function ViewportControls({
             ))}
           </select>
         </label>
+        {detail ? (
+          <label
+            className={cn(panel, 'flex items-center gap-1 pl-2 text-xs text-muted-foreground')}
+            title={`Drawing ${formatTriangles(detail.triangles[detail.current] ?? 0)} of ${formatTriangles(detail.triangles[0] ?? 0)} triangles. Auto draws fewer when the extra detail would not be visible; picking, measuring and editing always use full detail.`}
+          >
+            Detail
+            <select
+              aria-label="Detail"
+              className="h-7 rounded bg-transparent px-1 text-xs text-foreground outline-none"
+              value={String(detail.mode)}
+              onChange={(event) =>
+                detail.onMode(event.target.value === 'auto' ? 'auto' : Number(event.target.value))
+              }
+            >
+              <option value="auto">
+                Auto ({formatTriangles(detail.triangles[detail.current] ?? 0)})
+              </option>
+              {detail.triangles.map((count, level) => (
+                <option key={level} value={level}>
+                  {level === 0 ? 'Full' : `Level ${level}`} ({formatTriangles(count)})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
       <div className={cn(panel, 'pointer-events-auto flex items-center')}>
         <button

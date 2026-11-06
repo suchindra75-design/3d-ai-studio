@@ -38,6 +38,8 @@ export type {
   JobRead,
   JobStatus,
   LocalDeviceRead,
+  LodLevelRead,
+  LodRead,
   MeshFileRead,
   ModelList,
   ModelRead,
