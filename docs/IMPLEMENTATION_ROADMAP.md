@@ -1139,10 +1139,15 @@ benchmarks.
   upload check, levels of detail (100 s), both smoothing methods (sharp: 389 s),
   GLB/OBJ/STL/FBX exports re-opened and matching, and viewing in the browser
   (full model after 13.6 s, preview after 8.7 s, JS heap 652 MB).
-- Found: the upload check and sharp smoothing peak at 8.4 GB on 10 million
-  triangles; smoothing now checks free memory first, the upload check does not
-  yet. Rendering speed per level could not be measured validly with the method
-  used (frame times were the same for every level); that stays open.
+- Found: the upload check and sharp smoothing peaked at 8.4 GB on 10 million
+  triangles. Smoothing checks free memory first. The upload check was profiled
+  and now peaks at 4.7 GB (trimesh's volume calculation and cached arrays
+  replaced by chunked equivalents, same results; 47 → 35 s), and it too checks
+  free memory first, from the triangle count in the GLB header (for 10 million
+  triangles it asks for about 5.1 GB), and refuses with the numbers instead of
+  running out.
+  Rendering speed per level could not be measured validly with the method used
+  (frame times were the same for every level); that stays open.
 
 ## Roadmap after the capability audit (2026-11-04)
 

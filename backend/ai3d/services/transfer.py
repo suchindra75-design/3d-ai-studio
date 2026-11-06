@@ -33,14 +33,18 @@ from ai3d.models.enums import (
     ModelVersionSource,
     ProcessingMode,
     QualityMode,
-    ReportStatus,
     SurfaceProvenance,
 )
 from ai3d.processing import importing
 from ai3d.processing.mesh import validate_mesh_file
 from ai3d.schemas.project import ProjectCreate, ProjectRead
 from ai3d.services import images as image_service
-from ai3d.services.models import _spool_model, store_checked_version, version_file
+from ai3d.services.models import (
+    _spool_model,
+    reject_failed_report,
+    store_checked_version,
+    version_file,
+)
 from ai3d.services.projects import create_project, delete_project, get_project, read_project
 from ai3d.storage import StorageBackend
 
@@ -61,11 +65,7 @@ def _workdir(settings: Settings, prefix: str) -> Path:
 
 def _check(path: Path, what: str) -> Any:
     report = validate_mesh_file(path, file_type="glb")
-    if report.status == ReportStatus.FAIL:
-        raise InvalidInputError(
-            f"{what} failed the file checks and was not imported.",
-            details={"issues": [issue.to_dict() for issue in report.issues]},
-        )
+    reject_failed_report(report, f"{what} failed the file checks and was not imported.")
     return report
 
 

@@ -12,7 +12,14 @@ import trimesh
 from PIL import Image, ImageCms
 
 from ai3d.models.enums import ReportStatus
-from ai3d.processing.mesh import duplicate_face_count, row_keys, validate_mesh_file
+from ai3d.processing import mesh as mesh_module
+from ai3d.processing.mesh import (
+    duplicate_face_count,
+    glb_triangle_count,
+    row_keys,
+    validate_mesh_file,
+    validation_memory_bytes,
+)
 from ai3d.processing.preprocess import preprocess_for_provider
 from tests import images
 
@@ -202,3 +209,61 @@ def test_row_keys_match_numpy_row_uniqueness() -> None:
         assert len(first) == len(faces) - count
         edges = np.sort(faces[:, :2], axis=1)
         assert len(np.unique(row_keys(edges, vertices))) == len(np.unique(edges, axis=0))
+
+
+# -- memory check before the file checks ------------------------------------------------
+
+
+def _two_part_glb(tmp_path: Path) -> Path:
+    scene = trimesh.Scene()
+    box = trimesh.creation.box()
+    scene.add_geometry(box, geom_name="Box", node_name="A")
+    move = trimesh.transformations.translation_matrix([2, 0, 0])
+    scene.add_geometry(box, geom_name="Box", node_name="B", transform=move)  # used twice
+    scene.add_geometry(trimesh.creation.icosphere(), geom_name="Ball", node_name="C")
+    path = tmp_path / "parts.glb"
+    path.write_bytes(scene.export(file_type="glb"))
+    return path
+
+
+def test_triangles_are_counted_from_the_glb_header(tmp_path: Path) -> None:
+    path = _two_part_glb(tmp_path)
+    assert glb_triangle_count(path) == validate_mesh_file(path).metrics["triangle_count"] == 1304
+    (tmp_path / "bad.glb").write_bytes(b"not a model")
+    assert glb_triangle_count(tmp_path / "bad.glb") is None
+
+
+class _Memory:
+    def __init__(self, available: int) -> None:
+        self.available = available
+
+
+def test_a_model_too_large_for_free_memory_is_not_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _two_part_glb(tmp_path)
+    need = validation_memory_bytes(1304)
+    monkeypatch.setattr(mesh_module.psutil, "virtual_memory", lambda: _Memory(need - 1))
+    report = validate_mesh_file(path)
+    assert report.status == ReportStatus.FAIL
+    (issue,) = report.issues
+    assert issue.code == "not_enough_memory"
+    assert issue.message.startswith("Checking this 1,304-triangle model needs about 0.5 GB")
+    assert "Close other programs" in issue.message
+    monkeypatch.setattr(mesh_module.psutil, "virtual_memory", lambda: _Memory(need))
+    assert validate_mesh_file(path).status != ReportStatus.FAIL
+
+
+def test_the_chunked_measurements_match_trimesh() -> None:
+    sphere = trimesh.creation.icosphere(subdivisions=3)
+    assert mesh_module._signed_volume(sphere.vertices, sphere.faces) == pytest.approx(sphere.volume)
+    flipped = sphere.copy()
+    flipped.invert()
+    assert mesh_module._signed_volume(flipped.vertices, flipped.faces) == pytest.approx(
+        flipped.volume
+    )
+    faces = np.vstack([sphere.faces, [[0, 0, 1], [1, 2, 1]]])
+    degenerate = trimesh.Trimesh(sphere.vertices, faces, process=False)
+    assert mesh_module._degenerate_count(np.asarray(degenerate.vertices), faces) == int(
+        (~degenerate.nondegenerate_faces()).sum()
+    )

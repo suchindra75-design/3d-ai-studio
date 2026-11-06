@@ -220,3 +220,22 @@ def test_deleting_a_model_removes_every_version(
     assert stored_keys(client, model_dir) == []
     assert client.get(v2["file_url"]).status_code == 404
     assert client.get(f"/api/v1/models/{model['id']}/versions").status_code == 404
+
+
+def test_saving_a_model_too_large_for_free_memory_says_so(
+    client: TestClient, model: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai3d.processing import mesh as mesh_module  # noqa: PLC0415
+
+    class Memory:
+        available = 64 * 1024 * 1024  # less than the check needs for any model
+
+    monkeypatch.setattr(mesh_module.psutil, "virtual_memory", Memory)
+    glb = trimesh.creation.box().export(file_type="glb")
+    response = _save(client, model["id"], model["current_version"]["id"], glb)
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "not_enough_memory"
+    assert error["message"].startswith("Checking this 12-triangle model needs about")
+    versions = client.get(f"/api/v1/models/{model['id']}/versions").json()["items"]
+    assert len(versions) == 1  # nothing was saved

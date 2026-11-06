@@ -40,7 +40,8 @@ Seconds (peak memory in GB):
 | Step | 1M | 3M | 5M | Dragon 7.2M | Statuette 10M |
 |---|---|---|---|---|---|
 | Import (PLY → GLB) | 1.1 (0.3) | 1.6 (0.6) | 2.2 (0.8) | 1.3 (1.0) | 1.9 (1.3) |
-| Upload check (`validate_mesh_file`) | 3.7 (1.0) | 8.7 (2.1) | 15.8 (3.3) | 23.9 (4.4) | 47.3 (**8.4**) |
+| Upload check, first run | 3.7 (1.0) | 8.7 (2.1) | 15.8 (3.3) | 23.9 (4.4) | 47.3 (**8.4**) |
+| Upload check, after reducing its memory | 3.3 (0.9) | 8.5 (1.7) | 14.8 (2.8) | 23.0 (3.5) | 34.8 (4.7) |
 | Levels of detail (all levels) | 6.4 (1.3) | 21.5 (3.3) | 37.8 (5.3) | 52.5 (6.3) | 100.4 (6.6) |
 | Smoothing, keep sharp edges (10 passes) | 29.7 (1.3) | 103.4 (3.3) | 169.7 (5.4) | 243.7 (7.2) | 389.1 (**8.4**) |
 | Smoothing, Taubin (10 passes) | 2.2 (0.6) | 7.7 (1.3) | 12.2 (2.1) | 21.7 (2.7) | 56.8 (5.8) |
@@ -63,10 +64,14 @@ Every export was re-opened and matched the model's triangle count.
 
 **What this shows:**
 - Everything completed on 16 GB, up to the 10-million-triangle scan.
-- The upload check and feature-preserving smoothing both peak at 8.4 GB on
-  10 million triangles, about half this machine's memory. Smoothing now checks
-  free memory first (700 bytes per triangle) and says so instead of running out;
-  the upload check has no such guard yet (a known gap below).
+- The upload check and feature-preserving smoothing both peaked at 8.4 GB on
+  10 million triangles, about half this machine's memory. Profiling the upload
+  check showed trimesh's volume calculation (+2.4 GB) and cached intermediate
+  arrays as the cause; computing volume, degenerate triangles and surface centres
+  in chunks brought it to 4.7 GB (and 47 → 35 s) with the same results. Both now
+  check free memory first and say so instead of running out: smoothing at 700
+  bytes per triangle; the upload check at 500 MB + 500 bytes per triangle, with
+  the triangle count read from the GLB's header (0.2 ms, nothing loaded).
 - Keeping sharp edges costs 7–14× Taubin's time; on 10 million triangles it
   takes six and a half minutes.
 - OBJ export is the slowest writer (trimesh's text writer), about 12 s per
@@ -112,7 +117,5 @@ drop to the level's count (a quarter or less), as the Detail control reports.
 
 ## Known gaps
 
-- The upload check (`validate_mesh_file`) peaks at 8.4 GB on 10 million
-  triangles with no memory check before it starts.
 - Rendering speed per level of detail (see above).
 - Apple Silicon, Windows, Linux and discrete-GPU browsers not measured.

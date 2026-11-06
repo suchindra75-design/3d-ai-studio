@@ -8,11 +8,13 @@ shape matches the real object.
 
 import json
 import logging
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import psutil
 import trimesh
 
 from ai3d.models.enums import ReportStatus
@@ -409,7 +411,110 @@ def duplicate_face_count(faces: np.ndarray, vertex_count: int) -> tuple[int, np.
     return len(faces) - len(first), first
 
 
+# Triangles handled at a time by the chunked measurements below (bounds temporary
+# memory on models of millions of triangles).
+_CHUNK = 1_000_000
+
+
+def _degenerate_count(vertices: np.ndarray, faces: np.ndarray) -> int:
+    """Triangles with (almost) no area, as trimesh's ``nondegenerate_faces`` decides
+    (cross-product length below its default tolerance), without caching."""
+    tolerance = trimesh.tol.merge
+    count = 0
+    for start in range(0, len(faces), _CHUNK):
+        corners = vertices[faces[start : start + _CHUNK]]
+        cross = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+        count += int((np.linalg.norm(cross, axis=1) <= tolerance).sum())
+    return count
+
+
+def _face_centres(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    centres = np.empty((len(faces), 3), dtype=np.float32)
+    for start in range(0, len(faces), _CHUNK):
+        centres[start : start + _CHUNK] = vertices[faces[start : start + _CHUNK]].mean(axis=1)
+    return centres
+
+
+def _signed_volume(vertices: np.ndarray, faces: np.ndarray) -> float:
+    """Enclosed volume (negative when the surface faces inwards): the sum of the signed
+    tetrahedra from the origin, a sixth of v0 · (v1 × v2) per triangle."""
+    total = 0.0
+    for start in range(0, len(faces), _CHUNK):
+        corners = vertices[faces[start : start + _CHUNK]]
+        total += float(np.einsum("ij,ij->", corners[:, 0], np.cross(corners[:, 1], corners[:, 2])))
+    return total / 6.0
+
+
+# Peak memory of the check below: measured 0.94 GB for 1 million triangles and 4.7 GB
+# for 10 million (docs/BENCHMARKS.md), about 450 MB + 430 bytes per triangle; this
+# estimate keeps a margin.
+VALIDATION_BASE_BYTES = 500 * 1024 * 1024
+VALIDATION_BYTES_PER_TRIANGLE = 500
+
+
+def validation_memory_bytes(triangles: int) -> int:
+    return VALIDATION_BASE_BYTES + triangles * VALIDATION_BYTES_PER_TRIANGLE
+
+
+def glb_triangle_count(path: Path) -> int | None:
+    """Triangles in a GLB, read from its JSON header only (no geometry is loaded).
+
+    Counts triangle primitives (mode 4, the default) as indices / 3, or positions / 3
+    when not indexed. None when the header cannot be read."""
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(20)
+            if len(header) < 20 or header[:4] != b"glTF":
+                return None
+            length, kind = struct.unpack("<II", header[12:20])
+            if kind != 0x4E4F534A:  # "JSON"
+                return None
+            document = json.loads(handle.read(length))
+        accessors = document.get("accessors", [])
+        nodes_meshes = [n.get("mesh") for n in document.get("nodes", []) if "mesh" in n]
+        total = 0
+        for index in nodes_meshes:
+            for primitive in document["meshes"][index].get("primitives", []):
+                if primitive.get("mode", 4) != 4:
+                    continue
+                source = primitive.get("indices", primitive.get("attributes", {}).get("POSITION"))
+                if source is not None:
+                    total += int(accessors[source]["count"]) // 3
+        return total
+    except (OSError, ValueError, KeyError, IndexError, TypeError, struct.error):
+        return None
+
+
+def _not_enough_memory(path: Path, file_type: str) -> MeshReport | None:
+    """A failed report when checking this GLB would need more memory than is free."""
+    if file_type != "glb":
+        return None
+    triangles = glb_triangle_count(path)
+    if not triangles:
+        return None
+    need = validation_memory_bytes(triangles)
+    free = int(psutil.virtual_memory().available)
+    if need <= free:
+        return None
+    return MeshReport(
+        status=ReportStatus.FAIL,
+        metrics={"triangle_count": triangles},
+        issues=[
+            MeshIssue(
+                "not_enough_memory",
+                "error",
+                f"Checking this {triangles:,}-triangle model needs about "
+                f"{need / 1024**3:.1f} GB of memory and {free / 1024**3:.1f} GB is free. "
+                "Close other programs and try again.",
+            )
+        ],
+    )
+
+
 def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
+    short = _not_enough_memory(path, file_type)
+    if short is not None:
+        return short
     try:
         scene = load_model_scene(path, file_type=file_type)
     except Exception as exc:  # trimesh raises many exception types for bad input
@@ -441,7 +546,8 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
 
     bounds = combined.bounds
     size = bounds[1] - bounds[0]
-    degenerate = int((~combined.nondegenerate_faces()).sum())
+    degenerate = _degenerate_count(vertices, faces)
+    del combined  # its caches would stay alive otherwise
     material_count, texture_count, has_uv = _materials(scene)
 
     # Texture seams and normal splits duplicate vertices, which would make every UV
@@ -463,7 +569,7 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
     # triangles (e.g. sparse photogrammetry reaching background points) inflate it.
     spread: float | None = None
     if len(faces):
-        centres = vertices[faces].mean(axis=1)
+        centres = _face_centres(vertices, faces)
         core = np.percentile(centres, 97.5, axis=0) - np.percentile(centres, 2.5, axis=0)
         core_diagonal = float(np.linalg.norm(core))
         if core_diagonal > 0:
@@ -477,6 +583,9 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
     boundary_edges = int((edge_counts == 1).sum())
     non_manifold_edges = int((edge_counts > 2).sum())
     duplicate_faces, _ = duplicate_face_count(shape.faces, len(shape.vertices))
+    volume = (
+        _signed_volume(np.asarray(shape.vertices), np.asarray(shape.faces)) if watertight else 0.0
+    )
     metrics: dict[str, Any] = {
         "mesh_count": len(meshes),
         "vertex_count": len(vertices),
@@ -501,9 +610,9 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
         "winding_consistent": bool(shape.is_winding_consistent)
         if non_manifold_edges == 0
         else None,
-        "volume": round(abs(float(shape.volume)), 9) if watertight else None,
+        "volume": round(abs(volume), 9) if watertight else None,
         # A closed, consistently wound surface with negative volume faces inwards.
-        "inside_out": bool(watertight and shape.is_winding_consistent and shape.volume < 0)
+        "inside_out": bool(watertight and shape.is_winding_consistent and volume < 0)
         if watertight and non_manifold_edges == 0
         else None,
         "uv_out_of_range": _uv_out_of_range(meshes),

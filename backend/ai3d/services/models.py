@@ -608,11 +608,7 @@ def add_edited_version(
         path = workdir / "model.glb"
         size = _spool_model(stream, path, settings.max_model_bytes)
         report = validate_mesh_file(path, file_type="glb")
-        if report.status == ReportStatus.FAIL:
-            raise InvalidInputError(
-                "The edited model failed the file checks and was not saved.",
-                details={"issues": [issue.to_dict() for issue in report.issues]},
-            )
+        reject_failed_report(report, "The edited model failed the file checks and was not saved.")
         version = store_checked_version(
             db,
             storage,
@@ -765,6 +761,18 @@ def version_file(db: Session, version_id: uuid.UUID, kind: AssetKind) -> tuple[M
     if asset is None:
         raise NotFoundError("This version has no such file.")
     return version, asset
+
+
+def reject_failed_report(report: MeshReport, message: str) -> None:
+    """Raise when the file checks failed; a shortage of memory is said as such (it is
+    this computer, not the file)."""
+    if report.status != ReportStatus.FAIL:
+        return
+    issues = [issue.to_dict() for issue in report.issues]
+    short = next((i for i in report.issues if i.code == "not_enough_memory"), None)
+    if short is not None:
+        raise InvalidInputError(short.message, code="not_enough_memory", details={"issues": issues})
+    raise InvalidInputError(message, details={"issues": issues})
 
 
 def download_filename(model: Model3D, version: ModelVersion, extension: str) -> str:
