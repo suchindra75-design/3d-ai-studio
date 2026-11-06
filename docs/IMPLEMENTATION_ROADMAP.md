@@ -1132,6 +1132,18 @@ benchmarks.
 - Run: the free wrong-key check, against both real services (both refused the
   key; both adapters reported an authentication failure). No paid call was made.
 
+### Benchmarks ✅ ([BENCHMARKS.md](BENCHMARKS.md))
+- Synthetic 1M/3M/5M-triangle models and two real scans (Stanford 3D Scanning
+  Repository: 7.2M and 10M triangles), on the 2019 Intel MacBook Pro.
+- Everything completed on 16 GB, the 10-million-triangle scan included: import,
+  upload check, levels of detail (100 s), both smoothing methods (sharp: 389 s),
+  GLB/OBJ/STL/FBX exports re-opened and matching, and viewing in the browser
+  (full model after 13.6 s, preview after 8.7 s, JS heap 652 MB).
+- Found: the upload check and sharp smoothing peak at 8.4 GB on 10 million
+  triangles; smoothing now checks free memory first, the upload check does not
+  yet. Rendering speed per level could not be measured validly with the method
+  used (frame times were the same for every level); that stays open.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely
