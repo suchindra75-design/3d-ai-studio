@@ -458,19 +458,21 @@ function VersionWorkspace({
           <div className="relative min-h-0 min-w-0 flex-1">
             {file.status === 'loading' && webgl && lodState.status === 'ready' ? (
               // Progressive loading: the coarsest stored level while the full file loads.
-              <div className="relative size-full">
-                <CanvasBoundary>
-                  <Viewport
-                    className="size-full"
-                    model={lodState.sources[lodState.sources.length - 1]!.root}
-                    revision={0}
-                    options={options}
-                    selectedId={null}
-                    onSelect={() => {}}
-                    view={view}
-                    label={`Simplified preview of ${model.name}, version ${version.version_number}`}
-                  />
-                </CanvasBoundary>
+              // Same element tree as the full view below (boundary, then viewport), so the
+              // full model replaces the preview in the same canvas: no second WebGL context,
+              // the level stays on the GPU for the levels of detail, and the camera stays.
+              <CanvasBoundary>
+                <Viewport
+                  className="size-full"
+                  model={lodState.sources[lodState.sources.length - 1]!.root}
+                  revision={0}
+                  options={options}
+                  selectedId={null}
+                  onSelect={() => {}}
+                  view={view}
+                  frameKey={version.id}
+                  label={`Simplified preview of ${model.name}, version ${version.version_number}`}
+                />
                 <div
                   role="status"
                   className="absolute inset-x-2 bottom-2 flex flex-col gap-1.5 rounded-md bg-background/85 px-2.5 py-2 text-[11px] text-muted-foreground sm:right-auto sm:w-72"
@@ -484,7 +486,7 @@ function VersionWorkspace({
                     <Progress value={file.progress * 100} aria-label="Download progress" />
                   )}
                 </div>
-              </div>
+              </CanvasBoundary>
             ) : file.status === 'loading' ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-6">
                 <p className="text-xs text-muted-foreground">Opening the 3D file…</p>
@@ -523,6 +525,7 @@ function VersionWorkspace({
                   lod={lodForView}
                   detail={detail}
                   onDetailLevel={setDetailLevel}
+                  frameKey={version.id}
                   label={`3D view of ${model.name}, version ${version.version_number}`}
                 >
                   {problems ? <ProblemOverlay edges={problems} /> : null}

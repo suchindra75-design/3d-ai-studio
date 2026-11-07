@@ -286,10 +286,10 @@ def test_a_model_too_large_for_free_memory_is_not_checked(
 
 def test_the_chunked_measurements_match_trimesh() -> None:
     sphere = trimesh.creation.icosphere(subdivisions=3)
-    assert mesh_module._signed_volume(sphere.vertices, sphere.faces) == pytest.approx(sphere.volume)
+    assert mesh_module.signed_volume(sphere.vertices, sphere.faces) == pytest.approx(sphere.volume)
     flipped = sphere.copy()
     flipped.invert()
-    assert mesh_module._signed_volume(flipped.vertices, flipped.faces) == pytest.approx(
+    assert mesh_module.signed_volume(flipped.vertices, flipped.faces) == pytest.approx(
         flipped.volume
     )
     faces = np.vstack([sphere.faces, [[0, 0, 1], [1, 2, 1]]])

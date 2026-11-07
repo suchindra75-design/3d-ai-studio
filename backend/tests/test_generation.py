@@ -423,13 +423,19 @@ def test_cancel_while_running(
         assert time.monotonic() < deadline
         time.sleep(0.02)
     cancelled = client.post(f"/api/v1/jobs/{job['id']}/cancel").json()
-    assert cancelled["status"] == "cancelling"
+    # The response re-reads the job after the request is recorded; the worker polls
+    # every 0.02 s here and may already have finished cancelling by then.
+    assert cancelled["status"] in {"cancelling", "cancelled"}
     worker.join(10)
     assert not worker.is_alive()
     final = _job(client, job["id"])
     assert final["status"] == "cancelled"
     assert final["can_retry"] is True
-    assert "cancelled the task" in _events(client, job["id"])[-1]["message"]
+    messages = [event["message"] for event in _events(client, job["id"])]
+    # Cancelled as a running job (the worker asked the provider), not as a queued one.
+    assert "Cancellation requested." in messages
+    assert "Cancelled before anything was sent." not in messages
+    assert "cancelled the task" in messages[-1]
 
 
 def test_cancel_unsupported_by_provider_is_reported(

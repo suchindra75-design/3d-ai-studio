@@ -11,6 +11,8 @@ shapes. A version edited in the browser has no pairs (its exports are triangles)
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import numpy as np
 import trimesh
 
@@ -161,10 +163,11 @@ def obj_with_quads(
     return "\n".join(out) + "\n", quads
 
 
-def count_obj_faces(text: str) -> tuple[int, int]:
-    """(quads, triangles) among the ``f`` lines of an OBJ file."""
+def count_obj_faces(text: str | Iterable[str]) -> tuple[int, int]:
+    """(quads, triangles) among the ``f`` lines of an OBJ file, given as text or as its
+    lines (a file read line by line need not be in memory all at once)."""
     quads = triangles = 0
-    for line in text.splitlines():
+    for line in text.splitlines() if isinstance(text, str) else text:
         if line.startswith("f "):
             corners = len(line.split()) - 1
             if corners == 4:

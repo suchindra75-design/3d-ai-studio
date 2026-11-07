@@ -2,7 +2,14 @@
 
 import { Grid, OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
-import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  type MutableRefObject,
+  type ReactNode,
+} from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
@@ -101,6 +108,12 @@ export interface ViewportProps {
   detail?: DetailMode;
   /** Called when the level drawn changes. */
   onDetailLevel?: (level: number) => void;
+  /**
+   * The camera is framed again when this changes (or a view is requested), not on
+   * every new ``model``: a simplified preview can then be replaced by the full model
+   * in the same canvas without the camera moving. Defaults to ``model``.
+   */
+  frameKey?: unknown;
 }
 
 const SELECTION_COLOR = new THREE.Color('#0a84ff');
@@ -391,6 +404,7 @@ function Scene({
   detail = 'auto',
   onDetailLevel,
   label,
+  frameKey,
 }: Omit<ViewportProps, 'className'>) {
   const lodHandle = useRef<ModelLod | null>(null);
   const get = useThree((state) => state.get);
@@ -418,8 +432,9 @@ function Scene({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision` signals in-place edits
   const selectedBox = useMemo(() => (selected ? measure(selected) : null), [selected, revision]);
 
-  // Frame the model when it loads or a camera preset is requested; edits keep the camera.
-  useEffect(() => {
+  // Frame the model when it loads or a camera preset is requested; edits keep the camera,
+  // and so does a model replacing its own preview (same ``frameKey``).
+  const frame = useEffectEvent(() => {
     const { camera, size } = get();
     if (!(camera instanceof THREE.PerspectiveCamera)) return;
     const framing = frameBox(measure(model), view.preset, camera.fov, size.width / size.height);
@@ -434,7 +449,9 @@ function Scene({
       camera.lookAt(framing.target);
     }
     invalidate();
-  }, [model, view.preset, view.nonce, controls, get, invalidate]);
+  });
+  const framing = frameKey === undefined ? model : frameKey;
+  useEffect(() => frame(), [framing, view.preset, view.nonce, controls]);
 
   useEffect(() => invalidate(), [revision, options, selectedId, invalidate]);
 

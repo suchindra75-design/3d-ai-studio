@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import pytest
 
+from ai3d.models.enums import ExportFormat
 from ai3d.processing import lod
+from ai3d.processing.geometry import smoothing_memory_bytes
 from ai3d.processing.mesh import GlbCounts, validation_memory_bytes
 from ai3d.services.exports import export_memory_bytes
 
@@ -55,6 +57,28 @@ EXPORT = [
 ]  # fmt: skip
 
 
+# GLB (2026-11-07, the current code; the 5M soup with the earlier code, which kept
+# the model loaded while checking, an upper bound).
+GLB = [(T1, 431), (T5, 1122), (STATUETTE, 1655), (T15, 3365), (T20, 4223), (SOUP5, 3476)]
+# FBX: the whole process tree, Blender included (sampled every 0.2 s), largest of the
+# runs on the same model.
+FBX = [(T1, 2282), (T5, 7560), (STATUETTE, 8623)]
+
+
+@pytest.mark.parametrize(("fmt", "runs"), [(ExportFormat.GLB, GLB), (ExportFormat.FBX, FBX)])
+def test_glb_and_fbx_export_estimates_are_above_every_measured_peak(
+    fmt: ExportFormat, runs: list[tuple[GlbCounts, int]]
+) -> None:
+    for counts, peak_mb in runs:
+        assert export_memory_bytes(counts, fmt) > 1.05 * peak_mb * 1e6, (counts, peak_mb)
+
+
+def test_the_glb_estimate_lets_large_models_export_that_fit() -> None:
+    # A textured 20M terrain was exported (4.2 GB); the shared estimate asked for 22 GB.
+    assert export_memory_bytes(T20, ExportFormat.GLB) < 6e9
+    assert export_memory_bytes(T20) > 20e9
+
+
 @pytest.mark.parametrize(
     ("estimate", "runs"),
     [
@@ -74,3 +98,19 @@ def test_unshared_vertices_raise_the_estimates() -> None:
     assert validation_memory_bytes(SOUP5) > validation_memory_bytes(BARE5)
     assert lod.memory_bytes(SOUP5) > lod.memory_bytes(BARE5)
     assert export_memory_bytes(SOUP5) > export_memory_bytes(BARE5)
+
+
+# Smoothing: memory above the loaded model (peak minus what was in use before), 10
+# passes; (triangles, MB) measured 2026-11-07.
+SMOOTHING = {
+    "sharp": [(1_002_252, 449), (4_992_300, 1168), (10_002_828, 2039), (7_219_045, 1614),
+              (10_000_000, 1749)],
+    "taubin": [(1_002_252, 268), (4_992_300, 946), (10_002_828, 1712), (7_219_045, 1227),
+               (10_000_000, 1748)],
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("method", ["sharp", "taubin"])
+def test_smoothing_estimates_are_above_every_measured_run(method: str) -> None:
+    for triangles, extra_mb in SMOOTHING[method]:
+        assert smoothing_memory_bytes(triangles, method) > 1.15 * extra_mb * 1e6  # type: ignore[arg-type]

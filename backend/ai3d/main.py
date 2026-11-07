@@ -29,6 +29,7 @@ from ai3d.core.secrets import SecretBox
 from ai3d.database.migrate import upgrade_to_head
 from ai3d.database.session import Database
 from ai3d.providers import ProviderRegistry
+from ai3d.services import exports as export_service
 from ai3d.services.providers import ProviderManager
 from ai3d.storage import create_storage
 from ai3d.workers import JobRunner
@@ -73,6 +74,7 @@ def create_app(
             upgrade_to_head(database.engine)
         with database.session() as db:
             providers.sync(db)
+            export_service.recover_interrupted(db, storage, settings)
         if settings.run_jobs:
             runner.start()
         log.info(

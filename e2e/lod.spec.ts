@@ -112,9 +112,13 @@ test('levels of detail for a 1.3-million-triangle model', async ({ page, request
   await expect(page.getByTestId('selection-name')).toHaveText('Ball');
 
   // Opening it again: the stored coarsest level shows while the full file loads (held
-  // back here so the preview can be seen), then the full model takes over.
+  // back here so the preview can be seen), then the full model takes over in the same
+  // canvas (D67). Three times, to show the hand-over is reliable.
+  await page.addInitScript(() => {
+    (window as unknown as { __ai3dViewerProbe: object }).__ai3dViewerProbe = { views: {} };
+  });
   let release: () => void = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
+  let held: Promise<void> = Promise.resolve();
   await page.route(`**/api/v1/model-versions/${version.id}/file`, async (route) => {
     await held;
     await route.continue();
@@ -124,19 +128,158 @@ test('levels of detail for a 1.3-million-triangle model', async ({ page, request
     const match = /\/lod\/(\d+)\/file/.exec(r.url());
     if (match) levelFiles.push(match[1]!);
   });
-  await page.reload();
   const preview = page.getByRole('img', { name: /Simplified preview of .*version 2/ });
-  await expect(preview).toBeVisible({ timeout: 60_000 });
-  await expect(
-    page.getByText(/Simplified preview \(81,\d{3} of 1,310,720 triangles\)/),
-  ).toBeVisible();
+  const geometries: number[] = [];
+  for (let round = 0; round < 3; round += 1) {
+    held = new Promise<void>((resolve) => (release = resolve));
+    levelFiles.length = 0;
+    await page.reload();
+    await expect(preview).toBeVisible({ timeout: 60_000 });
+    await expect(
+      page.getByText(/Simplified preview \(81,\d{3} of 1,310,720 triangles\)/),
+    ).toBeVisible();
+    await settle(page);
+    expect(difference(coarse, await preview.screenshot())).toBeLessThan(0.05);
+    // Only the small coarsest level has been fetched: the finer ones would take
+    // bandwidth from the full file on a slow connection, so they come after it.
+    expect(levelFiles).toEqual([String(info.levels.length)]);
+
+    // Watch the hand-over: the canvas element, context losses, and every frame drawn
+    // (the pixel at the centre, which is on the model, and one in a corner).
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        contextLosses: number;
+        drawn: { centre: number[]; corner: number[] }[];
+        __ai3dViewerProbe: { views: Record<string, { get: () => { gl: unknown } }> };
+      };
+      const element = document.querySelector('canvas')!;
+      element.dataset.e2eCanvas = 'preview';
+      w.contextLosses = 0;
+      element.addEventListener('webglcontextlost', () => (w.contextLosses += 1));
+      w.drawn = [];
+      const gl = Object.values(w.__ai3dViewerProbe.views)[0]!.get().gl as {
+        render: (scene: unknown, camera: unknown) => void;
+        getContext: () => WebGL2RenderingContext;
+      };
+      const render = gl.render.bind(gl);
+      gl.render = (scene, camera) => {
+        render(scene, camera);
+        const context = gl.getContext();
+        const read = (x: number, y: number) => {
+          const pixel = new Uint8Array(4);
+          context.readPixels(x, y, 1, 1, context.RGBA, context.UNSIGNED_BYTE, pixel);
+          return [...pixel];
+        };
+        const width = context.drawingBufferWidth;
+        const height = context.drawingBufferHeight;
+        w.drawn.push({ centre: read(width >> 1, height >> 1), corner: read(2, height - 3) });
+      };
+    });
+    // Turn the camera during the preview; it stays turned when the full model arrives.
+    const previewBox = (await preview.boundingBox())!;
+    const [px, py] = [previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2];
+    await page.mouse.move(px, py);
+    await page.mouse.down();
+    await page.mouse.move(px + 160, py + 40, { steps: 8 });
+    await page.mouse.up();
+    await settle(page);
+    const turned = await preview.screenshot();
+    expect(difference(coarse, turned)).toBeGreaterThan(0.01); // the camera did move
+    const handOver = Date.now();
+    release();
+    await expect(canvas).toBeVisible({ timeout: 60_000 });
+    await expect(preview).toHaveCount(0);
+    await expect.poll(() => [...levelFiles].sort()).toEqual(['1', '2']);
+    await settle(page);
+    const seen = await page.evaluate(() => {
+      const w = window as unknown as {
+        contextLosses: number;
+        drawn: { centre: number[]; corner: number[] }[];
+      };
+      return {
+        sameCanvas: document.querySelectorAll('canvas[data-e2e-canvas="preview"]').length,
+        canvases: document.querySelectorAll('canvas').length,
+        losses: w.contextLosses,
+        frames: w.drawn.length,
+        // A frame without the model: nothing drawn at the centre, or the centre the
+        // same as the background in the corner.
+        empty: w.drawn.filter(
+          ({ centre, corner }) =>
+            centre[3] === 0 || centre.every((v, i) => Math.abs(v - corner[i]!) < 8),
+        ).length,
+      };
+    });
+    testInfo.annotations.push({
+      type: `hand-over ${round + 1}`,
+      description: JSON.stringify({ ...seen, ms: Date.now() - handOver }),
+    });
+    expect(seen).toMatchObject({ sameCanvas: 1, canvases: 1, losses: 0, empty: 0 });
+    expect(seen.frames).toBeGreaterThan(0);
+    const swapped = difference(turned, await canvas.screenshot());
+    testInfo.annotations.push({
+      type: `pixels changed, turned preview vs full (${round + 1})`,
+      description: `${swapped}`,
+    });
+    expect(swapped).toBeLessThan(0.05);
+    geometries.push(
+      await page.evaluate(
+        () =>
+          Object.values(
+            (
+              window as unknown as {
+                __ai3dViewerProbe: {
+                  views: Record<
+                    string,
+                    { get: () => { gl: { info: { memory: { geometries: number } } } } }
+                  >;
+                };
+              }
+            ).__ai3dViewerProbe.views,
+          )[0]!.get().gl.info.memory.geometries,
+      ),
+    );
+  }
+  // The same GPU geometry each time: nothing kept from earlier rounds or duplicated.
+  testInfo.annotations.push({
+    type: 'GPU geometries after each hand-over',
+    description: `${geometries}`,
+  });
+  expect(new Set(geometries).size).toBe(1);
+
+  // After the hand-over: every level still draws (none was freed with the preview),
+  // and picking, measuring and the section plane work on the full model.
+  await page.keyboard.press('f');
   await settle(page);
-  expect(difference(coarse, await preview.screenshot())).toBeLessThan(0.05);
-  // Only the small coarsest level has been fetched: the finer ones would take
-  // bandwidth from the full file on a slow connection, so they come after it.
-  expect(levelFiles).toEqual([String(info.levels.length)]);
-  release();
-  await expect(canvas).toBeVisible({ timeout: 60_000 });
-  await expect(preview).toHaveCount(0);
-  await expect.poll(() => [...levelFiles].sort()).toEqual(['1', '2']);
+  const framed = await canvas.screenshot();
+  for (const level of ['0', '1', '2']) {
+    await detail.selectOption(level);
+    await settle(page);
+    expect(difference(framed, await canvas.screenshot())).toBeLessThan(0.05);
+  }
+  await detail.selectOption('auto');
+  const after = (await canvas.boundingBox())!;
+  await canvas.click({ position: { x: after.width / 2, y: after.height / 2 } });
+  await expect(page.getByTestId('selection-name')).toHaveText('Ball');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('m');
+  await expect(page.getByLabel('Measurement')).toBeVisible();
+  const [mx, my] = [after.x + after.width / 2, after.y + after.height / 2];
+  await page.mouse.click(mx - 40, my);
+  await expect(page.getByText('Click a second point.')).toBeVisible();
+  await page.mouse.click(mx + 40, my + 20);
+  const distance = page.getByTestId('measured-distance');
+  await expect(distance).toHaveText(/^\d+(\.\d+)? units$/);
+  const value = Number((await distance.textContent())!.split(' ')[0]);
+  expect(value).toBeGreaterThan(0.05);
+  expect(value).toBeLessThan(1.0); // within the 1-unit-wide ball
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('m');
+  await page.getByRole('button', { name: 'Section' }).click();
+  await expect(page.getByLabel('Section view')).toBeVisible();
+  await settle(page);
+  expect(difference(framed, await canvas.screenshot())).toBeGreaterThan(0.05); // cut open
+  await page.getByRole('button', { name: 'Section' }).click();
+  await expect(page.getByLabel('Section view')).toHaveCount(0);
+  await settle(page);
+  expect(difference(framed, await canvas.screenshot())).toBeLessThan(0.05);
 });

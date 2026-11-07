@@ -469,7 +469,7 @@ class EdgeUse:
     winding_consistent: bool
 
 
-def _edge_use(faces: np.ndarray, vertex_count: int) -> EdgeUse:
+def edge_use(faces: np.ndarray, vertex_count: int) -> EdgeUse:
     """How many triangles use each edge, and whether shared edges are wound oppositely.
 
     Same definitions as trimesh's ``is_watertight`` / ``is_winding_consistent``, from one
@@ -498,7 +498,7 @@ def _edge_use(faces: np.ndarray, vertex_count: int) -> EdgeUse:
     )
 
 
-def _signed_volume(vertices: np.ndarray, faces: np.ndarray) -> float:
+def signed_volume(vertices: np.ndarray, faces: np.ndarray) -> float:
     """Enclosed volume (negative when the surface faces inwards): the sum of the signed
     tetrahedra from the origin, a sixth of v0 · (v1 × v2) per triangle."""
     total = 0.0
@@ -708,9 +708,9 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
     merged_faces = np.asarray(shape.faces)
     components, largest_share = _components(shape)
     del shape  # its caches (face adjacency) are not needed below
-    edges = _edge_use(merged_faces, len(merged_vertices))
+    edges = edge_use(merged_faces, len(merged_vertices))
     duplicate_faces, _ = duplicate_face_count(merged_faces, len(merged_vertices))
-    volume = _signed_volume(merged_vertices, merged_faces) if edges.watertight else 0.0
+    volume = signed_volume(merged_vertices, merged_faces) if edges.watertight else 0.0
     metrics: dict[str, Any] = {
         "mesh_count": mesh_count,
         "vertex_count": vertex_count,

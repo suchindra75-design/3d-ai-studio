@@ -39,7 +39,10 @@ test('one real photo becomes a 3D model on this computer', async ({ page, reques
 
   await page.goto(`/projects/${project.id}`);
   await page.getByLabel('Processing', { exact: true }).selectOption({ label: 'Local' });
-  await expect(page.getByText('Local AI (TripoSR)').first()).toBeVisible();
+  // The plan names the engine (the provider list also has it, as a hidden option).
+  await expect(
+    page.getByText('Local AI (TripoSR)').filter({ visible: true }).first(),
+  ).toBeVisible();
   await expect(page.getByText('Estimated cost: Free')).toBeVisible();
   // Nothing leaves the computer, so there is nothing to consent to.
   await expect(page.getByRole('checkbox', { name: /Send 1 photo/ })).toHaveCount(0);

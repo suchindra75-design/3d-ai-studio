@@ -18,7 +18,7 @@ original order, and the result is applied back to the original faces.
 
 import logging
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,7 +30,12 @@ from PIL import Image
 
 from ai3d.models.enums import QualityMode
 from ai3d.processing import quads
-from ai3d.processing.mesh import duplicate_face_count, load_model_scene
+from ai3d.processing.mesh import (
+    duplicate_face_count,
+    edge_use,
+    load_model_scene,
+    signed_volume,
+)
 from ai3d_engine.blender import (
     BlenderFailedError,
     BlenderNotFoundError,
@@ -727,16 +732,72 @@ SmoothingMethod = Literal["sharp", "taubin"]
 # cube, a cylinder, a sphere): 0.2 leaves noise, 0.5 starts rounding edges after
 # many passes (docs/BENCHMARKS.md).
 SHARP_NORMAL_SIGMA = 0.35
-# Pairs of faces processed at a time when weighting (bounds temporary memory).
-_PAIR_CHUNK = 2_000_000
+# Faces handled at a time: bounds the temporary arrays without changing the result
+# (the same sums are formed, in pieces). Neighbour pairs are about 13 per face.
+_FACE_CHUNK = 200_000
+_VERTEX_CHUNK = 1_000_000
 
 
 def _face_normals(vertices: np.ndarray, faces: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    corners = vertices[faces]
-    cross = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
-    double_area = np.linalg.norm(cross, axis=1)
-    normals = cross / np.maximum(double_area, 1e-30)[:, None]
-    return normals, double_area / 2
+    normals = np.empty((len(faces), 3))
+    area = np.empty(len(faces))
+    for start in range(0, len(faces), _VERTEX_CHUNK):
+        corners = vertices[faces[start : start + _VERTEX_CHUNK]]
+        cross = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+        double_area = np.linalg.norm(cross, axis=1)
+        normals[start : start + _VERTEX_CHUNK] = cross / np.maximum(double_area, 1e-30)[:, None]
+        area[start : start + _VERTEX_CHUNK] = double_area / 2
+    return normals, area
+
+
+def _face_neighbours(faces: np.ndarray, vertex_count: int) -> tuple[np.ndarray, np.ndarray]:
+    """For each face, the faces sharing a vertex with it (itself included), as compressed
+    rows: face ``f``'s neighbours are ``indices[indptr[f]:indptr[f + 1]]``.
+
+    Built a block of faces at a time into one buffer sized for the most there could be
+    (the faces around each corner); only the part written is ever touched, so the
+    rest takes no memory."""
+    from scipy import sparse  # noqa: PLC0415 - only needed here
+
+    face_count = len(faces)
+    incidence = sparse.csr_matrix(
+        (
+            np.ones(face_count * 3, dtype=np.float32),
+            faces.ravel().astype(np.int32),
+            np.arange(0, face_count * 3 + 1, 3, dtype=np.int64),
+        ),
+        shape=(face_count, vertex_count),
+    )
+    star = incidence.T.tocsr()  # vertex -> faces around it
+    valence = np.diff(star.indptr)
+    most = sum(
+        int(valence[faces[start : start + _VERTEX_CHUNK]].sum())
+        for start in range(0, face_count, _VERTEX_CHUNK)
+    )
+    indices = np.empty(most, dtype=np.int32)
+    indptr = np.zeros(face_count + 1, dtype=np.int64)
+    used = 0
+    for start in range(0, face_count, _FACE_CHUNK):
+        end = min(start + _FACE_CHUNK, face_count)
+        block = incidence[start:end] @ star
+        indices[used : used + block.nnz] = block.indices
+        indptr[start + 1 : end + 1] = used + block.indptr[1:]
+        used += block.nnz
+    return indptr, indices[:used]
+
+
+def _pair_blocks(
+    indptr: np.ndarray, indices: np.ndarray
+) -> Iterator[tuple[int, int, np.ndarray, np.ndarray, slice]]:
+    """Each block of faces: its range, how many neighbours each of its faces has, the
+    neighbours, and where its pairs are in ``indices``. A face's own values for all
+    its pairs are ``np.repeat(values[start:end], counts, axis=0)``: a sequential copy,
+    several times faster than indexing them face by face (profiled)."""
+    face_count = len(indptr) - 1
+    for start in range(0, face_count, _FACE_CHUNK):
+        end = min(start + _FACE_CHUNK, face_count)
+        span = slice(int(indptr[start]), int(indptr[end]))
+        yield start, end, np.diff(indptr[start : end + 1]), indices[span], span
 
 
 def _sharp_smooth(vertices: np.ndarray, faces: np.ndarray, passes: int) -> np.ndarray:
@@ -746,60 +807,65 @@ def _sharp_smooth(vertices: np.ndarray, faces: np.ndarray, passes: int) -> np.nd
     vertex with it: near faces count more, and faces whose normal differs a lot
     (the other side of an edge) hardly at all. The vertices are then moved to fit
     the filtered normals (Sun et al. 2007). Noise goes; edges and corners stay.
+
+    Memory (D66): the neighbour pairs are kept once, as compressed rows (4 bytes
+    each) with their fixed spatial weight (4 bytes), and every step runs a block of
+    faces at a time; about 2.2 GB for 10 million triangles instead of 6.3 GB.
     """
     from scipy import sparse  # noqa: PLC0415 - only needed here
 
     count = len(vertices)
     face_count = len(faces)
-    incidence = sparse.csr_matrix(
-        (
-            np.ones(face_count * 3, dtype=np.float32),
-            (np.repeat(np.arange(face_count, dtype=np.int32), 3), faces.ravel().astype(np.int32)),
-        ),
-        shape=(face_count, count),
-    )
-    neighbours = (incidence @ incidence.T).tocoo()
-    del incidence
-    rows = neighbours.row.astype(np.int32)
-    cols = neighbours.col.astype(np.int32)
-    del neighbours
+    indptr, indices = _face_neighbours(faces, count)
     normals, area = _face_normals(vertices, faces)
-    centres = vertices[faces].mean(axis=1)
-    spatial = np.empty(len(rows), dtype=np.float64)
+    centres = np.empty((face_count, 3))
+    for start in range(0, face_count, _VERTEX_CHUNK):
+        centres[start : start + _VERTEX_CHUNK] = vertices[
+            faces[start : start + _VERTEX_CHUNK]
+        ].mean(axis=1)
+
+    # The mean gap between neighbouring face centres sets the spatial width.
     gaps = 0.0
-    for start in range(0, len(rows), _PAIR_CHUNK):
-        r, c = rows[start : start + _PAIR_CHUNK], cols[start : start + _PAIR_CHUNK]
-        distance = np.linalg.norm(centres[r] - centres[c], axis=1)
-        spatial[start : start + _PAIR_CHUNK] = distance
-        gaps += float(distance.sum())
-    sigma = gaps / max(len(rows) - face_count, 1) or 1.0  # mean gap between neighbours
-    for start in range(0, len(rows), _PAIR_CHUNK):
-        d = spatial[start : start + _PAIR_CHUNK]
-        spatial[start : start + _PAIR_CHUNK] = area[cols[start : start + _PAIR_CHUNK]] * np.exp(
-            -(d * d) / (2 * sigma * sigma)
-        )
-    weights = np.empty_like(spatial)
+    for start, end, counts, cols, _ in _pair_blocks(indptr, indices):
+        own = np.repeat(centres[start:end], counts, axis=0)
+        gaps += float(np.linalg.norm(own - centres[cols], axis=1).sum())
+    sigma = gaps / max(len(indices) - face_count, 1) or 1.0
+    spatial = np.empty(len(indices), dtype=np.float32)
+    for start, end, counts, cols, span in _pair_blocks(indptr, indices):
+        own = np.repeat(centres[start:end], counts, axis=0)
+        distance = np.linalg.norm(own - centres[cols], axis=1)
+        spatial[span] = area[cols] * np.exp(-(distance * distance) / (2 * sigma * sigma))
+    del centres, area
+    filtered = np.empty_like(normals)
     for _ in range(passes):
-        for start in range(0, len(rows), _PAIR_CHUNK):
-            r, c = rows[start : start + _PAIR_CHUNK], cols[start : start + _PAIR_CHUNK]
-            difference = 2.0 - 2.0 * np.einsum("ij,ij->i", normals[r], normals[c])
-            weights[start : start + _PAIR_CHUNK] = spatial[start : start + _PAIR_CHUNK] * np.exp(
-                -difference / (2 * SHARP_NORMAL_SIGMA**2)
+        for start, end, counts, cols, span in _pair_blocks(indptr, indices):
+            own = np.repeat(normals[start:end], counts, axis=0)
+            difference = 2.0 - 2.0 * np.einsum("ij,ij->i", own, normals[cols])
+            weights = spatial[span] * np.exp(-difference / (2 * SHARP_NORMAL_SIGMA**2))
+            block = sparse.csr_matrix(
+                (weights, cols, indptr[start : end + 1] - span.start),
+                shape=(end - start, face_count),
             )
-        filtered = sparse.csr_matrix((weights, (rows, cols)), shape=(face_count, face_count))
-        normals = filtered @ normals
+            filtered[start:end] = block @ normals
+        normals, filtered = filtered, normals
         normals /= np.maximum(np.linalg.norm(normals, axis=1), 1e-30)[:, None]
-    del rows, cols, spatial, weights
-    moved = vertices.astype(np.float64).copy()
+    del indices, indptr, spatial, filtered
+    moved = vertices.astype(np.float64)  # a copy
     valence = np.maximum(np.bincount(faces.ravel(), minlength=count), 1).astype(np.float64)
+    step = np.empty_like(moved)
     for _ in range(passes + 10):
-        corners = moved[faces]
-        offset = np.einsum("fj,fkj->fk", normals, corners.mean(axis=1)[:, None, :] - corners)
-        step = np.zeros_like(moved)
-        for k in range(3):
-            push = normals * offset[:, k : k + 1]
+        step.fill(0.0)
+        for start in range(0, face_count, _VERTEX_CHUNK):
+            block_faces = faces[start : start + _VERTEX_CHUNK]
+            block_normals = normals[start : start + _VERTEX_CHUNK]
+            # How far each corner is off its face's plane through the centre:
+            # n·(mean of corners - corner) = mean of (n·corner) - n·corner.
+            along = np.einsum("fkj,fj->fk", moved[block_faces], block_normals)
+            offset = along.mean(axis=1, keepdims=True) - along
+            corner_ids = block_faces.ravel()  # each face's three corners in turn
             for axis in range(3):
-                step[:, axis] += np.bincount(faces[:, k], weights=push[:, axis], minlength=count)
+                push = (block_normals[:, axis : axis + 1] * offset).ravel()
+                step[:, axis] += np.bincount(corner_ids, weights=push, minlength=count)
         moved += step / valence[:, None]
     return moved
 
@@ -807,10 +873,16 @@ def _sharp_smooth(vertices: np.ndarray, faces: np.ndarray, passes: int) -> np.nd
 # Scene metadata key: quad pairs from retopology ({geometry name: (P, 2) face indices}).
 QUAD_PAIRS = "quad_pairs"
 
-# Working memory of feature-preserving smoothing per triangle, beyond the loaded
-# model (measured: 10 million triangles peaked 6.3 GB above loading; see
-# docs/BENCHMARKS.md), with some margin.
-SHARP_SMOOTHING_BYTES_PER_TRIANGLE = 700
+# Memory smoothing needs above the loaded model, measured (docs/BENCHMARKS.md,
+# 2026-11-07): keeping sharp edges 0.45 GB for 1 million triangles and 2.0 GB for 10
+# million; Taubin 0.27 and 1.7 GB. The estimate (smoothing_memory_bytes) is at
+# least 18% above every run (tests/test_memory_estimates.py).
+SMOOTHING_BASE_BYTES = 300 * 1024 * 1024
+SMOOTHING_BYTES_PER_TRIANGLE: dict[str, int] = {"sharp": 250, "taubin": 200}
+
+
+def smoothing_memory_bytes(triangles: int, method: SmoothingMethod) -> int:
+    return SMOOTHING_BASE_BYTES + triangles * SMOOTHING_BYTES_PER_TRIANGLE[method]
 
 
 def smooth(
@@ -832,16 +904,19 @@ def smooth(
     title = "Smoothing"
     if iterations <= 0:
         return Step("smoothing", title, "skipped", "Not requested.")
-    if method == "sharp" and available_bytes is not None:
-        need = _face_count(scene) * SHARP_SMOOTHING_BYTES_PER_TRIANGLE
+    if available_bytes is not None:
+        # Refused, never swapped for the other method: the user chose this one.
+        triangles = _face_count(scene)
+        need = smoothing_memory_bytes(triangles, method)
         if need > available_bytes:
+            what = "Keeping sharp edges" if method == "sharp" else "Rounding them off (Taubin)"
             return Step(
                 "smoothing",
                 title,
                 "skipped",
-                f"Keeping sharp edges on {_face_count(scene):,} triangles needs about "
-                f"{need / 1024**3:.1f} GB of memory and {available_bytes / 1024**3:.1f} GB is "
-                "free. Close other programs, or choose Round them off (much lighter).",
+                f"{what} on {triangles:,} triangles needs about {need / 1024**3:.1f} GB of "
+                f"memory and {available_bytes / 1024**3:.1f} GB is free. Close other programs "
+                "and try again; the model was not changed.",
             )
     diagonal = float(np.linalg.norm(scene.extents)) or 1.0
     moved: list[np.ndarray] = []
@@ -852,18 +927,21 @@ def smooth(
         shape = trimesh.Trimesh(
             vertices=mesh.vertices[unique], faces=inverse[mesh.faces], process=False
         )
-        closed = closed and shape.is_watertight
+        del unique
+        faces = np.asarray(shape.faces)
+        # Watertightness and volume from the low-memory checks (D61), not trimesh's
+        # cached edge and mass structures (several GB on 10 million triangles).
+        closed = closed and edge_use(faces, len(shape.vertices)).watertight
         if closed:
-            volume_before += abs(float(shape.volume))
+            volume_before += abs(signed_volume(np.asarray(shape.vertices), faces))
         if method == "taubin":
             trimesh.smoothing.filter_taubin(shape, lamb=0.5, nu=0.53, iterations=iterations)  # type: ignore[no-untyped-call]
         else:
-            shape.vertices = _sharp_smooth(
-                np.asarray(shape.vertices), np.asarray(shape.faces), iterations
-            )
+            shape.vertices = _sharp_smooth(np.asarray(shape.vertices), faces, iterations)
         if closed:
-            volume_after += abs(float(shape.volume))
+            volume_after += abs(signed_volume(np.asarray(shape.vertices), faces))
         new = np.asarray(shape.vertices)[inverse]
+        del shape, faces
         moved.append(np.linalg.norm(new - mesh.vertices, axis=1) / diagonal)
         mesh.vertices = new
     if not moved:

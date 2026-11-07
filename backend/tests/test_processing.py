@@ -429,3 +429,20 @@ def test_requested_steps_that_did_not_apply_are_reported() -> None:
         Step("scale", "Real-world scale", "applied", "Y = 100 mm."),
     ]
     assert not_applied(steps) == ["Retopology: Not kept: too far.", "Upscaling: Not installed."]
+
+
+@pytest.mark.parametrize("method", ["sharp", "taubin"])
+def test_smoothing_without_enough_free_memory_is_refused_not_switched(method: str) -> None:
+    """Too little free memory: the chosen method is not run (nor swapped for the other
+    one); the step says what it needs, and the model is unchanged."""
+    _, noisy = _noisy_cube()
+    scene = _scene(noisy)
+    (mesh,) = scene.geometry.values()
+    before = mesh.vertices.copy()
+    need = geometry.smoothing_memory_bytes(len(mesh.faces), method)
+    step = geometry.smooth(scene, 10, method, available_bytes=need - 1)
+    assert step.status == "skipped"
+    assert f"on {len(mesh.faces):,} triangles needs about" in step.detail
+    assert "the model was not changed" in step.detail
+    assert np.array_equal(mesh.vertices, before)
+    assert geometry.smooth(scene, 10, method, available_bytes=need).status == "applied"

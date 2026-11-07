@@ -219,6 +219,10 @@ def _base_image(mesh: trimesh.Trimesh) -> Image.Image | None:
 # -- writers ---------------------------------------------------------------------------
 
 
+# Characters of a large text file encoded and written at a time.
+_TEXT_PIECE = 16 * 1024 * 1024
+
+
 def _zip(files: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -444,10 +448,21 @@ def _write_fbx(
     with tempfile.TemporaryDirectory(prefix="fbx-", dir=dest.parent) as tmp:
         source = Path(tmp) / "source.glb"
         source.write_bytes(scene.export(file_type="glb"))  # type: ignore[no-untyped-call]
-        request = {"input": str(source), "output": str(dest.resolve())}
-        if quad_pairs:
+        centres = quads.pair_centres(scene, quad_pairs) if quad_pairs else None
+        return write_fbx_from_glb(source, dest, quad_centres=centres)
+
+
+def write_fbx_from_glb(
+    source: Path, dest: Path, *, quad_centres: np.ndarray | None = None
+) -> list[str]:
+    """FBX straight from a GLB file (Blender imports it): the caller need not hold the
+    model in memory while Blender works. ``quad_centres`` (P, 2, 3): the two triangle
+    centres of each quad from retopology, which Blender joins (D60)."""
+    with tempfile.TemporaryDirectory(prefix="fbx-", dir=dest.parent) as tmp:
+        request = {"input": str(source.resolve()), "output": str(dest.resolve())}
+        if quad_centres is not None and len(quad_centres):
             centres = Path(tmp) / "quad-centres.npy"
-            np.save(centres, quads.pair_centres(scene, quad_pairs))
+            np.save(centres, quad_centres)
             request["quad_centres"] = str(centres)
         try:
             result = run_blender(
@@ -482,7 +497,16 @@ def _write_obj(
     joined = 0
     if quad_pairs:
         text, joined = quads.obj_with_quads(text, scene, quad_pairs)
-    dest.write_bytes(_zip({"model.obj": text.encode(), **extra}))
+    # Written into the zip a piece at a time: the text is not also held encoded and
+    # compressed in memory (each is about as large as the text on big models).
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in sorted([*extra, "model.obj"]):
+            if name != "model.obj":
+                archive.writestr(name, extra[name])
+                continue
+            with archive.open(name, "w", force_zip64=True) as entry:
+                for start in range(0, len(text), _TEXT_PIECE):
+                    entry.write(text[start : start + _TEXT_PIECE].encode())
     return [_quads_note(joined)] if joined else []
 
 
@@ -614,10 +638,14 @@ def read_back(path: Path, fmt: ExportFormat) -> Facts:
         if fmt == ExportFormat.GLTF:
             scene = _read_zip_scene(path, "model.gltf")
         elif fmt == ExportFormat.OBJ:
+            # Quads counted line by line, before the model is re-opened.
+            with (
+                zipfile.ZipFile(path) as archive,
+                archive.open("model.obj") as entry,
+                io.TextIOWrapper(entry, encoding="utf-8", errors="replace") as lines,
+            ):
+                quad_count, _ = quads.count_obj_faces(lines)
             scene = _read_zip_scene(path, "model.obj")
-            with zipfile.ZipFile(path) as archive:
-                obj_text = archive.read("model.obj").decode("utf-8", "replace")
-            quad_count, _ = quads.count_obj_faces(obj_text)
         else:
             file_type = {"glb": "glb", "stl": "stl", "3mf": "3mf"}[fmt.value]
             scene = _as_scene(trimesh.load(path, file_type=file_type, force="scene", process=False))

@@ -2,16 +2,23 @@
 
 import importlib.util
 import io
+import subprocess
+import sys
+import threading
+import uuid
 import zipfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 import trimesh
 from fastapi.testclient import TestClient
 
-from ai3d.models.enums import ExportFormat
+from ai3d.models import ModelVersion
+from ai3d.models.enums import ExportFormat, ExportStatus
 from ai3d.processing import exporters
+from ai3d.storage.keys import model_asset_key
 from ai3d.workers import JobRunner
 from ai3d_engine.blender import check_blender
 from tests.test_model_versions import _generated_model, _save, _scaled_glb
@@ -242,6 +249,126 @@ def test_failed_enhance_can_be_retried(
     assert new["source_model_version_id"] == job["source_model_version_id"]
     runner.run_until_idle()
     assert client.get(f"/api/v1/jobs/{new['id']}").json()["status"] == "succeeded"
+
+
+class _Killed(BaseException):
+    """Stands in for the process being killed part-way (nothing after it runs)."""
+
+
+def test_an_interrupted_export_is_marked_failed_and_cleaned_up_at_the_next_start(
+    client: TestClient, model: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai3d.models import Export  # noqa: PLC0415
+    from ai3d.services import exports as export_service  # noqa: PLC0415
+
+    state = client.app.state  # type: ignore[attr-defined]
+    version_id = model["current_version"]["id"]
+    original = client.get(model["current_version"]["file_url"]).content
+    written: dict[str, Path] = {}
+
+    def dies_while_writing(scene: object, fmt: object, dest: Path, **_: object) -> list[str]:
+        dest.write_bytes(b"half a file")
+        written["dest"] = dest
+        raise _Killed
+
+    # A killed process cleans nothing up: no "finally", so the temporary folder stays.
+    with monkeypatch.context() as patch:
+        patch.setattr(exporters, "write", dies_while_writing)
+        patch.setattr(export_service.shutil, "rmtree", lambda *_a, **_k: None)
+        with state.db.session() as db, pytest.raises(_Killed):
+            export_service.create_export(
+                db, state.storage, state.settings, uuid.UUID(version_id), ExportFormat.STL
+            )
+    (left,) = client.get(f"/api/v1/model-versions/{version_id}/exports").json()["items"]
+    assert left["status"] == "running"
+    workdir = written["dest"].parent
+    assert workdir.is_dir()
+    # It had also stored the file without recording it.
+    with state.db.session() as db:
+        export = db.get(Export, uuid.UUID(left["id"]))
+        version = db.get(ModelVersion, export.model_version_id)
+        key = model_asset_key(
+            export.project_id, version.model_id, version.version_number, f"exports/{export.id}.stl"
+        )
+        state.storage.save_bytes(key, b"stored but not recorded")
+        # The process that wrote it is gone (a finished child process's id).
+        gone = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
+                              capture_output=True, text=True, check=True)  # fmt: skip
+        export.options = {
+            **export.options,
+            "worker": {**export.options["worker"], "pid": int(gone.stdout), "started": 0},
+        }
+        db.commit()
+    # Another export, still being written by a live process, is left alone.
+    ok = client.post(f"/api/v1/model-versions/{version_id}/exports", json={"format": "stl"})
+    with state.db.session() as db:
+        busy = db.get(Export, uuid.UUID(ok.json()["id"]))
+        busy.status = ExportStatus.RUNNING
+        db.commit()
+
+        assert export_service.recover_interrupted(db, state.storage, state.settings) == 1
+    items = {
+        item["id"]: item
+        for item in client.get(f"/api/v1/model-versions/{version_id}/exports").json()["items"]
+    }
+    assert items[left["id"]]["status"] == "failed"
+    assert items[left["id"]]["error_message"] == export_service.INTERRUPTED_MESSAGE
+    assert items[ok.json()["id"]]["status"] == "running"
+    assert not workdir.exists()
+    assert not state.storage.exists(key)
+    assert client.get(model["current_version"]["file_url"]).content == original
+    again = client.post(f"/api/v1/model-versions/{version_id}/exports", json={"format": "stl"})
+    assert again.json()["status"] == "ready"
+
+
+def test_concurrent_exports_keep_their_own_temporary_files(
+    client: TestClient, model: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two exports written at the same time each work in their own folder, and the
+    start-up recovery run meanwhile (another backend process starting) touches
+    neither: both finish and are kept."""
+    from ai3d.services import exports as export_service  # noqa: PLC0415
+
+    state = client.app.state  # type: ignore[attr-defined]
+    version_id = uuid.UUID(model["current_version"]["id"])
+    both_writing = threading.Barrier(3, timeout=60)
+    folders: list[Path] = []
+    real_write = exporters.write
+
+    def write(scene: Any, fmt: ExportFormat, dest: Path, **kw: Any) -> list[str]:
+        notes = real_write(scene, fmt, dest, **kw)
+        folders.append(dest.parent)
+        both_writing.wait()  # both written, neither checked or cleaned up yet
+        both_writing.wait()  # until the recovery below has run
+        return notes
+
+    monkeypatch.setattr(exporters, "write", write)
+    results: dict[str, Any] = {}
+
+    def export(fmt: ExportFormat) -> None:
+        with state.db.session() as db:
+            done = export_service.create_export(db, state.storage, state.settings, version_id, fmt)
+            results[fmt.value] = (done.status, done.error_message)
+
+    threads = [
+        threading.Thread(target=export, args=(f,)) for f in (ExportFormat.STL, ExportFormat.OBJ)
+    ]
+    for thread in threads:
+        thread.start()
+    both_writing.wait()
+    assert len(set(folders)) == 2  # one folder each
+    assert all(folder.is_dir() for folder in folders)
+    with state.db.session() as db:
+        assert export_service.recover_interrupted(db, state.storage, state.settings) == 0
+    assert all(folder.is_dir() for folder in folders)  # neither touched
+    both_writing.wait()
+    for thread in threads:
+        thread.join(timeout=120)
+    assert results == {
+        "stl": (ExportStatus.READY, None),
+        "obj": (ExportStatus.READY, None),
+    }
+    assert not any(folder.exists() for folder in folders)  # each cleaned up its own
 
 
 def test_an_export_that_would_not_fit_in_memory_is_refused(
