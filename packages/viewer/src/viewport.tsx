@@ -23,6 +23,11 @@ export interface ViewRequest {
   preset: CameraPreset;
   /** Change it to re-apply the same preset. */
   nonce: number;
+  /**
+   * Frame this region (e.g. an inspection finding) instead of the whole model, looking
+   * from the current direction: the camera moves closer, it does not turn to a preset.
+   */
+  box?: THREE.Box3 | null;
 }
 
 /** Renders the view to a PNG at ``scale`` × its resolution (1 when omitted). */
@@ -387,6 +392,27 @@ function KeyLight({
   );
 }
 
+/** Moves the camera to frame ``box`` from the direction it is looking now. */
+function focusOn(
+  camera: THREE.PerspectiveCamera,
+  box: THREE.Box3,
+  controls: { target: THREE.Vector3; update: () => void } | null,
+) {
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const radius = Math.max(sphere.radius, 1e-4);
+  const distance = (radius / Math.sin(THREE.MathUtils.degToRad(camera.fov) / 2)) * 1.4;
+  const direction = camera.getWorldDirection(new THREE.Vector3());
+  camera.position.copy(sphere.center).addScaledVector(direction, -distance);
+  camera.near = Math.min(camera.near, distance / 100);
+  camera.updateProjectionMatrix();
+  if (controls) {
+    controls.target.copy(sphere.center);
+    controls.update();
+  } else {
+    camera.lookAt(sphere.center);
+  }
+}
+
 function Scene({
   model,
   revision,
@@ -437,6 +463,11 @@ function Scene({
   const frame = useEffectEvent(() => {
     const { camera, size } = get();
     if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    if (view.box && !view.box.isEmpty()) {
+      focusOn(camera, view.box, controls);
+      invalidate();
+      return;
+    }
     const framing = frameBox(measure(model), view.preset, camera.fov, size.width / size.height);
     camera.position.copy(framing.position);
     camera.near = framing.near;

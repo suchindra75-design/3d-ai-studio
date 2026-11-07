@@ -118,8 +118,11 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
   const [switchTo, setSwitchTo] = useState<ProviderSummary | null>(null);
   const [confirmSwitch, setConfirmSwitch] = useState(false);
   const retryKey = useRef(newIdempotencyKey());
-  const name =
-    job.kind === 'enhance'
+  // Repairs (D70) run as enhance jobs that do only the operations asked for.
+  const isRepair = job.kind === 'enhance' && job.provider_summary[0]?.startsWith('Repair:');
+  const name = isRepair
+    ? 'Repair (on this computer)'
+    : job.kind === 'enhance'
       ? 'Enhance (on this computer)'
       : (job.provider?.display_name ?? 'Unknown provider');
   const uploads = job.provider?.uploads_images ?? false;
@@ -143,7 +146,7 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-[13px] font-medium">
-            {name} · {qualityModeLabel[job.quality_mode]}
+            {isRepair ? name : `${name} · ${qualityModeLabel[job.quality_mode]}`}
           </span>
           <span className="text-xs text-subtle-foreground">
             {job.kind === 'enhance' || job.kind === 'retexture'

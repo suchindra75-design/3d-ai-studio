@@ -6,11 +6,13 @@ import type {
   RetextureRequest,
   ExportFormat,
   GenerationCreate,
+  InspectionRequest,
   JobRead,
   ModelUpdate,
   JobStatus,
   ProjectCreate,
   ProjectUpdate,
+  RepairRequest,
 } from '@ai3d/shared-types';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
@@ -519,5 +521,38 @@ export function useDeleteExport(versionId: string) {
   return useMutation({
     mutationFn: (exportId: string) => api.exports.delete(exportId),
     onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.exports(versionId) }),
+  });
+}
+
+/** The version's health report; polled while an inspection runs (D69). */
+export function useInspection(versionId: string) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['model-versions', versionId, 'inspection'] as const,
+    queryFn: () => api.inspection.get(versionId),
+    refetchInterval: (q) => (q.state.data?.status === 'running' ? 1000 : false),
+  });
+}
+
+export function useStartInspection(versionId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: InspectionRequest) => api.inspection.start(versionId, body),
+    onSuccess: (state) => client.setQueryData(['model-versions', versionId, 'inspection'], state),
+  });
+}
+
+/** Repairs (D70): a job that makes a new version; the source version is unchanged. */
+export function useRepair(projectId: string, modelId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ body, idempotencyKey }: { body: RepairRequest; idempotencyKey: string }) =>
+      api.repairs.create(modelId, body, idempotencyKey),
+    onSuccess: (job) => {
+      client.setQueryData(queryKeys.job(job.id), job);
+      void client.invalidateQueries({ queryKey: queryKeys.jobs(projectId) });
+    },
   });
 }

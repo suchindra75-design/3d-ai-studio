@@ -52,6 +52,11 @@ export function fakeApi(overrides: DeepPartial<ApiClient> = {}): ApiClient {
       get: vi.fn().mockResolvedValue({ status: 'not_needed', triangles: 0, levels: [] }),
       build: vi.fn(),
     },
+    inspection: {
+      get: vi.fn().mockResolvedValue({ status: 'missing' }),
+      start: vi.fn(),
+    },
+    repairs: { create: vi.fn() },
   };
   return {
     ...base,
@@ -65,6 +70,8 @@ export function fakeApi(overrides: DeepPartial<ApiClient> = {}): ApiClient {
     models: { ...base.models, ...overrides.models },
     exports: { ...base.exports, ...overrides.exports },
     lod: { ...base.lod, ...overrides.lod },
+    inspection: { ...base.inspection, ...overrides.inspection },
+    repairs: { ...base.repairs, ...overrides.repairs },
   } as unknown as ApiClient;
 }
 

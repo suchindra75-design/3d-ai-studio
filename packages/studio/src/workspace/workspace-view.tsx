@@ -16,14 +16,16 @@ import {
   type Command,
   type GizmoMode,
 } from '@ai3d/editor';
-import type { ModelRead, ModelVersionRead } from '@ai3d/shared-types';
+import type { FindingRead, ModelRead, ModelVersionRead } from '@ai3d/shared-types';
 import { Button, ConfirmDialog, Progress, Spinner, cn } from '@ai3d/ui';
 import {
   CAMERA_PRESETS,
   CameraLink,
   DEFAULT_VIEWPORT_OPTIONS,
   MeasureMarkers,
+  FindingOverlay,
   ProblemOverlay,
+  locationsBox,
   Viewport,
   buildHierarchy,
   findProblemEdges,
@@ -63,6 +65,7 @@ import { HierarchyPanel } from './hierarchy-panel';
 import { InspectorPanel } from './inspector-panel';
 import { useLevelsOfDetail } from './lod';
 import { useModelFile } from './model-file';
+import { InspectionPanel, SEVERITY_COLOUR } from './inspection-panel';
 import { QualityPanel } from './quality-panel';
 import { RetexturePanel } from './retexture-panel';
 import { scaleOf } from './scale';
@@ -178,6 +181,11 @@ function VersionWorkspace({
   const [link] = useState(() => new CameraLink());
   const [viewNotice, setViewNotice] = useState<string | null>(null);
   const [showProblems, setShowProblems] = useState(false);
+  // An inspection finding drawn on the model; only for the version it came from.
+  const [finding, setFinding] = useState<{ versionId: string; finding: FindingRead } | null>(null);
+  const shownFinding = finding?.versionId === version.id ? finding.finding : null;
+  const setShownFinding = (next: FindingRead | null) =>
+    setFinding(next ? { versionId: version.id, finding: next } : null);
   const capture = useRef<CaptureFunction | null>(null);
   const [screenshotScale, setScreenshotScale] = useState(2);
   const onCaptureReady = useCallback((fn: CaptureFunction) => {
@@ -280,6 +288,13 @@ function VersionWorkspace({
 
   function requestView(preset: CameraPreset) {
     setView((current) => ({ preset, nonce: current.nonce + 1 }));
+  }
+
+  /** Frame an inspection finding from the current direction (the camera does not turn). */
+  function locate(finding: FindingRead) {
+    const box = locationsBox(finding.locations);
+    if (box) setView((current) => ({ ...current, box, nonce: current.nonce + 1 }));
+    setShownFinding(finding);
   }
 
   function requestVersion(id: string) {
@@ -529,6 +544,12 @@ function VersionWorkspace({
                   label={`3D view of ${model.name}, version ${version.version_number}`}
                 >
                   {problems ? <ProblemOverlay edges={problems} /> : null}
+                  {shownFinding ? (
+                    <FindingOverlay
+                      locations={shownFinding.locations}
+                      color={SEVERITY_COLOUR[shownFinding.severity]}
+                    />
+                  ) : null}
                   {points.length > 0 ? (
                     <MeasureMarkers
                       points={points}
@@ -721,12 +742,23 @@ function VersionWorkspace({
                 />
               ) : null
             ) : tab === 'quality' ? (
-              <QualityPanel
-                version={version}
-                showProblems={showProblems}
-                onShowProblems={setShowProblems}
-                problems={problems}
-              />
+              <>
+                <QualityPanel
+                  version={version}
+                  showProblems={showProblems}
+                  onShowProblems={setShowProblems}
+                  problems={problems}
+                />
+                <InspectionPanel
+                  projectId={projectId}
+                  modelId={model.id}
+                  version={version}
+                  shownCode={shownFinding?.code ?? null}
+                  onShow={setShownFinding}
+                  onLocate={locate}
+                  onView={onView}
+                />
+              </>
             ) : tab === 'enhance' ? (
               <>
                 <EnhancePanel

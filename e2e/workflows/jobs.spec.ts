@@ -33,7 +33,12 @@ test('a provider error is shown and retrying the job succeeds', async ({ page })
   await projectWithPhoto(page, `Workflow error ${Date.now()}`, 21);
   await generate(page);
 
-  const jobs = page.getByRole('region', { name: 'Generations' }).getByRole('listitem');
+  // The job cards only (a failed job can list suggestions of its own).
+  const jobs = page
+    .getByRole('region', { name: 'Generations' })
+    .getByRole('list')
+    .first()
+    .locator(':scope > li');
   await expect(jobs.first().getByText('Running')).toBeVisible();
   await expect(jobs.first().getByText('Failed', { exact: true })).toBeVisible();
   await expect(jobs.first().getByRole('alert')).toHaveText('Mock provider simulated task_failed.');
@@ -59,7 +64,12 @@ test('a running job can be cancelled and then retried', async ({ page }) => {
   await projectWithPhoto(page, `Workflow cancel ${Date.now()}`, 22);
   await generate(page);
 
-  const jobs = page.getByRole('region', { name: 'Generations' }).getByRole('listitem');
+  // The job cards only (a failed job can list suggestions of its own).
+  const jobs = page
+    .getByRole('region', { name: 'Generations' })
+    .getByRole('list')
+    .first()
+    .locator(':scope > li');
   await expect(jobs.first().getByText('Running', { exact: true })).toBeVisible();
   await expect(
     jobs.first().getByRole('progressbar', { name: 'Generation progress' }),
