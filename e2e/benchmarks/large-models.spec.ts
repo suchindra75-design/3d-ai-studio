@@ -13,6 +13,9 @@ import { modelWithVersion } from '../fixtures';
 // frame, not how long the GPU takes to draw it (see BENCHMARKS.md).
 
 const models = (process.env.AI3D_BENCHMARK_GLBS ?? '').split(',').filter(Boolean);
+// Optional: limit the browser's download speed (megabits per second) to see the
+// preview and the full model arrive over a slow connection.
+const downloadMbps = Number(process.env.AI3D_BENCHMARK_DOWNLOAD_MBPS ?? 0);
 test.skip(models.length === 0, 'set AI3D_BENCHMARK_GLBS to benchmark models');
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -44,12 +47,28 @@ for (const path of models) {
     record.triangles = version.stats.triangle_count;
 
     started = Date.now();
-    const lod = await (
-      await request.post(`/api/v1/model-versions/${version.id}/lod`, { timeout: 30 * 60_000 })
-    ).json();
+    await request.post(`/api/v1/model-versions/${version.id}/lod`);
+    // Built in the background: poll until it is done.
+    let lod = await (await request.get(`/api/v1/model-versions/${version.id}/lod`)).json();
+    for (let i = 0; lod.status === 'building' && i < 1800; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      lod = await (await request.get(`/api/v1/model-versions/${version.id}/lod`)).json();
+    }
+    if (lod.status !== 'ready') console.log(`levels of detail: ${lod.status} ${lod.message ?? ''}`);
     record.lod_build_s = (Date.now() - started) / 1000;
     record.lod_levels = lod.levels.map((l: { triangles: number }) => l.triangles);
 
+    if (downloadMbps > 0) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Network.enable');
+      await cdp.send('Network.emulateNetworkConditions', {
+        offline: false,
+        latency: 40,
+        downloadThroughput: (downloadMbps * 1e6) / 8,
+        uploadThroughput: (downloadMbps * 1e6) / 8,
+      });
+      record.download_mbps = downloadMbps;
+    }
     started = Date.now();
     await page.goto(`/projects/${projectId}/models/${modelId}`);
     const preview = page.getByRole('img', { name: /Simplified preview of/ });
@@ -58,6 +77,29 @@ for (const path of models) {
     record.first_view_s = (Date.now() - started) / 1000;
     await expect(canvas).toBeVisible({ timeout: 20 * 60_000 });
     record.full_model_s = (Date.now() - started) / 1000;
+    // Responsiveness after loading: the longest main-thread tasks over the next 15 s
+    // (ms, and when each started, in s after the full model was shown). The finer
+    // levels load and the picking index is built (in idle-time slices) then.
+    record.long_tasks = await page.evaluate(
+      () =>
+        new Promise<{ ms: number; at_s: number }[]>((resolve) => {
+          const origin = performance.now();
+          const tasks: { ms: number; at_s: number }[] = [];
+          const observer = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+              tasks.push({
+                ms: Math.round(entry.duration),
+                at_s: Math.round((entry.startTime - origin) / 100) / 10,
+              });
+            }
+          });
+          observer.observe({ type: 'longtask', buffered: false });
+          setTimeout(() => {
+            observer.disconnect();
+            resolve(tasks.sort((a, b) => b.ms - a.ms).slice(0, 5));
+          }, 15_000);
+        }),
+    );
     const detail = page.getByRole('combobox', { name: 'Detail' });
     if (lod.levels.length) await expect(detail).toBeVisible({ timeout: 5 * 60_000 });
     await frames(page, 5);

@@ -1147,7 +1147,84 @@ benchmarks.
   triangles it asks for about 5.1 GB), and refuses with the numbers instead of
   running out.
   Rendering speed per level could not be measured validly with the method used
-  (frame times were the same for every level); that stays open.
+  (frame times were the same for every level); measured since with GPU timer
+  queries (next section).
+
+## Large models: performance, memory and reliability (2026-11-07)
+
+**Audit first.** Already there: levels of detail (D58), progressive preview,
+memory checks before the upload check and smoothing, a benchmark script and a
+loading benchmark. Missing or wrong: no valid rendering measurement; the
+benchmark page named the wrong GPU; the upload check peaked at 4.7 GB and
+levels at 6.6 GB on 10 million triangles; levels were built inside the request
+(minutes, and the server stopped answering meanwhile); a click on a large model
+tested every triangle (1.15 s on 10 million); a slow connection delayed the
+preview until every level had downloaded; the memory estimates counted
+triangles only.
+
+### Measured rendering ✅ (D63)
+- GPU time per frame with WebGL2 timer queries around the app's own render
+  call; CPU submission time, draw calls and triangles; 20 warm-up and 60
+  measured frames per level, shadows off and on, on both GPUs of the test Mac
+  (named from the app's own context). Results and method in
+  [BENCHMARKS.md](BENCHMARKS.md#rendering-e2ebenchmarksrenderingspects).
+- The first page's GPU claim was wrong (it was the Radeon, not the Intel GPU);
+  corrected there.
+
+### Less memory ✅ (D61, D62)
+- Upload check in stages, freeing each stage's data: 4.7 → 3.7 GB on 10 million
+  triangles, same metrics on every case compared.
+- Levels simplified in pieces of at most 2.5 million triangles: 6.6 → 3.6 GB, same
+  accuracy; 15 and 20 million triangles now build in 4.2 GB.
+- Estimates from the GLB header now count vertices and textured vertices: the
+  triangle-only ones were below the measured peak on 8 runs (soups, textured OBJ
+  exports). A test keeps every estimate above every measured run.
+
+### Reliability ✅ (D65)
+- Levels built in the background, one at a time, in a separate process: the
+  simplifier held Python's lock for seconds, which reset connections during
+  large builds. The server now answers within 0.5 s during a build (tested); a
+  failed build is reported, changes nothing, and is retried on the next open.
+- A level that would keep over 90% of the triangles is dropped (it would cost
+  memory and draw no faster).
+- Tested: an interrupted upload saves nothing and leaves no files; a check,
+  levels or an export that would not fit in free memory is refused with the
+  numbers and nothing recorded; a failed level build leaves the version's file
+  byte-for-byte the same. A browser crash cannot change stored data (the viewer
+  only reads; an upload counts only once complete); that follows from the above
+  and was not tested by killing a browser.
+- Model kinds at 1 and 5 million triangles (textured, vertex colours, soup,
+  parts, positions only) through import, check, levels and GLB/OBJ export;
+  15 and 20 million triangles through import, check and levels.
+
+### Viewer ✅ (D64)
+- Picking index: a click takes 2–5 ms instead of 0.1–1.15 s, same hit as
+  three.js; built after loading in idle time (the first click on the
+  Statuette: 2,215 → 9 ms).
+- No more half-second stalls after loading: the full model's bounding box was
+  recomputed each time another level arrived; it is now kept while the
+  positions are unchanged (longest task 547 → 95 ms on the Statuette).
+- On a slow connection the coarsest level loads first and the finer ones after
+  the full model (Statuette at 50 Mbit/s: preview 18.6 → 3.4 s).
+- Switching versions frees the previous one (GPU geometry and textures level;
+  heap within 5 MB on a production build).
+- Screenshots render all 10 million triangles of the Statuette in 270 ms (2×)
+  and 518 ms (4×); measuring and editing work on the full model.
+
+### Other hardware
+[HARDWARE_TESTING.md](HARDWARE_TESTING.md) has the steps and a status table:
+tested locally on the Intel Mac only, in CI on Linux without a GPU; Apple
+Silicon, Windows and Linux desktops not tested.
+
+### Not done
+- Feature-preserving smoothing still needs 8.4 GB on 10 million triangles.
+- Exports above 10 million triangles are estimated, not measured, and the
+  estimate refuses the 20M terrain on 16 GB.
+- Picking index for multi-material meshes (they use three.js's own picking).
+- Swapping the preview for the full model releases one WebGL context and
+  creates another (0.2–0.6 s on the development server); one shared canvas
+  would avoid it.
+- The 2026-11-07 runs were in Low Power Mode; no other machine measured.
 
 ## Roadmap after the capability audit (2026-11-04)
 
@@ -1213,7 +1290,7 @@ working and adds tests that use real tools and real data.
 
 Not planned: billing or subscriptions, public release work.
 
-## Known gaps carried forward (updated 2026-11-06)
+## Known gaps carried forward (updated 2026-11-07)
 
 | Gap | Status |
 |---|---|
@@ -1228,6 +1305,7 @@ Not planned: billing or subscriptions, public release work.
 | Main JS chunk 601 KB (186 KB gzipped): React 33%, React Router 20%, TanStack Query 8%, app code 8%; 3D code (1.2 MB) loads only in the workspace | Measured 2026-11-05; accepted |
 | Vertex-level editing, KTX2 textures | Later |
 | Light theme | Not planned |
+| Large-model performance measured on one Intel Mac only (in Low Power Mode); Apple Silicon, Windows and Linux desktops not measured | Steps in HARDWARE_TESTING.md |
 
 Resolved since the first list: CI runs on every push to GitHub; its six jobs,
 including the browser tests with real WebGL in headless Chromium, passed
