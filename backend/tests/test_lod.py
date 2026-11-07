@@ -1,6 +1,7 @@
 """Levels of detail for viewing large models (D58)."""
 
 import io
+import time
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from PIL import Image
 
 from ai3d.processing import lod
 from ai3d.processing.mesh import load_model_scene
+from ai3d.services import lod as lod_service
 from ai3d.workers import JobRunner
 from tests.test_model_versions import MakeImageProject, _generated_model, _save
 
@@ -61,6 +63,16 @@ def _reopen(data: bytes, tmp_path: Path) -> trimesh.Scene:
     path = tmp_path / "level.glb"
     path.write_bytes(data)
     return load_model_scene(path)
+
+
+def _build(client: TestClient, url: str) -> dict[str, Any]:
+    """Start building (POST) and wait for the background build to finish."""
+    state: dict[str, Any] = client.post(url).json()
+    deadline = time.monotonic() + 120
+    while state["status"] == "building" and time.monotonic() < deadline:
+        time.sleep(0.05)
+        state = client.get(url).json()
+    return state
 
 
 def test_level_targets() -> None:
@@ -135,14 +147,16 @@ def test_lod_api_builds_once_and_serves_the_levels(
     # The generated model is small: nothing to build.
     small = client.get(f"/api/v1/model-versions/{first['id']}/lod").json()
     assert small["status"] == "not_needed"
-    assert client.post(f"/api/v1/model-versions/{first['id']}/lod").json()["levels"] == []
+    assert _build(client, f"/api/v1/model-versions/{first['id']}/lod")["levels"] == []
 
     saved = _save(client, model["id"], first["id"], _glb(_model()))
     assert saved.status_code == 201, saved.text
     version = saved.json()
     url = f"/api/v1/model-versions/{version['id']}/lod"
     assert client.get(url).json()["status"] == "missing"
-    built = client.post(url).json()
+    started = client.post(url).json()
+    assert started["status"] == "building"  # returns at once; the work is in the background
+    built = _build(client, url)
     assert built["status"] == "ready"
     assert [lv["level"] for lv in built["levels"]] == [1, 2, 3]
     assert built["triangles"] == version["stats"]["triangle_count"]
@@ -161,3 +175,114 @@ def test_lod_api_builds_once_and_serves_the_levels(
     current = client.get(f"/api/v1/models/{model['id']}").json()["current_version"]
     assert current["id"] == version["id"]
     assert current["stats"]["triangle_count"] == version["stats"]["triangle_count"]
+
+
+class _Memory:
+    def __init__(self, available: int) -> None:
+        self.available = available
+
+
+@pytest.mark.usefixtures("small_thresholds")
+def test_levels_wait_for_free_memory_and_failures_change_nothing(
+    client: TestClient,
+    runner: JobRunner,
+    make_image_project: MakeImageProject,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ai3d.processing import mesh as mesh_module  # noqa: PLC0415
+
+    model = _generated_model(client, runner, make_image_project)
+    version = _save(client, model["id"], model["current_version"]["id"], _glb(_model())).json()
+    url = f"/api/v1/model-versions/{version['id']}/lod"
+    original = client.get(version["file_url"]).content
+
+    # Not enough free memory: refused with the numbers, nothing recorded.
+    with monkeypatch.context() as patch:
+        patch.setattr(mesh_module.psutil, "virtual_memory", lambda: _Memory(1024))
+        refused = client.post(url)
+    assert refused.status_code == 422
+    assert refused.json()["error"]["code"] == "not_enough_memory"
+    assert "Preparing simplified views of" in refused.json()["error"]["message"]
+    assert client.get(url).json()["status"] == "missing"
+
+    # Building fails part-way: no level files, the version untouched, and it can retry.
+    def broken(source: Path) -> list[lod.LodLevel]:
+        raise RuntimeError("simplifier crashed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(lod_service, "_levels", broken)
+        failed = _build(client, url)
+    assert failed["status"] == "failed"
+    assert "Preparing simplified views failed (RuntimeError)" in failed["message"]
+    assert failed["levels"] == []
+    assert client.get(version["file_url"]).content == original
+    assert _build(client, url)["status"] == "ready"  # building again retries
+    assert client.get(version["file_url"]).content == original
+
+
+def test_large_meshes_are_simplified_in_pieces_without_gaps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pieces keep their cut edges, so a closed model stays closed and keeps its colours
+    and normals; the result matches simplifying it in one go."""
+    ball = _bumpy_ball(6)  # 81,920 triangles, closed
+    top = ball.vertices[:, 1] > 0
+    colours = np.where(top[:, None], [230, 120, 20, 255], [30, 60, 220, 255]).astype(np.uint8)
+    ball.visual = trimesh.visual.ColorVisuals(ball, vertex_colors=colours)
+    target = len(ball.faces) // 4
+    results = {}
+    for limit in (10**9, 25_000):  # one piece; four pieces
+        monkeypatch.setattr(lod, "LOD_PIECE_TRIANGLES", limit)
+        simplified, mapping = lod.simplify_mesh(ball, target)
+        welded = trimesh.Trimesh(simplified.vertices.copy(), simplified.faces.copy(), process=False)
+        welded.merge_vertices()
+        assert welded.is_watertight  # no gaps where the pieces meet
+        assert (mapping >= 0).all()
+        assert (np.linalg.norm(simplified.vertex_normals, axis=1) > 0.5).all()
+        shown = np.asarray(simplified.visual.vertex_colors)[:, :3].astype(float)
+        assert shown[simplified.vertices[:, 1] > 0.2].mean(axis=0)[0] > 200  # still orange
+        shift = np.linalg.norm(ball.vertices - simplified.vertices[mapping], axis=1).mean()
+        results[limit] = (len(simplified.faces), shift)
+    (one_count, one_shift), (four_count, four_shift) = results[10**9], results[25_000]
+    assert four_count == pytest.approx(one_count, rel=0.01)
+    assert four_shift < one_shift * 1.2
+
+
+@pytest.mark.usefixtures("small_thresholds")
+def test_no_level_when_nothing_can_be_simplified() -> None:
+    """Triangles that touch only at corners have every edge on a border, which is kept:
+    a "level" would be a copy of the model, so none is made."""
+    n = 80
+    u, v = np.meshgrid(np.arange(n), np.arange(n))
+    vertices = np.stack([u.ravel(), np.zeros(n * n), v.ravel()], 1).astype(float)
+    index = np.arange(n * n).reshape(n, n)
+    # Only the "lower" triangle of each cell: neighbours share corners, never edges.
+    faces = np.stack([index[:-1, :-1].ravel(), index[1:, :-1].ravel(), index[:-1, 1:].ravel()], 1)
+    scattered = trimesh.Trimesh(vertices, faces, process=False)
+    assert len(faces) >= lod.LOD_MIN_TRIANGLES
+    assert lod.build_levels(trimesh.Scene(scattered)) == []
+
+
+def test_the_server_keeps_answering_while_levels_are_built(
+    client: TestClient, runner: JobRunner, make_image_project: MakeImageProject
+) -> None:
+    """The simplifier holds Python's interpreter lock for seconds at a time; built in
+    the server process it froze every request (connections were reset). It runs in a
+    separate process, so requests are answered while it works."""
+    big = trimesh.creation.icosphere(subdivisions=8, radius=0.5)  # 1.3 million triangles
+    big.vertices *= 1 + 0.02 * np.sin(9 * big.vertices[:, :1])
+    model = _generated_model(client, runner, make_image_project)
+    version = _save(client, model["id"], model["current_version"]["id"], _glb(trimesh.Scene(big)))
+    url = f"/api/v1/model-versions/{version.json()['id']}/lod"
+    assert client.post(url).json()["status"] == "building"
+    slowest = 0.0
+    state = "building"
+    deadline = time.monotonic() + 300
+    while state == "building" and time.monotonic() < deadline:
+        started = time.monotonic()
+        state = client.get(url).json()["status"]
+        client.get("/api/v1/health")
+        slowest = max(slowest, time.monotonic() - started)
+        time.sleep(0.05)
+    assert state == "ready"
+    assert slowest < 0.5, f"a request took {slowest:.2f} s while building"

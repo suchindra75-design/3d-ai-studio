@@ -2022,8 +2022,10 @@
             "enum": [
               "not_needed",
               "missing",
+              "building",
               "ready",
-              "unavailable"
+              "unavailable",
+              "failed"
             ],
             "title": "Status",
             "type": "string"
@@ -4550,7 +4552,7 @@
         ]
       },
       "post": {
-        "description": "Simplified copies (about a quarter of the triangles each) for drawing the model when full detail would not be visible. The version's own file is unchanged.",
+        "description": "Simplified copies (about a quarter of the triangles each) for drawing the model when full detail would not be visible. The version's own file is unchanged. Returns at once with status `building` (or the current state); refused with `not_enough_memory` when it would not fit in free memory.",
         "operationId": "build_lod_api_v1_model_versions__version_id__lod_post",
         "parameters": [
           {
@@ -4596,7 +4598,7 @@
             "description": "Server error"
           }
         },
-        "summary": "Build the levels of detail (once; can take seconds for large models)",
+        "summary": "Start building the levels of detail (in the background; poll the GET)",
         "tags": [
           "models"
         ]

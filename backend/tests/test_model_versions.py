@@ -239,3 +239,22 @@ def test_saving_a_model_too_large_for_free_memory_says_so(
     assert error["message"].startswith("Checking this 12-triangle model needs about")
     versions = client.get(f"/api/v1/models/{model['id']}/versions").json()["items"]
     assert len(versions) == 1  # nothing was saved
+
+
+def test_an_interrupted_upload_saves_nothing_and_leaves_no_files(
+    client: TestClient, model: dict[str, Any], settings: Settings
+) -> None:
+    """A connection dropped mid-upload (or a browser closed while saving) delivers a
+    truncated file: no version is made, nothing is left in temporary storage, and the
+    current version is untouched."""
+    current = model["current_version"]
+    original = client.get(current["file_url"]).content
+    whole = trimesh.creation.icosphere(subdivisions=4).export(file_type="glb")
+    for cut in (len(whole) // 2, 30, 0):
+        response = _save(client, model["id"], current["id"], whole[:cut])
+        assert response.status_code in {400, 413, 422}, response.text
+    versions = client.get(f"/api/v1/models/{model['id']}/versions").json()["items"]
+    assert [v["id"] for v in versions] == [current["id"]]
+    assert client.get(current["file_url"]).content == original
+    tmp = settings.data_dir / "tmp"
+    assert not tmp.exists() or not any(tmp.iterdir())

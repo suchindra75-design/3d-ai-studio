@@ -86,8 +86,9 @@ const DISPLAY: { value: DisplayMode; label: string; hint?: string }[] = [
 ];
 
 /** 5,242,880 → "5.2M", 81,920 → "82K" triangles. */
-function formatTriangles(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+export function formatTriangles(count: number): string {
+  // 999,698 would round to "1000K": from 999,500 on, millions.
+  if (count >= 999_500) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${Math.round(count / 1_000)}K`;
   return String(count);
 }

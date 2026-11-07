@@ -14,7 +14,10 @@ from PIL import Image, ImageCms
 from ai3d.models.enums import ReportStatus
 from ai3d.processing import mesh as mesh_module
 from ai3d.processing.mesh import (
+    GlbCounts,
     duplicate_face_count,
+    glb_counts,
+    glb_texture_bytes,
     glb_triangle_count,
     row_keys,
     validate_mesh_file,
@@ -233,6 +236,31 @@ def test_triangles_are_counted_from_the_glb_header(tmp_path: Path) -> None:
     assert glb_triangle_count(tmp_path / "bad.glb") is None
 
 
+def test_vertices_and_texture_coordinates_are_counted_from_the_glb_header(
+    tmp_path: Path,
+) -> None:
+    path = _two_part_glb(tmp_path)
+    scene = trimesh.load(path, force="scene")
+    vertices = sum(
+        len(scene.geometry[scene.graph[node][1]].vertices) for node in scene.graph.nodes_geometry
+    )
+    counts = glb_counts(path)
+    assert counts is not None
+    assert (counts.triangles, counts.vertices, counts.textured_vertices) == (1304, vertices, 0)
+    ball = trimesh.creation.icosphere()
+    ball.visual = trimesh.visual.TextureVisuals(
+        uv=np.zeros((len(ball.vertices), 2)), image=Image.new("RGB", (64, 32))
+    )
+    textured = tmp_path / "textured.glb"
+    textured.write_bytes(trimesh.Scene(ball).export(file_type="glb"))
+    counts = glb_counts(textured)
+    n = len(ball.vertices)
+    assert counts == GlbCounts(len(ball.faces), n, n, 64 * 32 * 4 * 2)
+    assert glb_counts(tmp_path / "missing.glb") is None
+    # Without the file, the most the version's triangles could need.
+    assert GlbCounts.from_stats({"triangle_count": 10}) == GlbCounts(10, 30, 30, 0)
+
+
 class _Memory:
     def __init__(self, available: int) -> None:
         self.available = available
@@ -242,13 +270,15 @@ def test_a_model_too_large_for_free_memory_is_not_checked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = _two_part_glb(tmp_path)
-    need = validation_memory_bytes(1304)
+    counts = glb_counts(path)
+    assert counts is not None
+    need = validation_memory_bytes(counts)
     monkeypatch.setattr(mesh_module.psutil, "virtual_memory", lambda: _Memory(need - 1))
     report = validate_mesh_file(path)
     assert report.status == ReportStatus.FAIL
     (issue,) = report.issues
     assert issue.code == "not_enough_memory"
-    assert issue.message.startswith("Checking this 1,304-triangle model needs about 0.5 GB")
+    assert issue.message.startswith("Checking this 1,304-triangle model needs about 0.6 GB")
     assert "Close other programs" in issue.message
     monkeypatch.setattr(mesh_module.psutil, "virtual_memory", lambda: _Memory(need))
     assert validate_mesh_file(path).status != ReportStatus.FAIL
@@ -267,3 +297,18 @@ def test_the_chunked_measurements_match_trimesh() -> None:
     assert mesh_module._degenerate_count(np.asarray(degenerate.vertices), faces) == int(
         (~degenerate.nondegenerate_faces()).sum()
     )
+
+
+def test_decoded_texture_memory_is_read_from_the_image_headers(tmp_path: Path) -> None:
+    ball = trimesh.creation.icosphere()
+    ball.visual = trimesh.visual.TextureVisuals(
+        uv=np.zeros((len(ball.vertices), 2)), image=Image.new("RGB", (512, 256))
+    )
+    textured = tmp_path / "textured.glb"
+    textured.write_bytes(trimesh.Scene(ball).export(file_type="glb"))
+    assert glb_texture_bytes(textured) == 512 * 256 * 4 * 2
+    plain = tmp_path / "plain.glb"
+    plain.write_bytes(trimesh.creation.box().export(file_type="glb"))
+    assert glb_texture_bytes(plain) == 0
+    (tmp_path / "bad.glb").write_bytes(b"glTF broken")
+    assert glb_texture_bytes(tmp_path / "bad.glb") == 0

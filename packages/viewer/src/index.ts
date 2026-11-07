@@ -45,5 +45,6 @@ export {
   type LodSource,
 } from './lod';
 export { MeasureMarkers } from './measure';
+export { FAST_PICK_MIN_TRIANGLES, acceleratePicking, fastRaycast } from './pick';
 export { findProblemEdges, type ProblemEdges } from './problems';
 export { ProblemOverlay } from './problem-overlay';

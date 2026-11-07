@@ -40,6 +40,7 @@ def get_db(database: Annotated[Database, Depends(get_database)]) -> Iterator[Ses
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+DatabaseDep = Annotated[Database, Depends(get_database)]
 DbDep = Annotated[Session, Depends(get_db)]
 StorageDep = Annotated[StorageBackend, Depends(get_storage)]
 

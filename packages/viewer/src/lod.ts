@@ -68,9 +68,27 @@ function meshes(root: THREE.Object3D): THREE.Mesh[] {
   return found;
 }
 
+// Each geometry's own box, kept while its positions are unchanged: the levels are
+// set up again as each one arrives, and a fresh pass over a 10-million-triangle model
+// took a third of a second each time (measured).
+const localBoxes = new WeakMap<
+  THREE.BufferGeometry,
+  { position: unknown; version: number; box: THREE.Box3 }
+>();
+
+function localBox(geometry: THREE.BufferGeometry): THREE.Box3 {
+  const position = geometry.getAttribute('position');
+  const version = position && 'version' in position ? position.version : 0;
+  const kept = localBoxes.get(geometry);
+  if (kept && kept.position === position && kept.version === version) return kept.box;
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox!.clone();
+  localBoxes.set(geometry, { position, version, box });
+  return box;
+}
+
 function worldBox(mesh: THREE.Mesh): THREE.Box3 {
-  mesh.geometry.computeBoundingBox();
-  return mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld);
+  return localBox(mesh.geometry).clone().applyMatrix4(mesh.matrixWorld);
 }
 
 /**
@@ -173,9 +191,10 @@ export class ModelLod {
     sources: LodSource[],
   ) {
     this.group.name = 'Levels of detail';
-    const box = new THREE.Box3().setFromObject(root);
-    const diagonal = box.getSize(new THREE.Vector3()).length() || 1;
     const fullMeshes = meshes(root);
+    const box = new THREE.Box3();
+    for (const mesh of fullMeshes) box.union(worldBox(mesh));
+    const diagonal = box.isEmpty() ? 1 : box.getSize(new THREE.Vector3()).length() || 1;
     this.triangles = [fullTriangles];
     this.levels = [];
     for (const source of sources) {

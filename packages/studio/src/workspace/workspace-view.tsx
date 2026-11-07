@@ -190,7 +190,7 @@ function VersionWorkspace({
   const loaded = file.status === 'ready' ? file.model : null;
   const root = loaded?.root ?? null;
   // Asked for at once: a stored coarse level can be shown while the full file loads.
-  const lodState = useLevelsOfDetail(api, version.id, webgl);
+  const lodState = useLevelsOfDetail(api, version.id, webgl, root !== null);
   const [detail, setDetail] = useState<DetailMode>('auto');
   const [detailLevel, setDetailLevel] = useState(0);
   // Levels are matched to the model's parts as loaded, so they are only used if they

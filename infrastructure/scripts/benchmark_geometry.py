@@ -4,8 +4,9 @@
 
 ``--steps`` runs only those steps (after a full run: they reuse its imported files).
 
-MODEL is ``synthetic:<triangles>`` (a textured, bumpy terrain made here, labelled as
-synthetic in the results) or a path to a real model file (GLB, PLY, OBJ, STL…).
+MODEL is ``synthetic:<triangles>[:<kind>]`` (a bumpy terrain made here, labelled as
+synthetic in the results; kinds in ``synthetic()``) or a path to a real model file
+(GLB, PLY, OBJ, STL…).
 Every step runs in its own process, so its peak memory is its own. Results are
 printed as JSON lines and written to OUT_DIR/results.json; nothing here is estimated.
 """
@@ -38,8 +39,15 @@ STEPS = (
 )
 
 
-def synthetic(triangles: int, dest: Path) -> None:
-    """A heightfield terrain of about ``triangles`` triangles with a 2048 px texture."""
+KINDS = ("textured", "colours", "soup", "parts", "bare")
+
+
+def synthetic(triangles: int, dest: Path, kind: str = "textured") -> None:
+    """A bumpy heightfield of about ``triangles`` triangles, stored as ``kind``:
+
+    textured (2048 px texture and UVs), colours (per-vertex colours), soup (every
+    triangle its own three vertices, as STL-like files are), parts (400 separate
+    meshes), bare (positions only: no normals, UVs or colours)."""
     import numpy as np
     import trimesh
     from PIL import Image
@@ -53,10 +61,37 @@ def synthetic(triangles: int, dest: Path) -> None:
     c, d = index[1:, :-1].ravel(), index[1:, 1:].ravel()
     faces = np.concatenate([np.stack([a, c, b], 1), np.stack([b, c, d], 1)])
     rng = np.random.default_rng(0)
-    image = Image.fromarray(rng.integers(40, 220, (2048, 2048, 3), dtype=np.uint8))
+    uv = np.stack([u.ravel(), v.ravel()], 1)
+    if kind == "parts":
+        scene = trimesh.Scene()
+        # Patches of neighbouring cells (20 × 20 blocks), so each part is a surface.
+        cell_row, cell_col = (faces.min(axis=1) // n), (faces.min(axis=1) % n)
+        block = (cell_row * 20 // (n - 1)) * 20 + (cell_col * 20 // (n - 1))
+        for k in range(400):
+            chunk = np.flatnonzero(block == k)
+            if not len(chunk):
+                continue
+            used, local = np.unique(faces[chunk], return_inverse=True)
+            part = trimesh.Trimesh(vertices[used], local.reshape(-1, 3), process=False)
+            scene.add_geometry(part, geom_name=f"part{k}", node_name=f"part{k}")
+        scene.export(dest, file_type="glb")
+        return
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-    mesh.visual = trimesh.visual.TextureVisuals(uv=np.stack([u.ravel(), v.ravel()], 1), image=image)
-    trimesh.Scene(mesh).export(dest, file_type="glb")
+    if kind == "textured":
+        image = Image.fromarray(rng.integers(40, 220, (2048, 2048, 3), dtype=np.uint8))
+        mesh.visual = trimesh.visual.TextureVisuals(uv=uv, image=image)
+    elif kind == "colours":
+        colours = np.concatenate(
+            [(uv * 255).astype(np.uint8), np.full((len(uv), 2), 255, dtype=np.uint8)], axis=1
+        )
+        mesh.visual = trimesh.visual.ColorVisuals(mesh, vertex_colors=colours)
+    elif kind == "soup":
+        mesh = trimesh.Trimesh(
+            vertices=vertices[faces].reshape(-1, 3),
+            faces=np.arange(len(faces) * 3).reshape(-1, 3),
+            process=False,
+        )
+    trimesh.Scene(mesh).export(dest, file_type="glb", include_normals=kind != "bare")
 
 
 def step(name: str, source: Path, work: Path) -> dict[str, Any]:
@@ -125,13 +160,19 @@ def main(argv: list[str]) -> int:
     results: list[dict[str, Any]] = []
     for spec in specs:
         if spec.startswith("synthetic:"):
-            triangles = int(spec.split(":", 1)[1])
-            label = f"synthetic terrain, {triangles:,} triangles"
-            work = out / f"synthetic-{triangles}"
+            _, count, *rest = spec.split(":")
+            triangles, kind = int(count), (rest[0] if rest else "textured")
+            if kind not in KINDS:
+                print(f"unknown kind {kind!r}; one of {', '.join(KINDS)}")
+                return 2
+            label = f"synthetic terrain, {triangles:,} triangles" + (
+                "" if kind == "textured" else f", {kind}"
+            )
+            work = out / (f"synthetic-{triangles}" + ("" if kind == "textured" else f"-{kind}"))
             work.mkdir(exist_ok=True)
             source = work / "source.glb"
             if not source.exists():
-                synthetic(triangles, source)
+                synthetic(triangles, source, kind)
         else:
             source = Path(spec).resolve()
             label = source.name

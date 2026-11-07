@@ -298,8 +298,8 @@ export interface paths {
         get: operations["get_lod_api_v1_model_versions__version_id__lod_get"];
         put?: never;
         /**
-         * Build the levels of detail (once; can take seconds for large models)
-         * @description Simplified copies (about a quarter of the triangles each) for drawing the model when full detail would not be visible. The version's own file is unchanged.
+         * Start building the levels of detail (in the background; poll the GET)
+         * @description Simplified copies (about a quarter of the triangles each) for drawing the model when full detail would not be visible. The version's own file is unchanged. Returns at once with status `building` (or the current state); refused with `not_enough_memory` when it would not fit in free memory.
          */
         post: operations["build_lod_api_v1_model_versions__version_id__lod_post"];
         delete?: never;
@@ -1442,7 +1442,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "not_needed" | "missing" | "ready" | "unavailable";
+            status: "not_needed" | "missing" | "building" | "ready" | "unavailable" | "failed";
             /** Triangles */
             triangles: number;
             /**

@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import trimesh
@@ -19,7 +20,7 @@ from ai3d.core.timeutil import utcnow
 from ai3d.models import Asset, Export, ModelVersion
 from ai3d.models.enums import AssetKind, ExportFormat, ExportStatus
 from ai3d.processing import exporters, quads
-from ai3d.processing.mesh import load_model_scene
+from ai3d.processing.mesh import GlbCounts, glb_counts, load_model_scene, memory_shortfall
 from ai3d.schemas.export import ExportFormatRead, ExportRead
 from ai3d.services.models import download_filename, get_model, get_version, version_file
 from ai3d.storage import StorageBackend
@@ -58,6 +59,28 @@ def _notes(fmt: ExportFormat, version: ModelVersion) -> list[str]:
     return notes
 
 
+# Peak memory of an export in this process (Blender runs as its own process for
+# FBX), measured (docs/BENCHMARKS.md): up to 5.7 GB for the 10-million-triangle scan
+# (STL), 4.6 GB for a textured 5-million-triangle terrain (OBJ writes texture
+# coordinates as text) and 4.4 GB for a 5-million-triangle soup with 15 million
+# vertices (OBJ). The estimate (export_memory_bytes) is at least 10% above every run
+# (tests/test_memory_estimates.py).
+EXPORT_BASE_BYTES = 700 * 1024 * 1024
+EXPORT_BYTES_PER_TRIANGLE = 600
+EXPORT_BYTES_PER_VERTEX = 150
+EXPORT_BYTES_PER_TEXTURED_VERTEX = 800  # on top of the above
+
+
+def export_memory_bytes(counts: GlbCounts) -> int:
+    return (
+        EXPORT_BASE_BYTES
+        + counts.triangles * EXPORT_BYTES_PER_TRIANGLE
+        + counts.vertices * EXPORT_BYTES_PER_VERTEX
+        + counts.textured_vertices * EXPORT_BYTES_PER_TEXTURED_VERTEX
+        + counts.texture_bytes
+    )
+
+
 # Formats that can hold quads (the others are triangles only).
 QUAD_FORMATS = {ExportFormat.OBJ, ExportFormat.FBX}
 
@@ -88,6 +111,39 @@ def _quad_pairs(
     return checked or None
 
 
+def _check_memory(storage: StorageBackend, version: ModelVersion, key: str, label: str) -> None:
+    """Refuse (nothing recorded) when the export would need more memory than is free."""
+    local = storage.local_path(key)
+    counts = (glb_counts(local) if local is not None else None) or GlbCounts.from_stats(
+        version.stats
+    )
+    short = memory_shortfall(
+        export_memory_bytes(counts),
+        f"Writing {counts.triangles:,} triangles as {label}",
+    )
+    if short:
+        raise InvalidInputError(short, code="not_enough_memory")
+
+
+def _write_checked(
+    scene: trimesh.Scene,
+    fmt: ExportFormat,
+    out: Path,
+    facts: exporters.Facts,
+    pairs: dict[str, np.ndarray] | None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Write the file, re-open it, and note quads that could not be kept."""
+    expected = sum(len(p) for p in (pairs or {}).values())
+    notes = exporters.write(scene, fmt, out, quad_pairs=pairs) or []
+    validation = exporters.validate(out, fmt, facts, quads_expected=expected)
+    if expected and validation["quads"] < expected:
+        notes.append(
+            f"{validation['quads']:,} of the {expected:,} quads from retopology were "
+            "kept; the rest are written as triangles."
+        )
+    return notes, validation
+
+
 def create_export(
     db: Session,
     storage: StorageBackend,
@@ -104,6 +160,7 @@ def create_export(
             info.reason or f"{info.label} export is not available.",
             code="format_unavailable",
         )
+    _check_memory(storage, version, mesh_asset.storage_key, info.label)
     export = Export(
         project_id=model.project_id,
         model_version_id=version.id,
@@ -125,14 +182,7 @@ def create_export(
         facts = exporters.scene_facts(scene)
         out = workdir / f"export.{info.extension}"
         pairs = _quad_pairs(db, storage, version.id, scene) if fmt in QUAD_FORMATS else None
-        expected = sum(len(p) for p in (pairs or {}).values())
-        file_notes = exporters.write(scene, fmt, out, quad_pairs=pairs) or []
-        validation = exporters.validate(out, fmt, facts, quads_expected=expected)
-        if expected and validation["quads"] < expected:
-            file_notes.append(
-                f"{validation['quads']:,} of the {expected:,} quads from retopology were "
-                "kept; the rest are written as triangles."
-            )
+        file_notes, validation = _write_checked(scene, fmt, out, facts, pairs)
         if file_notes:
             export.options = {
                 **(export.options or {}),

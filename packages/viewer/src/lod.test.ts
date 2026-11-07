@@ -86,6 +86,26 @@ describe('matchParts', () => {
 });
 
 describe('ModelLod', () => {
+  it('measures each part once while its positions are unchanged', () => {
+    // Levels arrive one by one and are set up again each time; measuring a large
+    // model again each time stalled the page.
+    const root = model(64);
+    const [a] = root.children as THREE.Mesh[];
+    const measured = vi.spyOn(a!.geometry, 'computeBoundingBox');
+    new ModelLod(root, 8000, [{ triangles: 200, root: model(8) }]);
+    new ModelLod(root, 8000, [
+      { triangles: 2000, root: model(16) },
+      { triangles: 200, root: model(8) },
+    ]);
+    expect(measured).toHaveBeenCalledTimes(1);
+    // An edit to the positions is measured again.
+    const position = a!.geometry.getAttribute('position') as THREE.BufferAttribute;
+    position.setX(0, position.getX(0) + 0.1);
+    position.needsUpdate = true;
+    new ModelLod(root, 8000, [{ triangles: 200, root: model(8) }]);
+    expect(measured).toHaveBeenCalledTimes(2);
+  });
+
   it('draws a level instead of the full parts, which stay pickable', () => {
     const root = model(64);
     const lod = new ModelLod(root, 8000, [{ triangles: 200, root: model(8) }]);

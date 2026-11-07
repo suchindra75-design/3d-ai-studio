@@ -6,6 +6,7 @@ facts about the file (counts, bounds, watertightness); none of them says the
 shape matches the real object.
 """
 
+import io
 import json
 import logging
 import struct
@@ -16,6 +17,7 @@ from typing import Any
 import numpy as np
 import psutil
 import trimesh
+from PIL import Image
 
 from ai3d.models.enums import ReportStatus
 
@@ -435,6 +437,67 @@ def _face_centres(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
     return centres
 
 
+def _spread(vertices: np.ndarray, faces: np.ndarray, size: np.ndarray) -> float | None:
+    """Bounding-box diagonal / diagonal of the central 95% of the triangle centres."""
+    if not len(faces):
+        return None
+    centres = _face_centres(vertices, faces)
+    core = np.percentile(centres, 97.5, axis=0) - np.percentile(centres, 2.5, axis=0)
+    core_diagonal = float(np.linalg.norm(core))
+    return round(float(np.linalg.norm(size)) / core_diagonal, 2) if core_diagonal > 0 else None
+
+
+def _components(shape: trimesh.Trimesh) -> tuple[int | None, float | None]:
+    """Separate pieces and the largest piece's share of triangles (skipped above
+    COMPONENT_ANALYSIS_MAX_FACES, where it would take too long and too much memory)."""
+    if len(shape.faces) > COMPONENT_ANALYSIS_MAX_FACES:
+        return None, None
+    labels = trimesh.graph.connected_component_labels(  # type: ignore[no-untyped-call]
+        shape.face_adjacency, node_count=len(shape.faces)
+    )
+    if not len(labels):
+        return 0, None
+    return int(labels.max()) + 1, round(float(np.bincount(labels).max()) / len(labels), 4)
+
+
+@dataclass(frozen=True, slots=True)
+class EdgeUse:
+    boundary: int  # edges used by one triangle (open)
+    non_manifold: int  # edges used by three or more
+    watertight: bool  # every edge used by exactly two triangles
+    # Edges shared by two triangles run in opposite directions in them (trimesh's rule).
+    winding_consistent: bool
+
+
+def _edge_use(faces: np.ndarray, vertex_count: int) -> EdgeUse:
+    """How many triangles use each edge, and whether shared edges are wound oppositely.
+
+    Same definitions as trimesh's ``is_watertight`` / ``is_winding_consistent``, from one
+    sort of integer keys instead of its cached edge structures (less memory)."""
+    base = max(vertex_count, 1)
+    directed = faces[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2).astype(np.int64)
+    low = np.minimum(directed[:, 0], directed[:, 1])
+    high = np.maximum(directed[:, 0], directed[:, 1])
+    undirected = low * base + high
+    forward = directed[:, 0] < directed[:, 1]
+    del directed, low, high
+    order = np.argsort(undirected, kind="stable")
+    keys = undirected[order]
+    del undirected
+    starts = np.flatnonzero(np.r_[True, keys[1:] != keys[:-1]])
+    counts = np.diff(np.r_[starts, len(keys)])
+    del keys
+    pairs = starts[counts == 2]
+    # A shared edge is consistent when one triangle uses it forwards, the other backwards.
+    consistent = bool(np.all(forward[order[pairs]] != forward[order[pairs + 1]]))
+    return EdgeUse(
+        boundary=int((counts == 1).sum()),
+        non_manifold=int((counts > 2).sum()),
+        watertight=bool(np.all(counts == 2)),
+        winding_consistent=consistent,
+    )
+
+
 def _signed_volume(vertices: np.ndarray, faces: np.ndarray) -> float:
     """Enclosed volume (negative when the surface faces inwards): the sum of the signed
     tetrahedra from the origin, a sixth of v0 · (v1 × v2) per triangle."""
@@ -445,22 +508,76 @@ def _signed_volume(vertices: np.ndarray, faces: np.ndarray) -> float:
     return total / 6.0
 
 
-# Peak memory of the check below: measured 0.94 GB for 1 million triangles and 4.7 GB
-# for 10 million (docs/BENCHMARKS.md), about 450 MB + 430 bytes per triangle; this
-# estimate keeps a margin.
-VALIDATION_BASE_BYTES = 500 * 1024 * 1024
-VALIDATION_BYTES_PER_TRIANGLE = 500
+@dataclass(frozen=True, slots=True)
+class GlbCounts:
+    """What a GLB holds, read from its header (no geometry loaded): the memory
+    estimates below are made from it."""
+
+    triangles: int
+    vertices: int
+    # Vertices that carry texture coordinates (exports write them out as text).
+    textured_vertices: int
+    # Images once decoded (see glb_texture_bytes).
+    texture_bytes: int
+
+    @classmethod
+    def from_stats(cls, stats: dict[str, Any] | None) -> "GlbCounts":
+        """When the file cannot be read locally: the triangle count from the version's
+        stats, and the most memory the rest could need (three vertices per triangle,
+        all textured)."""
+        triangles = int((stats or {}).get("triangle_count") or 0)
+        return cls(triangles, 3 * triangles, 3 * triangles, 0)
 
 
-def validation_memory_bytes(triangles: int) -> int:
-    return VALIDATION_BASE_BYTES + triangles * VALIDATION_BYTES_PER_TRIANGLE
+# Peak memory of the (staged) check below, measured (docs/BENCHMARKS.md): 0.85 GB
+# for 1 million triangles, 3.7 GB for the 10-million-triangle scan, and more per
+# triangle when vertices are not shared (3.0 GB for a 5-million-triangle soup with
+# 15 million vertices). This estimate, decoded textures included, is at least 7%
+# above every run (tests/test_memory_estimates.py).
+VALIDATION_BASE_BYTES = 600 * 1024 * 1024
+VALIDATION_BYTES_PER_TRIANGLE = 300
+VALIDATION_BYTES_PER_VERTEX = 90
 
 
-def glb_triangle_count(path: Path) -> int | None:
-    """Triangles in a GLB, read from its JSON header only (no geometry is loaded).
+def validation_memory_bytes(counts: GlbCounts) -> int:
+    return (
+        VALIDATION_BASE_BYTES
+        + counts.triangles * VALIDATION_BYTES_PER_TRIANGLE
+        + counts.vertices * VALIDATION_BYTES_PER_VERTEX
+        + counts.texture_bytes
+    )
 
-    Counts triangle primitives (mode 4, the default) as indices / 3, or positions / 3
-    when not indexed. None when the header cannot be read."""
+
+def glb_texture_bytes(path: Path) -> int:
+    """Memory the GLB's images take once decoded (4 bytes per pixel, twice: the image
+    and the arrays made from it), from each image's header only. 0 when unknown."""
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(20)
+            if len(header) < 20 or header[:4] != b"glTF":
+                return 0
+            length, _ = struct.unpack("<II", header[12:20])
+            document = json.loads(handle.read(length))
+            binary_start = 20 + length + 8
+            total = 0
+            for image in document.get("images", []):
+                view = document["bufferViews"][image["bufferView"]]
+                handle.seek(binary_start + int(view.get("byteOffset", 0)))
+                head = handle.read(min(int(view["byteLength"]), 256 * 1024))
+                with Image.open(io.BytesIO(head)) as opened:
+                    width, height = opened.size
+                total += width * height * 4 * 2
+            return total
+    except (OSError, ValueError, KeyError, IndexError, TypeError, struct.error):
+        return 0
+
+
+def glb_counts(path: Path) -> GlbCounts | None:
+    """Triangles and vertices in a GLB, read from its JSON header only (no geometry is
+    loaded), counting each mesh once per node that uses it.
+
+    Triangles are counted on triangle primitives (mode 4, the default) as indices / 3,
+    or positions / 3 when not indexed. None when the header cannot be read."""
     try:
         with path.open("rb") as handle:
             header = handle.read(20)
@@ -472,27 +589,51 @@ def glb_triangle_count(path: Path) -> int | None:
             document = json.loads(handle.read(length))
         accessors = document.get("accessors", [])
         nodes_meshes = [n.get("mesh") for n in document.get("nodes", []) if "mesh" in n]
-        total = 0
+        triangles = vertices = textured = 0
         for index in nodes_meshes:
             for primitive in document["meshes"][index].get("primitives", []):
                 if primitive.get("mode", 4) != 4:
                     continue
-                source = primitive.get("indices", primitive.get("attributes", {}).get("POSITION"))
+                attributes = primitive.get("attributes", {})
+                position = attributes.get("POSITION")
+                count = int(accessors[position]["count"]) if position is not None else 0
+                source = primitive.get("indices", position)
                 if source is not None:
-                    total += int(accessors[source]["count"]) // 3
-        return total
+                    triangles += int(accessors[source]["count"]) // 3
+                vertices += count
+                if "TEXCOORD_0" in attributes:
+                    textured += count
     except (OSError, ValueError, KeyError, IndexError, TypeError, struct.error):
         return None
+    return GlbCounts(triangles, vertices, textured, glb_texture_bytes(path))
+
+
+def glb_triangle_count(path: Path) -> int | None:
+    """Triangles in a GLB, from its header only (see glb_counts)."""
+    counts = glb_counts(path)
+    return counts.triangles if counts else None
+
+
+def memory_shortfall(need: int, what: str) -> str | None:
+    """A sentence saying ``what`` needs more memory than is free now, or None."""
+    free = int(psutil.virtual_memory().available)
+    if need <= free:
+        return None
+    return (
+        f"{what} needs about {need / 1024**3:.1f} GB of memory and {free / 1024**3:.1f} GB "
+        "is free. Close other programs and try again."
+    )
 
 
 def _not_enough_memory(path: Path, file_type: str) -> MeshReport | None:
     """A failed report when checking this GLB would need more memory than is free."""
     if file_type != "glb":
         return None
-    triangles = glb_triangle_count(path)
-    if not triangles:
+    counts = glb_counts(path)
+    if not counts or not counts.triangles:
         return None
-    need = validation_memory_bytes(triangles)
+    triangles = counts.triangles
+    need = validation_memory_bytes(counts)
     free = int(psutil.virtual_memory().available)
     if need <= free:
         return None
@@ -533,70 +674,54 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
             issues=[MeshIssue("no_geometry", "error", "The file contains no triangles.")],
         )
 
+    # Stage 1: what needs the scene (materials, textures, UVs); then it is released.
+    mesh_count = len(meshes)
+    material_count, texture_count, has_uv = _materials(scene)
+    uv_out_of_range = _uv_out_of_range(meshes)
+    texture_sizes = _texture_sizes(scene)
     combined = scene.to_mesh()
     vertices = np.asarray(combined.vertices)
     faces = np.asarray(combined.faces)
-    finite = bool(np.isfinite(vertices).all())
-    if not finite:
+    del combined, meshes, scene
+
+    # Stage 2: positions (in chunks where it matters).
+    if not bool(np.isfinite(vertices).all()):
         return MeshReport(
             status=ReportStatus.FAIL,
             metrics={"vertex_count": len(vertices), "triangle_count": len(faces)},
             issues=[MeshIssue("non_finite", "error", "Vertex positions contain NaN or infinity.")],
         )
-
-    bounds = combined.bounds
+    bounds = np.array([vertices.min(axis=0), vertices.max(axis=0)])
     size = bounds[1] - bounds[0]
     degenerate = _degenerate_count(vertices, faces)
-    del combined  # its caches would stay alive otherwise
-    material_count, texture_count, has_uv = _materials(scene)
-
-    # Texture seams and normal splits duplicate vertices, which would make every UV
-    # island look like a separate, open piece. Topology is judged on the shape alone.
-    shape = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-    shape.merge_vertices(merge_tex=True, merge_norm=True)
-
-    components: int | None = None
-    largest_share: float | None = None
-    if len(faces) <= COMPONENT_ANALYSIS_MAX_FACES:
-        labels = trimesh.graph.connected_component_labels(  # type: ignore[no-untyped-call]
-            shape.face_adjacency, node_count=len(shape.faces)
-        )
-        components = int(labels.max()) + 1 if len(labels) else 0
-        if len(labels):
-            largest_share = round(float(np.bincount(labels).max()) / len(labels), 4)
-
     # How far the bounding box reaches beyond where most of the surface is: a few stray
     # triangles (e.g. sparse photogrammetry reaching background points) inflate it.
-    spread: float | None = None
-    if len(faces):
-        centres = _face_centres(vertices, faces)
-        core = np.percentile(centres, 97.5, axis=0) - np.percentile(centres, 2.5, axis=0)
-        core_diagonal = float(np.linalg.norm(core))
-        if core_diagonal > 0:
-            spread = round(float(np.linalg.norm(size)) / core_diagonal, 2)
+    spread = _spread(vertices, faces, size)
+    vertex_count, triangle_count = len(vertices), len(faces)
 
-    watertight = bool(shape.is_watertight)
-    # How many triangles use each edge: 1 = open boundary, 3+ = non-manifold.
-    _, edge_counts = np.unique(
-        row_keys(shape.edges_sorted, max(len(shape.vertices), 1)), return_counts=True
-    )
-    boundary_edges = int((edge_counts == 1).sum())
-    non_manifold_edges = int((edge_counts > 2).sum())
-    duplicate_faces, _ = duplicate_face_count(shape.faces, len(shape.vertices))
-    volume = (
-        _signed_volume(np.asarray(shape.vertices), np.asarray(shape.faces)) if watertight else 0.0
-    )
+    # Stage 3: topology, on the shape alone. Texture seams and normal splits duplicate
+    # vertices, which would make every UV island look like a separate, open piece.
+    shape = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    del vertices, faces
+    shape.merge_vertices(merge_tex=True, merge_norm=True)
+    merged_vertices = np.asarray(shape.vertices)
+    merged_faces = np.asarray(shape.faces)
+    components, largest_share = _components(shape)
+    del shape  # its caches (face adjacency) are not needed below
+    edges = _edge_use(merged_faces, len(merged_vertices))
+    duplicate_faces, _ = duplicate_face_count(merged_faces, len(merged_vertices))
+    volume = _signed_volume(merged_vertices, merged_faces) if edges.watertight else 0.0
     metrics: dict[str, Any] = {
-        "mesh_count": len(meshes),
-        "vertex_count": len(vertices),
-        "triangle_count": len(faces),
+        "mesh_count": mesh_count,
+        "vertex_count": vertex_count,
+        "triangle_count": triangle_count,
         "material_count": material_count,
         "texture_count": texture_count,
         "has_uv": has_uv,
         "bbox_min": [round(float(v), 6) for v in bounds[0]],
         "bbox_max": [round(float(v), 6) for v in bounds[1]],
         "bbox_size": [round(float(v), 6) for v in size],
-        "watertight": watertight,
+        "watertight": edges.watertight,
         "components": components,
         # Share of the triangles in the biggest piece (1.0 = all in one piece).
         "largest_component_share": largest_share,
@@ -604,19 +729,17 @@ def validate_mesh_file(path: Path, *, file_type: str = "glb") -> MeshReport:
         "spread_ratio": spread,
         "degenerate_triangles": degenerate,
         "file_bytes": path.stat().st_size,
-        "boundary_edges": boundary_edges,
-        "non_manifold_edges": non_manifold_edges,
+        "boundary_edges": edges.boundary,
+        "non_manifold_edges": edges.non_manifold,
         "duplicate_faces": duplicate_faces,
-        "winding_consistent": bool(shape.is_winding_consistent)
-        if non_manifold_edges == 0
-        else None,
-        "volume": round(abs(volume), 9) if watertight else None,
+        "winding_consistent": edges.winding_consistent if edges.non_manifold == 0 else None,
+        "volume": round(abs(volume), 9) if edges.watertight else None,
         # A closed, consistently wound surface with negative volume faces inwards.
-        "inside_out": bool(watertight and shape.is_winding_consistent and volume < 0)
-        if watertight and non_manifold_edges == 0
+        "inside_out": bool(edges.watertight and edges.winding_consistent and volume < 0)
+        if edges.watertight and edges.non_manifold == 0
         else None,
-        "uv_out_of_range": _uv_out_of_range(meshes),
-        "texture_sizes": _texture_sizes(scene),
+        "uv_out_of_range": uv_out_of_range,
+        "texture_sizes": texture_sizes,
     }
 
     issues.extend(_findings(metrics))

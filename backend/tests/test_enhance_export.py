@@ -242,3 +242,28 @@ def test_failed_enhance_can_be_retried(
     assert new["source_model_version_id"] == job["source_model_version_id"]
     runner.run_until_idle()
     assert client.get(f"/api/v1/jobs/{new['id']}").json()["status"] == "succeeded"
+
+
+def test_an_export_that_would_not_fit_in_memory_is_refused(
+    client: TestClient, model: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai3d.processing import mesh as mesh_module  # noqa: PLC0415
+
+    class Memory:
+        available = 1024
+
+    version_id = model["current_version"]["id"]
+    with monkeypatch.context() as patch:
+        patch.setattr(mesh_module.psutil, "virtual_memory", Memory)
+        refused = client.post(
+            f"/api/v1/model-versions/{version_id}/exports", json={"format": "stl"}
+        )
+    assert refused.status_code == 422
+    error = refused.json()["error"]
+    assert error["code"] == "not_enough_memory"
+    assert error["message"].startswith("Writing ")
+    assert "triangles as STL needs about" in error["message"]
+    listed = client.get(f"/api/v1/model-versions/{version_id}/exports").json()["items"]
+    assert listed == []  # nothing recorded
+    ok = client.post(f"/api/v1/model-versions/{version_id}/exports", json={"format": "stl"})
+    assert ok.json()["status"] == "ready"

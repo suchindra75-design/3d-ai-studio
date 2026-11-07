@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Form, Header, Response, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 
-from ai3d.api.deps import DbDep, ProvidersDep, RunnerDep, SettingsDep, StorageDep
+from ai3d.api.deps import DatabaseDep, DbDep, ProvidersDep, RunnerDep, SettingsDep, StorageDep
 from ai3d.core.errors import NotFoundError
 from ai3d.models.enums import AssetKind
 from ai3d.schemas.enhance import EnhancePlanRead, EnhanceRequest, RetextureRequest
@@ -214,14 +214,16 @@ def get_lod(db: DbDep, version_id: uuid.UUID) -> LodRead:
 @router.post(
     "/model-versions/{version_id}/lod",
     response_model=LodRead,
-    summary="Build the levels of detail (once; can take seconds for large models)",
+    summary="Start building the levels of detail (in the background; poll the GET)",
     description="Simplified copies (about a quarter of the triangles each) for drawing the "
-    "model when full detail would not be visible. The version's own file is unchanged.",
+    "model when full detail would not be visible. The version's own file is unchanged. "
+    "Returns at once with status `building` (or the current state); refused with "
+    "`not_enough_memory` when it would not fit in free memory.",
 )
 def build_lod(
-    db: DbDep, storage: StorageDep, settings: SettingsDep, version_id: uuid.UUID
+    database: DatabaseDep, storage: StorageDep, settings: SettingsDep, version_id: uuid.UUID
 ) -> LodRead:
-    return lod_service.build_lod(db, storage, settings, version_id)
+    return lod_service.start_build(database, storage, settings, version_id)
 
 
 @router.get(

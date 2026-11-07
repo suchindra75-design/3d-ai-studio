@@ -9,6 +9,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { frameBox, gridCellSize, type CameraPreset } from './camera';
 import { applyDisplayMode, type DisplayMode } from './display';
 import { measure } from './inspect';
+import { acceleratePicking } from './pick';
 import { ModelLod, chooseLevel, projectedArea, type DetailMode, type LodSource } from './lod';
 
 export interface ViewRequest {
@@ -191,6 +192,47 @@ function Capture({
   return null;
 }
 
+/**
+ * Measurement hook for benchmarks (docs/BENCHMARKS.md). Inert unless the page has
+ * created ``window.__ai3dViewerProbe`` before loading (a test does this with an init
+ * script); then each viewport registers its renderer, scene, camera and level of
+ * detail there under its label, so a benchmark can time real renders.
+ */
+interface ViewerProbe {
+  views: Record<
+    string,
+    {
+      get: () => {
+        gl: THREE.WebGLRenderer;
+        scene: THREE.Scene;
+        camera: THREE.Camera;
+        raycaster: THREE.Raycaster;
+      };
+      lod: MutableRefObject<ModelLod | null>;
+    }
+  >;
+}
+
+function Probe({ label, lod }: { label: string; lod: MutableRefObject<ModelLod | null> }) {
+  const get = useThree((state) => state.get);
+  useEffect(() => {
+    const probe = (globalThis as { __ai3dViewerProbe?: ViewerProbe }).__ai3dViewerProbe;
+    if (!probe) return undefined;
+    probe.views ??= {};
+    probe.views[label] = {
+      get: () => {
+        const { gl, scene, camera, raycaster } = get();
+        return { gl, scene, camera, raycaster };
+      },
+      lod,
+    };
+    return () => {
+      delete probe.views[label];
+    };
+  }, [get, label, lod]);
+  return null;
+}
+
 /** Copies camera moves to and from a shared link. */
 function LinkedCamera({ link }: { link: CameraLink }) {
   const get = useThree((state) => state.get);
@@ -348,7 +390,8 @@ function Scene({
   lod,
   detail = 'auto',
   onDetailLevel,
-}: Omit<ViewportProps, 'label' | 'className'>) {
+  label,
+}: Omit<ViewportProps, 'className'>) {
   const lodHandle = useRef<ModelLod | null>(null);
   const get = useThree((state) => state.get);
   const invalidate = useThree((state) => state.invalidate);
@@ -361,6 +404,10 @@ function Scene({
     applyDisplayMode(model, options.display);
     invalidate();
   }, [model, options.display, invalidate]);
+
+  // Large meshes: picking and measuring through a spatial index (pick.ts).
+  // `revision`: edits may add or replace parts.
+  useEffect(() => acceleratePicking(model), [model, revision]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision` signals in-place edits
   const box = useMemo(() => measure(model), [model, revision]);
@@ -412,6 +459,7 @@ function Scene({
       {clipPlane ? <Section plane={clipPlane} /> : null}
       {cameraLink ? <LinkedCamera link={cameraLink} /> : null}
       {onCaptureReady ? <Capture onReady={onCaptureReady} lod={lodHandle} /> : null}
+      <Probe label={label} lod={lodHandle} />
       <primitive object={model} onClick={handleClick} />
       {lod && lod.sources.length > 0 ? (
         <LodLayer
@@ -455,12 +503,12 @@ function Scene({
 }
 
 /** Interactive 3D view of a loaded model: orbit (drag), pan (right-drag), zoom (wheel/pinch). */
-export function Viewport({ label, className, ...scene }: ViewportProps) {
+export function Viewport({ className, ...scene }: ViewportProps) {
   return (
     <Canvas
       className={className}
       role="img"
-      aria-label={label}
+      aria-label={scene.label}
       shadows
       frameloop="demand"
       dpr={[1, 2]}

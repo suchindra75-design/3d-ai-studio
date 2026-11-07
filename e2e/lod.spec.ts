@@ -119,6 +119,11 @@ test('levels of detail for a 1.3-million-triangle model', async ({ page, request
     await held;
     await route.continue();
   });
+  const levelFiles: string[] = [];
+  page.on('request', (r) => {
+    const match = /\/lod\/(\d+)\/file/.exec(r.url());
+    if (match) levelFiles.push(match[1]!);
+  });
   await page.reload();
   const preview = page.getByRole('img', { name: /Simplified preview of .*version 2/ });
   await expect(preview).toBeVisible({ timeout: 60_000 });
@@ -127,7 +132,11 @@ test('levels of detail for a 1.3-million-triangle model', async ({ page, request
   ).toBeVisible();
   await settle(page);
   expect(difference(coarse, await preview.screenshot())).toBeLessThan(0.05);
+  // Only the small coarsest level has been fetched: the finer ones would take
+  // bandwidth from the full file on a slow connection, so they come after it.
+  expect(levelFiles).toEqual([String(info.levels.length)]);
   release();
   await expect(canvas).toBeVisible({ timeout: 60_000 });
   await expect(preview).toHaveCount(0);
+  await expect.poll(() => [...levelFiles].sort()).toEqual(['1', '2']);
 });
