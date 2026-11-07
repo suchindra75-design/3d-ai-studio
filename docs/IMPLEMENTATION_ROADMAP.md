@@ -1226,6 +1226,45 @@ Silicon, Windows and Linux desktops not tested.
   would avoid it.
 - The 2026-11-07 runs were in Low Power Mode; no other machine measured.
 
+## Mesh inspection, validation and repair (2026-11-08)
+
+**Audit first.** Before this milestone the app had upload-time checks (watertight,
+volume, degenerate counts), repairs bundled in Enhance, and no way to see where a
+problem was. Details: [MESH_INSPECTION.md](MESH_INSPECTION.md).
+
+### Health inspection ✅ (D69)
+- Findings in five categories (geometry integrity, topology, surface quality, UV and
+  texture, optional fabrication), each with severity, an exact count, how it was
+  measured (exact, approximate or sampled), its limits, world-space locations and
+  the repair that addresses it. No overall score.
+- numpy and scipy only. Self-intersections are tested against a check of every
+  pair; wall thickness against boxes and plates of known thickness, including a
+  noisy one. When a search could not be complete, the report says so.
+- Runs in a separate process with a memory check first (estimate tested against
+  every measured peak); JSON and Markdown downloads.
+- Measured at 1M–10M triangles: 30 s–2 min and up to 4.9 GB; the full
+  self-intersection search on 10M about 5 minutes ([BENCHMARKS.md](BENCHMARKS.md#inspection-2026-11-08)).
+
+### Repairs ✅ (D70)
+- Nine individual operations, each confirmed, each saving a new version that says
+  exactly what changed; the source is never changed and can be made current again.
+  Deleting pieces only when they are named. UVs, materials and colours kept;
+  holes are filled only on untextured meshes.
+- A failed repair saves nothing; an interrupted one runs again once.
+
+### In the viewer ✅ (D71)
+- A finding is shown in the same canvas (no second WebGL context), shown and hidden
+  without moving the camera, and located; before/after uses the existing comparison.
+
+### Not done
+- Automatic repair of self-intersections, large holes, thin walls, non-manifold
+  edges where real surfaces meet, UV overlaps: reported only.
+- Coplanar overlaps and folds between neighbouring triangles are not detected.
+- Self-intersections above 2 million triangles and UV overlaps above 5 million are
+  skipped by default (the report says so); the panel cannot ask for the full
+  search (the API can).
+- Measured on this Intel Mac only.
+
 ## Geometry processing and a seamless viewer (2026-11-07)
 
 **Audit first.** Open from the last milestone: feature-preserving smoothing at

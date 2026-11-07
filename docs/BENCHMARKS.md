@@ -1,6 +1,6 @@
 # Benchmarks: large models
 
-Measured on 2026-11-06 and 2026-11-07 on one machine (below). Every number
+Measured on 2026-11-06, 2026-11-07 and 2026-11-08 on one machine (below). Every number
 here comes from a run of the scripts named in each section; nothing is
 estimated or extrapolated, and where a number depends on how it was measured
 the method says how. Other platforms: see [HARDWARE_TESTING.md](HARDWARE_TESTING.md);
@@ -21,7 +21,7 @@ GPU each run used.
 - AMD Radeon Pro 5300M (4 GB) and Intel UHD Graphics 630
 - macOS 26.7.1, Python 3.11, Chrome 156 (the installed browser, driven by
   Playwright), Blender 4.5.15 LTS
-- **Low Power Mode was on for every 2026-11-07 run** (it cannot be switched off
+- **Low Power Mode was on for every 2026-11-07 and 2026-11-08 run** (it cannot be switched off
   from these tools); on battery for most daytime runs, on mains power for the
   smoothing, export and hand-over comparisons. CPU-bound times are probably slower than
   this machine can do; they are comparable with each other, not with a machine
@@ -291,6 +291,56 @@ where the model had one. The 10M FBX ran twice each way, alternating.
   any stored-but-unrecorded file are removed (tested). Two exports written at
   the same time use separate folders, and the start-up recovery run during them
   touches neither (tested).
+
+### Inspection (2026-11-08)
+
+`--steps inspect,inspect_print,inspect_deep`: the health inspection (D69) on the
+stored GLB, loading included. **inspect**: the default checks; **print**: with the
+3D-printing checks (wall thickness from 2,000 samples, overhangs, internal shells);
+**deep**: self-intersections searched whatever the size (by default only up to 2
+million triangles). On mains power, Low Power Mode on, nothing else of ours running.
+Seconds (peak GB):
+
+| Model | inspect | print | deep |
+|---|---|---|---|
+| Terrain 1M | 32.3 (0.97) | 29.3 (0.98) | — (searched by default) |
+| Terrain 5M | 46.2 (2.14) | 44.5 (2.17) | — |
+| Noisy cube 1M | 35.2 (0.79) | 47.1 (0.79) | — (searched by default) |
+| Noisy cube 5M | 41.4 (2.08) | 57.9 (2.94) | 160.3 (2.94) |
+| Noisy cube 10M | 67.3 (3.39) | 110.3 (4.38) | — |
+| Dragon 7.2M | 39.4 (2.56) | 39.8 (2.56) | — |
+| Statuette 10M | 58.2 (3.22) | 112.1 (4.94) | 300.7 (3.99) |
+
+The noisy cubes (`synthetic:<n>:cube`) are closed boxes of known size with a
+1-unit wall in every direction, so their thickness is known:
+
+| Model | measured of 2,000 | 5th percentile | median | minimum |
+|---|---|---|---|---|
+| Noisy cube 1M | 1,887 | 1.0004 | 1.0121 | 0.019 |
+| Noisy cube 5M | 1,886 | 1.0004 | 1.0119 | 0.021 |
+| Noisy cube 10M | 1,908 | 1.0004 | 1.0127 | 0.012 |
+| Statuette 10M | 1,790 | 4.62 | 38.6 | 0.43 (model units) |
+
+The minimum is one sample, near an edge or corner, where noise can still tilt a
+ray towards a neighbouring side; the 5th percentile is the robust figure. Samples
+not measured are those whose rays found no far wall facing back (at edges and
+corners, and on the Statuette in thin, curled details).
+
+- **Peaks vary between runs.** The same Statuette print run peaked at 3.94 GB in
+  one run and 4.94 GB in the next (macOS compresses idle memory); the estimate is
+  checked against the highest peak seen.
+- **Before and after, same models.** An earlier version of this code,
+  run the same way, measured a 5th percentile of 0.18 on the noisy 5M and 10M
+  cubes (rays along one tilted triangle's normal) and reached the far wall on
+  only 1,531 of the Statuette's samples. The grid then left out very long
+  triangles; they are now registered (by sampling when very long, which the report
+  says; 359 on the Statuette). Building UV, edge and grid arrays in blocks and with
+  32-bit ids then cut peaks with the same results: Terrain 5M 3.83 → 2.14 GB;
+  Statuette print 4.81 → 3.94 GB in back-to-back single runs.
+- Self-intersections found: none on the synthetic models (none exist); one
+  crossing pair on the Statuette (its search marked incomplete, see above).
+- The memory check before an inspection asks for 700 MiB + 350 B per triangle +
+  300 B per vertex + textures: 5.7 GB for the Statuette, 1.3 GB for Terrain 1M.
 
 ### Earlier steps (2026-11-06)
 
