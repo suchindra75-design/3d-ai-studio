@@ -1,115 +1,168 @@
 # Testing on other hardware
 
-How to check AI 3D Studio on a machine we have not tested, and how to report
-it so results from different machines can be compared. Results are only claimed
-for a platform after someone has run these steps on it and the numbers are in
-[BENCHMARKS.md](BENCHMARKS.md).
+How to check AI 3D Studio on a computer we have not tested, and how to report
+it so results from different machines can be compared. A platform counts as
+tested only when someone has run these steps on it and the results are recorded
+in [BENCHMARKS.md](BENCHMARKS.md) with the machine report. Instructions written
+for a platform are not results.
 
 ## Status (2026-11-07)
 
-| Platform | Status | Where the results are |
-|---|---|---|
-| Intel Mac (MacBook Pro 16" 2019, i7-9750H, 16 GB, Radeon Pro 5300M + UHD 630, macOS 26.7) | **Tested locally**: every suite, the large-model and rendering benchmarks on both GPUs | BENCHMARKS.md |
-| Linux x86-64 (GitHub Actions `ubuntu-latest`, no GPU) | **Tested in CI** on every push: backend (SQLite, PostgreSQL, S3), frontend, Docker images, browser tests with software WebGL (SwiftShader), Rust | CI logs; no performance numbers (shared runners, software rendering) |
-| Apple Silicon Mac | **Not tested** | — |
-| Windows, integrated graphics | **Not tested** | — |
-| Windows, dedicated GPU | **Not tested** | — |
-| Linux desktop with a GPU | **Not tested** | — |
+Three different things, kept apart:
 
-What we expect but have not verified: the backend is plain Python and NumPy
-and should behave the same everywhere; the local AI engine (PyTorch) and
-COLMAP/OpenMVS have their own platform builds; WebGL performance depends on the
-GPU and on which GPU the browser picks (the app asks WebGL for the
-high-performance GPU; on the test Mac, Chrome then draws on the Radeon, while a
-plain test canvas gets the Intel GPU, which is why the benchmark reads the GPU
-from the app itself).
+| Platform | Run locally | Run in CI | Prepared, not yet run |
+|---|---|---|---|
+| **Intel Mac**: MacBook Pro 16" 2019, i7-9750H, 16 GB, Radeon Pro 5300M + Intel UHD 630, macOS 26.7.1 | **Yes**: every suite; geometry, smoothing, export (Blender included), rendering (both GPUs), loading and hand-over benchmarks. Low Power Mode was on | — | — |
+| **Linux x86-64, no GPU** (GitHub Actions `ubuntu-latest`) | — | **Yes**, on every push: backend on SQLite, PostgreSQL and S3, frontend, browser tests with software WebGL (SwiftShader), Rust, Docker images | No performance numbers: shared runners, software rendering |
+| **Apple Silicon Mac** | No | No | §A below |
+| **Windows, integrated graphics** | No | No | §B below |
+| **Windows, dedicated GPU** | No | No | §B below |
+| **Linux desktop with a GPU** | No | No | §C below |
 
-## 1. Set up
+The release workflow (`release.yml`, Windows/Linux/macOS desktop builds) runs
+only on a `v*` tag and has never run.
 
-Follow [INSTALLATION.md](INSTALLATION.md). Then record:
+What we expect, unverified: the backend is Python and NumPy and should behave
+the same everywhere; its memory figures should carry over within tens of
+percent (the same arrays are made). The local AI engine (PyTorch), COLMAP,
+OpenMVS and Blender have their own builds per platform. Rendering speed depends
+entirely on the GPU and on which GPU the browser gives the page.
 
-- CPU model, core count, memory, GPU(s) and their memory, OS version;
-- `uv run python --version`, `node --version`, Chrome version
-  (`chrome://version`);
-- in Chrome, `chrome://gpu`: the "GL_RENDERER" line and whether WebGL2 is
-  hardware accelerated.
+## 1. Every machine: set up and describe it
 
-## 2. Run the test suites
+1. Install as in [INSTALLATION.md](INSTALLATION.md).
+2. Describe the machine (read-only queries; nothing is sent anywhere):
+
+   ```bash
+   uv run python infrastructure/scripts/machine_report.py machine.json
+   ```
+
+   It records the OS, CPU, cores, memory, GPUs (with driver on Windows), power
+   state (macOS Low Power Mode and power source, Windows power plan, Linux CPU
+   governor), and Python, Node, pnpm and Blender versions.
+3. In Chrome, open `chrome://gpu` and note `GL_RENDERER` and whether WebGL2 is
+   "Hardware accelerated".
+4. Plug in to mains power, switch off power saving if you can, and keep the
+   computer awake (macOS: `caffeinate -i <command>`; Windows: Settings → Power,
+   "Never" sleep while plugged in). A run that sleeps part-way is invalid: it
+   happened here once (a levels build looked stuck for 40 minutes while the lid
+   was closed).
+
+## 2. Every machine: the test suites
 
 ```bash
-uv run ruff check . && uv run mypy && uv run pytest
+uv run ruff check . && uv run mypy
+uv run pytest
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 pnpm exec playwright test --project=desktop
+pnpm test:e2e:desktop
+pnpm test:e2e:workflows
 ```
 
 Report the counts printed at the end (passed, skipped, failed), and for any
-failure the test name and its first error line. Skips are expected for tools
-that are not installed (COLMAP, OpenMVS, Blender, the local AI engine) and for
-the real-provider checks; the skip reason says which.
+failure the test name and its first error line. Skips name their reason
+(COLMAP, OpenMVS, Blender or the local AI engine not installed; real-provider
+checks, which stay off unless you choose to run them; S3). A skip is not a pass:
+list them.
 
-On Windows, run the commands in PowerShell from the repository folder; the
-`.venv` paths in some browser tests assume a POSIX layout and may need
-`.venv\Scripts\python.exe` (report it if a test fails for that reason).
+## 3. Every machine: the benchmarks
 
-## 3. Large-model benchmarks
+The same models make results comparable: synthetic models made by the script,
+and two Stanford scans (research use; download and unzip them yourself:
+`xyzrgb_dragon.ply.gz`, `xyzrgb_statuette.ply.gz` from the
+[Stanford 3D Scanning Repository](http://graphics.stanford.edu/data/3Dscanrep/)).
 
-The same models make results comparable:
-
-- three synthetic terrains, made by the script: 1, 3 and 5 million triangles;
-- two real scans from the [Stanford 3D Scanning Repository](http://graphics.stanford.edu/data/3Dscanrep/)
-  (research use; do not redistribute): `xyzrgb_dragon.ply.gz` (7.2 million
-  triangles) and `xyzrgb_statuette.ply.gz` (10 million). Download and unzip
-  them yourself.
-
-Backend (each step in its own process, peak memory included):
+Backend (each step in its own process, its peak memory included):
 
 ```bash
 uv run python infrastructure/scripts/benchmark_geometry.py OUT \
   synthetic:1000000 synthetic:3000000 synthetic:5000000 \
   path/to/xyzrgb_dragon.ply path/to/xyzrgb_statuette.ply
+# Smoothing quality against a known surface (noisy cubes):
+uv run python infrastructure/scripts/benchmark_geometry.py OUT --steps import,smooth_sharp,smooth_taubin \
+  synthetic:1000000:cube synthetic:3000000:cube synthetic:5000000:cube synthetic:10000000:cube
 ```
 
-Browser (uses the GLBs the backend run wrote to `OUT/*/model.glb`):
+Browser (uses the GLBs the backend run wrote):
 
 ```bash
-export AI3D_BENCHMARK_GLBS=OUT/synthetic-1000000/model.glb,OUT/synthetic-3000000/model.glb,OUT/synthetic-5000000/model.glb,OUT/xyzrgb_dragon/model.glb,OUT/xyzrgb_statuette/model.glb
+export AI3D_BENCHMARK_GLBS=OUT/synthetic-1000000/model.glb,OUT/xyzrgb_statuette/model.glb
 pnpm exec playwright test e2e/benchmarks/large-models.spec.ts --project=desktop --workers=1
 pnpm exec playwright test e2e/benchmarks/rendering.spec.ts --project=desktop --workers=1
-# On a machine with two GPUs, once with each:
-AI3D_BENCHMARK_GPU=integrated pnpm exec playwright test e2e/benchmarks/rendering.spec.ts --project=desktop --workers=1
-AI3D_BENCHMARK_GPU=high-performance pnpm exec playwright test e2e/benchmarks/rendering.spec.ts --project=desktop --workers=1
 ```
 
-The rendering benchmark prints one JSON line per model and reports the GPU it
-used (`environment.renderer`) and whether GPU timer queries were available
-(`environment.timerQueries`). Where timer queries are missing (some browsers and
-drivers do not expose them), `gpuMs` is `null`: report that, do not substitute
-another number.
+The rendering benchmark prints one JSON line per model, with the GPU it drew on
+(`environment.renderer`, read from the app's own WebGL context) and whether GPU
+timer queries were available (`environment.timerQueries`). Without timer
+queries (some browsers and drivers do not expose them) `gpuMs` is `null`:
+report that; do not substitute another number.
 
-If a model does not fit in memory, the app refuses it with "needs about N GB of
-memory and M GB is free": that is a result too; report it with the numbers.
+A model that does not fit in memory is refused with "needs about N GB of memory
+and M GB is free". That is a result too: report it with the numbers.
 
-Note whether the machine was on battery or in a power-saving mode
-(`pmset -g` on macOS, the power plan on Windows), and keep it awake: a run that
-sleeps part-way is invalid (it happened here once: a levels build looked stuck
-for 40 minutes while the lid was closed).
+## A. Apple Silicon Mac (prepared, not run)
+
+- **Install:** the same commands; `uv` and pnpm install arm64 builds. Blender
+  5.x publishes arm64 builds (the test Mac used 4.5 LTS, the last Intel build).
+- **Memory:** unified memory is shared with the GPU; note the total and what
+  `machine_report.py` shows as available before each run.
+- **GPU:** one GPU; `AI3D_BENCHMARK_GPU` is not needed. `chrome://gpu` should
+  show "ANGLE (Apple, ANGLE Metal Renderer: Apple M…)".
+- **Expect to check:** the local AI engine runs on the CPU in this setup (PyTorch
+  MPS has not been tried); COLMAP and OpenMVS need arm64 builds.
+- **Report:** everything in §4, plus the chip (M1/M2/…, core counts) from
+  `machine_report.py`.
+
+## B. Windows (prepared, not run)
+
+- **Install:** PowerShell from the repository folder. Some browser tests call
+  `.venv/bin/python`; on Windows the path is `.venv\Scripts\python.exe`. If a
+  test fails for that reason, report it (that is a bug to fix, not a skip).
+- **Environment variables** in PowerShell:
+  `$env:AI3D_BENCHMARK_GLBS = "OUT\xyzrgb_statuette\model.glb"`.
+- **Keep awake / power:** `machine_report.py` records the active power plan;
+  use "High performance" or "Balanced" on mains power and say which.
+- **Integrated graphics:** run the rendering benchmark as is and check
+  `environment.renderer` names the Intel/AMD integrated GPU.
+- **Dedicated GPU (laptop with two GPUs):** Windows decides which GPU Chrome
+  gets (Settings → System → Display → Graphics). Run once with
+  `AI3D_BENCHMARK_GPU=integrated` and once with `high-performance`, and check
+  `environment.renderer` each time: on Windows Chrome may ignore its switches
+  and use the GPU Windows assigns, so the renderer line, not the setting, says
+  which GPU was measured.
+- **Desktop app:** the sidecar and Blender path detection are covered by unit
+  tests only; `pnpm test:e2e:desktop` drives the desktop UI in a browser, not
+  the Tauri window.
+
+## C. Linux desktop with a GPU (prepared, not run)
+
+- **GPU in the browser:** `chrome://gpu` must show hardware acceleration; on
+  some distributions Chrome blocks GPUs it does not recognise, which falls back
+  to software rendering (SwiftShader, as in CI). Report the renderer line.
+- **Two GPUs (laptops):** start the run with the dedicated GPU selected
+  (`DRI_PRIME=1` for Mesa drivers, `prime-run` or
+  `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia` for NVIDIA) and
+  check `environment.renderer`.
+- **COLMAP with CUDA:** the dense COLMAP path needs CUDA and has never been run;
+  report it separately if you try it.
 
 ## 4. What to send back
 
 ```
-Machine: …            OS: …            Memory: …     Power: mains/battery, power-saving on/off
-GPU(s): …             Browser: Chrome …  GL_RENDERER: …
-Suites: pytest N passed / N skipped / N failed; vitest …; playwright …
-Backend benchmark: OUT/results.json
+machine.json (from machine_report.py)
+Chrome version and GL_RENDERER (chrome://gpu)
+Power: mains or battery, power-saving on or off, kept awake: yes/no
+Suites: pytest N passed / N skipped / N failed; vitest …; playwright …; with each failure's first error line
+Backend benchmark: OUT/results*.json
 Rendering benchmark: the JSON lines (one per model, per GPU)
-Anything that failed or was refused, with the message
+Anything refused or failed, with the message
 ```
 
-## Known platform-specific limits
+## Known platform limits
 
-- **Apple Silicon:** the local AI engine uses PyTorch's CPU build in this setup;
-  MPS acceleration has not been tried.
-- **Windows:** the desktop app's sidecar and Blender path detection are covered
-  by unit tests only; no Windows run yet.
-- **Integrated GPUs:** shadows double the triangles drawn (a shadow pass), which
-  is why they start off for models over 1.5 million triangles.
+- **Apple Silicon:** PyTorch MPS acceleration has not been tried for the local
+  AI engine.
+- **Windows:** no run of any kind yet; the desktop sidecar and Blender path
+  detection are unit-tested only.
+- **Integrated GPUs:** shadows draw the model twice (a shadow pass), which is
+  why they start off for models over 1.5 million triangles.

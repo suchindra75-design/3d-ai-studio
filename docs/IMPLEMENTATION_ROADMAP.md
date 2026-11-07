@@ -1226,6 +1226,50 @@ Silicon, Windows and Linux desktops not tested.
   would avoid it.
 - The 2026-11-07 runs were in Low Power Mode; no other machine measured.
 
+## Geometry processing and a seamless viewer (2026-11-07)
+
+**Audit first.** Open from the last milestone: feature-preserving smoothing at
+8.4 GB on 10 million triangles; a 0.15–0.6 s stall when the full model replaced
+the preview; exports above 10M refused; no hardware procedures beyond this Mac.
+
+### Smoothing in less memory ✅ (D66)
+- The same algorithm with compact neighbour lists, a block of faces at a time;
+  then profiled and sped up without changing the arithmetic. On the same models
+  as the old code: 10M cube 8.6 → 3.4 GiB and 562 → 305 s; Statuette 7.2 → 2.9
+  GiB and 582 → 357 s; results equal to 2.6 × 10⁻⁹ of the model's size.
+- Taubin unchanged (identical results), 16–46% less memory from the checks
+  around it.
+- UVs, colours, normals, seams, topology and volume checked on every run; edge
+  and corner error measured on noisy cubes with a known surface.
+- Both methods refuse, with the numbers, when memory is short (Taubin had no
+  check); neither is swapped for the other.
+- Not done: dividing the model into regions (it would change neighbourhoods
+  at the borders; the exact version fits).
+
+### One canvas from preview to full model ✅ (D67)
+- The full model replaces the preview in the same canvas, camera kept. On the
+  Statuette the hand-over's longest task went from about 0.99 s to 0.36–0.5 s.
+- What remains (parsing the full file, compiling its shaders) is the same in
+  both designs; preparing shaders in the background before the swap was not
+  tried.
+
+### Exports ✅ (D68)
+- Model freed before the re-opened file is checked; OBJ written into the zip
+  in pieces: 6–22% less memory for GLB and OBJ, the same checks.
+- Measured with Blender included for the first time: FBX needs 1.9 GB at 1M, up
+  to 8.6 GB at 10M, nearly all Blender's. GLB and FBX now have their own
+  estimates (the shared one under-estimated FBX and refused 20M GLB exports
+  that need 4.2 GB).
+- Interrupted exports are marked failed at start-up and cleaned up; concurrent
+  exports keep their own folders.
+- Not done: OBJ and FBX above 10M (beyond this machine's free memory); a
+  streaming OBJ writer.
+
+### Other hardware: procedures prepared, nothing run
+- `infrastructure/scripts/machine_report.py` and per-platform steps in
+  [HARDWARE_TESTING.md](HARDWARE_TESTING.md) for Apple Silicon, Windows (two
+  kinds) and Linux GPUs. Still tested only on this Intel Mac and in Linux CI.
+
 ## Roadmap after the capability audit (2026-11-04)
 
 Based on [CAPABILITY_AUDIT.md](CAPABILITY_AUDIT.md). The goal is a genuinely

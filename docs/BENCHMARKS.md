@@ -22,11 +22,16 @@ GPU each run used.
 - macOS 26.7.1, Python 3.11, Chrome 156 (the installed browser, driven by
   Playwright), Blender 4.5.15 LTS
 - **Low Power Mode was on for every 2026-11-07 run** (it cannot be switched off
-  from these tools), mostly on battery. CPU-bound times are probably slower than
+  from these tools); on battery for most daytime runs, on mains power for the
+  smoothing, export and hand-over comparisons. CPU-bound times are probably slower than
   this machine can do; they are comparable with each other, not with a machine
   at full power.
 - Backend, web app (Next.js development server) and browser all ran on this
   machine.
+- Memory figures are peak *resident* memory. Under memory pressure macOS
+  compresses idle pages, which then no longer count as resident, so the largest
+  peaks (8–9 GB on a 16 GB machine with other programs open) may be understated
+  somewhat; the old-versus-new comparisons ran in the same conditions.
 
 ## Models
 
@@ -143,16 +148,151 @@ estimate against every run in the tables above:
 |---|---|---|
 | Check | 600 MiB + 300 B/triangle + 90 B/vertex + decoded textures | 7% (Soup 1M) |
 | Levels | 1 GiB + 450 B per triangle up to 2.5M + 120 B/triangle + 130 B/vertex + textures | 5% (Terrain 5M) |
-| Export | 700 MiB + 600 B/triangle + 150 B/vertex + 800 B/textured vertex + textures | 10% (Soup 1M, OBJ) |
+| Export as GLB | 500 MiB + 100 B/triangle + 180 B/vertex + 100 B/textured vertex + textures | 7% (Soup 5M) |
+| Export as FBX (Blender included) | 1 GiB + 850 B/triangle + 1,100 B/textured vertex + textures | 7% (Terrain 5M) |
+| Export, other formats | 700 MiB + 600 B/triangle + 150 B/vertex + 800 B/textured vertex + textures | 10% (Soup 1M, OBJ) |
+| Smoothing, keep sharp edges (above the loaded model) | 300 MiB + 250 B/triangle | 26% (cube 1M) |
+| Smoothing, Taubin (above the loaded model) | 300 MiB + 200 B/triangle | 32% (Statuette) |
 
-They are deliberately cautious where the measurements stop: the 20M terrain's
-check is estimated at 7.6 GB and measured at 4.1 GB (it was refused on this
-machine at the time, and was measured with the guard bypassed); its levels are
-estimated at 5.9 GB (measured 4.1 GB); its export, never measured, is estimated
-at 22 GB and so is refused on a 16 GB machine. A refusal says how much is
-needed and how much is free; nothing is recorded, and it can be tried again.
+Two were wrong until this was measured: FBX export shared the other formats'
+estimate, which left Blender out (7.5 GB estimated for the 10M scan, 8.6 GB
+measured), and GLB export shared it too, which refused a 20M model that needs
+4.2 GB (22 GB estimated). They are cautious where the measurements stop: the 20M
+terrain's check is estimated at 7.6 GB and measured at 4.1 GB (it was refused on
+this machine at the time, and was measured with the guard bypassed); its levels
+are estimated at 5.9 GB (measured 4.1 GB). A refusal says how much is needed and
+how much is free; nothing is recorded, and it can be tried again.
 
-### Earlier steps (2026-11-06, unchanged since)
+### Smoothing: old and new code on the same models (2026-11-07)
+
+Feature-preserving smoothing (D59) peaked at 8.4 GB on 10 million triangles. It
+now keeps the same algorithm with compact neighbour lists and works a block of
+faces at a time (D66); Taubin keeps trimesh's filter, and both now check
+watertightness and volume with the low-memory checks (D61). To compare like
+with like, the code at `e6e9ac2` ("old") and the new code ran on the **same
+GLB files**, 10 passes, each in its own process, one after another (new, then
+old) with nothing else running, on mains power with Low Power Mode on:
+
+```bash
+uv run python infrastructure/scripts/benchmark_geometry.py OUT --steps import,smooth_sharp,smooth_taubin \
+  synthetic:1000000:cube synthetic:5000000:cube synthetic:10000000:cube
+```
+
+(the old code was run through the same step with `e6e9ac2`'s `geometry.py`
+swapped in). Seconds and peak memory of the process in **GiB** (no child
+processes are started):
+
+| Model (triangles) | Keep sharp edges, old | Keep sharp edges, new | Taubin, old | Taubin, new |
+|---|---|---|---|---|
+| Noisy cube 1M (1,002,252) | 52.7 s, 1.38 GiB | **35.2 s, 0.70 GiB** | 8.4 s, 0.84 GiB | 9.0 s, 0.53 GiB |
+| Terrain with colours and normals 1M (999,698) | 37.2 s, 1.30 GiB | **29.2 s, 0.87 GiB** | — | — |
+| Noisy cube 5M (4,992,300) | 250.1 s, 4.95 GiB | **165.1 s, 2.01 GiB** | 37.9 s, 3.17 GiB | 31.2 s, 1.79 GiB |
+| Dragon scan (7,219,045) | 333.0 s, 6.06 GiB ¹ | **221.8 s, 2.58 GiB** | 42.7 s, 2.64 GiB | 52.2 s, 2.21 GiB |
+| Noisy cube 10M (10,002,828) | 562.4 s, 8.62 GiB | **304.7 s, 3.35 GiB** | 101.6 s, 5.24 GiB | 87.6 s, 3.04 GiB |
+| Statuette scan (10,000,000) | 581.8 s, 7.20 GiB | **356.6 s, 2.89 GiB** | 110.9 s, 5.36 GiB | 86.9 s, 2.89 GiB |
+
+¹ The old code's first run on the Dragon did not finish: after 73 minutes it
+was still swapping (about 6 GiB was free; it needs about 6 GiB more than the
+loaded model) and was stopped. Run again alone it took 333 s. The new code
+never came near the free memory.
+
+Times include loading the model and the checks below. Taubin's filter is
+unchanged; only the checks around it changed, and on the Dragon that step got
+22% slower (42.7 → 52.2 s; not investigated further) while it was faster on the
+other models.
+
+**The same result.** The new and old outputs, compared point by point: largest
+difference 5.9 × 10⁻¹¹ (cube 1M), 1.8 × 10⁻¹² (5M), 1.4 × 10⁻¹² (10M), 3.0 × 10⁻¹⁰
+(Dragon), 2.6 × 10⁻⁹ (Statuette), 5.8 × 10⁻¹² (terrain 1M) of the model's
+size, for keeping sharp edges (the fixed spatial weights are stored in single
+precision); exactly 0 for Taubin.
+
+**Quality**, against the cubes' true surface (noise 13% of a triangle's side;
+distance as a share of the cube's size; old and new identical to every digit
+shown):
+
+| Cube | Noise: all / edges / corners | Keep sharp edges | Taubin |
+|---|---|---|---|
+| 1M | 4.51 / 3.91 / 3.93 × 10⁻⁴ | 0.78 / 0.67 / 0.73 × 10⁻⁴ | 2.12 / 1.91 / 2.06 × 10⁻⁴ |
+| 5M | 2.02 / 1.75 / 1.76 × 10⁻⁴ | 0.34 / 0.28 / 0.28 × 10⁻⁴ | 0.93 / 0.79 / 0.83 × 10⁻⁴ |
+| 10M | 1.42 / 1.23 / 1.24 × 10⁻⁴ | 0.24 / 0.20 / 0.20 × 10⁻⁴ | 0.66 / 0.55 / 0.57 × 10⁻⁴ |
+
+("All" is the root mean square over every vertex; edges and corners are means
+over vertices within 5% of them.) Keeping sharp edges leaves about 37% of
+Taubin's error, at the edges and corners too.
+
+**Kept, checked on every run above:** the triangle count and faces (same
+topology); UVs and vertex colours, byte for byte; texture seams (vertices that
+were together are still together: the cubes' sides meet at seams); normals,
+saved for the smoothed surface whenever the file had them (on a test sphere
+they match the smoothed surface within 0.016°, float storage). Volume: 0.00%
+change on the closed cubes and the Statuette when keeping edges, −0.04% with
+Taubin on the Statuette; the Dragon is not closed, so it has no volume. How far
+vertices moved (mean / largest, share of the model's size): the Statuette 0.00
+/ 0.09% keeping edges, 0.01 / 3.82% with Taubin; the Dragon 0.00 / 0.07% and
+0.00 / 1.19%. The scans have no known true surface, so their error cannot be
+measured; their old and new results are the same (above).
+
+**Where the time goes** (the new code before the last change, 1M cube, timed
+step by step): gathering each face's own normal for its 13 neighbour pairs
+(30%), the vertex fitting's offsets (16%) and corner gathering (11%), the
+spatial weights (9%), accumulating moves (8%), dot products (8%) and the
+weights' exponentials (6%); building the neighbour lists and the sparse
+products took under 5%. So the memory work had not added CPU time (the 1M
+terrain took 32 s with either code). Two changes, the same arithmetic: a face's
+own values are repeated sequentially instead of indexed per pair, and each
+corner's distance from its face's plane is computed as n·c̄ − n·cₖ directly.
+That took the 10M cube from 540 s to 305 s.
+
+**Free memory before smoothing.** The check now covers both methods (Taubin
+had none) and refuses with the numbers instead of switching method; it allows
+300 MiB + 250 bytes per triangle above the loaded model for keeping edges
+(measured: 0.45 GB at 1M, 2.0 GB at 10M) and 300 MiB + 200 bytes for Taubin
+(0.27 and 1.7 GB), at least 18% above every run.
+
+### Exports: old and new code, Blender included (2026-11-07)
+
+Each export writes the file, re-opens it with an independent reader and
+compares it with the model (triangles, size, texture, colours, quads); that
+check is unchanged. What changed (D68): the model is freed before the file is
+re-opened (the comparison uses facts taken beforehand), OBJ text goes into the
+zip in pieces, OBJ quads are counted line by line, and for FBX the model is
+freed before Blender starts. Same GLB files, old (`e6e9ac2`) and new code one
+after the other, each in its own process. Peak memory in GB: of our process for
+GLB and OBJ; for FBX, of the whole process tree (our process and Blender,
+sampled every 0.2 s), with Blender's own peak in brackets:
+
+| Model | GLB old | GLB new | OBJ old | OBJ new | FBX old | FBX new |
+|---|---|---|---|---|---|---|
+| Terrain 1M, textured | 5.0 s, 0.49 | 7.0 s, 0.43 | 23.9 s, 1.06 | 24.5 s, 0.98 | 23.2 s, 2.28 (1.89) | 28.0 s, 2.25 (1.90) |
+| Terrain 5M, textured | 8.2 s, 1.40 | 9.2 s, 1.12 | 106.8 s, 3.81 | 107.8 s, 3.59 | 78.2 s, 7.46 (6.52) | 91.6 s, 6.27 (6.25) |
+| Statuette 10M | 11.0 s, 2.13 | 12.3 s, 1.66 | 142.3 s, 4.77 | 144.0 s, 4.11 | 163 / 186 s, 8.30 / 8.62 (8.15 / 8.60) | 160 / 190 s, 7.95 / 8.36 (7.95 / 8.35) |
+| Terrain 15M, textured | — | 31.3 s, 3.37 | — | — | — | — |
+| Terrain 20M, textured | — | 38.8 s, 4.22 | — | — | — | — |
+
+Every export re-opened with the model's triangle count and size, the texture
+where the model had one. The 10M FBX ran twice each way, alternating.
+
+- **GLB and OBJ:** 6–22% less memory; the same time within a few seconds. OBJ is
+  still the heaviest of these (4.1 GB at 10M): trimesh builds the whole OBJ text,
+  then reads it back; replacing those writers and readers was not attempted.
+- **FBX is Blender's memory:** 1.9 GB for the 1M terrain, 6.2–7.0 GB for the 5M,
+  7.9–8.6 GB for the 10M scan, varying by up to 0.8 GB between runs of the same
+  model. Freeing our copy of the model first lowers the total by 0.3 GB at 10M
+  (inside that variation) and 1.2 GB at 5M. A try that gave Blender the stored
+  GLB directly, instead of one written from the loaded model, made Blender
+  itself use more (9.2 against 7.7 GB at 10M) and was dropped.
+- **15M and 20M** were exported as GLB only: the estimate for OBJ (and the
+  measured trend: 4.1 GB at 10M) puts them past what is free on this machine,
+  and FBX at 10M already needs 8–8.6 GB.
+- **Interrupted exports:** an export killed part-way used to stay "running" for
+  ever. Each export now records the process writing it; at start-up, one whose
+  process is gone is marked failed ("interrupted"), and its temporary folder and
+  any stored-but-unrecorded file are removed (tested). Two exports written at
+  the same time use separate folders, and the start-up recovery run during them
+  touches neither (tested).
+
+### Earlier steps (2026-11-06)
 
 | Step | 1M | 3M | 5M | Dragon 7.2M | Statuette 10M |
 |---|---|---|---|---|---|
@@ -164,9 +304,8 @@ needed and how much is free; nothing is recorded, and it can be tried again.
 | Export STL | 3.4 (1.1) | 8.8 (2.3) | 11.4 (3.6) | 16.7 (5.0) | 22.4 (5.7) |
 | Export FBX (Blender) | 17.5 (0.4) | 37.2 (0.7) | 60.3 (1.1) | 81.1 (1.2) | 111.4 (1.6) |
 
-Feature-preserving smoothing still peaks at 8.4 GB on 10 million triangles; it
-checks free memory first (700 bytes per triangle) and was not reworked in this
-milestone.
+The two smoothing rows are superseded by the comparison above (a different
+day's runs; the comparison ran old and new code together).
 
 ## Rendering (`e2e/benchmarks/rendering.spec.ts`)
 
@@ -283,12 +422,38 @@ Intel GPU.
   React render). Each part's box is now kept while its positions are unchanged
   (`lod.test.ts` checks it is measured once): longest task 95 ms afterwards.
   The picking index runs in slices of about 10 ms meanwhile.
-- **Still there:** when the full model replaces the preview, the preview's
-  WebGL context is released (`forceContextLoss` in React Three Fiber's
-  teardown), which took 0.15–0.6 s in the profiles, and creating a context
-  took 0.2–0.3 s. These were measured on the development server, where React
-  mounts the canvas twice; not changed, as avoiding it would mean drawing the
-  preview and the full model in one canvas.
+
+### From the preview to the full model: one canvas (D67)
+
+The preview and the full model used to be two canvases: when the full model
+arrived, the preview's WebGL context was released (`forceContextLoss`, 0.15–0.6
+s in profiles) and a new one created (0.2–0.3 s), and the camera was framed
+again. They now share one canvas. Measured on the Statuette (development
+server, Intel GPU, levels built once, the page opened four times, the first
+discarded as warm-up), main-thread long tasks from 4 s before the full model
+appeared to 3 s after:
+
+| | Longest task | All long tasks together | Shader programs after |
+|---|---|---|---|
+| Two canvases (`e6e9ac2`) | 991, 990, 980 ms | 2.16, 2.03, 2.02 s | 8 |
+| One canvas (now) | 498, 358, 411 ms | 1.51, 0.89, 1.16 s | 10 (the preview's 2 are kept) |
+
+What remains is the full model's own preparation, there in both: parsing the
+180 MB file (about 0.2 and 0.4 s, just before it is shown) and compiling its
+shaders for the first frames (up to 0.4 s; three.js waits for each program to
+link). A first single run of the loading benchmark had suggested the opposite
+(1,087 against 358 ms): one run each, and the window was set from when the page
+reported the full model, which falls at a different point of the work in the
+two designs; the repeated measurement above replaces it.
+
+`e2e/lod.spec.ts` hands over three times in a row and checks, each time: the
+same canvas element and no WebGL context loss (the two-canvas version fails
+here: context lost once, a new canvas); a frame drawn on every render during
+the hand-over (10–11 frames, none without the model at the centre); a camera
+turned during the preview still turned afterwards (2.6% of pixels differ from
+the turned preview: level against full detail); the same 6 geometries on the
+GPU after each hand-over; then every level still drawing (none freed with the
+preview), picking, measuring and the section plane on the full model.
 
 ## Screenshots and editing at full detail
 
@@ -326,7 +491,8 @@ the Statuette); a part whose geometry is edited is drawn in full from then on.
   [HARDWARE_TESTING.md](HARDWARE_TESTING.md)). CI runs on Linux with software
   WebGL and gives no performance numbers.
 - This machine at full power (Low Power Mode was on).
-- Exports of the 15M and 20M terrains, and smoothing above 10 million triangles.
+- OBJ and FBX exports above 10 million triangles (GLB was measured at 15M and
+  20M), and smoothing above 10 million triangles.
 - Rendering above 10 million triangles in the browser.
 - Real slow networks (only the browser's throttling, through a compressing
   development server).

@@ -69,6 +69,16 @@ for (const path of models) {
       });
       record.download_mbps = downloadMbps;
     }
+    // Every long main-thread task from the page's start (Long Tasks API).
+    await page.addInitScript(() => {
+      const w = window as unknown as { longTasks: { start: number; ms: number }[] };
+      w.longTasks = [];
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          w.longTasks.push({ start: entry.startTime, ms: Math.round(entry.duration) });
+        }
+      }).observe({ type: 'longtask', buffered: true });
+    });
     started = Date.now();
     await page.goto(`/projects/${projectId}/models/${modelId}`);
     const preview = page.getByRole('img', { name: /Simplified preview of/ });
@@ -77,29 +87,28 @@ for (const path of models) {
     record.first_view_s = (Date.now() - started) / 1000;
     await expect(canvas).toBeVisible({ timeout: 20 * 60_000 });
     record.full_model_s = (Date.now() - started) / 1000;
-    // Responsiveness after loading: the longest main-thread tasks over the next 15 s
-    // (ms, and when each started, in s after the full model was shown). The finer
-    // levels load and the picking index is built (in idle-time slices) then.
-    record.long_tasks = await page.evaluate(
-      () =>
-        new Promise<{ ms: number; at_s: number }[]>((resolve) => {
-          const origin = performance.now();
-          const tasks: { ms: number; at_s: number }[] = [];
-          const observer = new PerformanceObserver((list) => {
-            for (const entry of list.getEntries()) {
-              tasks.push({
-                ms: Math.round(entry.duration),
-                at_s: Math.round((entry.startTime - origin) / 100) / 10,
-              });
-            }
-          });
-          observer.observe({ type: 'longtask', buffered: false });
-          setTimeout(() => {
-            observer.disconnect();
-            resolve(tasks.sort((a, b) => b.ms - a.ms).slice(0, 5));
-          }, 15_000);
-        }),
+    const shownAt = await page.evaluate(() => performance.now());
+    // Then 15 s more: the finer levels load and the picking index is built (in
+    // idle-time slices). Tasks are given as ms, and when they started (s, relative
+    // to the full model being shown; negative: before it).
+    await page.waitForTimeout(15_000);
+    const tasks = await page.evaluate(
+      (shown) =>
+        (window as unknown as { longTasks: { start: number; ms: number }[] }).longTasks.map(
+          (task) => ({ ms: task.ms, at_s: Math.round((task.start - shown) / 100) / 10 }),
+        ),
+      shownAt,
     );
+    // The hand-over from the preview to the full model: from 3 s before it was shown
+    // to 1 s after (the first frames).
+    record.hand_over_longest_ms = Math.max(
+      0,
+      ...tasks.filter((t) => t.at_s >= -3 && t.at_s <= 1).map((t) => t.ms),
+    );
+    record.long_tasks = tasks
+      .filter((t) => t.at_s > 1)
+      .sort((a, b) => b.ms - a.ms)
+      .slice(0, 5);
     const detail = page.getByRole('combobox', { name: 'Detail' });
     if (lod.levels.length) await expect(detail).toBeVisible({ timeout: 5 * 60_000 });
     await frames(page, 5);
