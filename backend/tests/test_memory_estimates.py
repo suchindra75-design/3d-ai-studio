@@ -14,6 +14,7 @@ from ai3d.models.enums import ExportFormat
 from ai3d.processing import lod
 from ai3d.processing.geometry import smoothing_memory_bytes
 from ai3d.processing.mesh import GlbCounts, validation_memory_bytes
+from ai3d.services import inspection
 from ai3d.services.exports import export_memory_bytes
 
 TEXTURE = 2048 * 2048 * 4 * 2  # the synthetic terrains' 2048 px texture, decoded
@@ -114,3 +115,22 @@ SMOOTHING = {
 def test_smoothing_estimates_are_above_every_measured_run(method: str) -> None:
     for triangles, extra_mb in SMOOTHING[method]:
         assert smoothing_memory_bytes(triangles, method) > 1.15 * extra_mb * 1e6  # type: ignore[arg-type]
+
+
+# Inspection (2026-11-08, the current code): the highest peak of the default, printing
+# and full self-intersection runs on each model. Peaks of the same run differ by up to
+# 1 GB between runs (macOS compresses idle memory), so the highest one seen is used.
+CUBE = 786_432  # the noisy cubes' small texture, decoded
+INSPECT = [
+    (T1, 975), (T5, 2169), (DRAGON, 2563), (STATUETTE, 4941),
+    (GlbCounts(1_002_252, 504_600, 504_600, CUBE), 791),
+    (GlbCounts(4_992_300, 2_503_896, 2_503_896, CUBE), 2937),
+    (GlbCounts(10_002_828, 5_012_376, 5_012_376, CUBE), 4381),
+]  # fmt: skip
+
+
+def test_inspection_estimate_is_above_every_measured_peak() -> None:
+    for counts, peak_mb in INSPECT:
+        assert inspection.memory_bytes(counts) > 1.05 * peak_mb * 1e6, (counts, peak_mb)
+    # Unshared vertices (three per triangle) need more.
+    assert inspection.memory_bytes(SOUP5) > inspection.memory_bytes(BARE5)

@@ -8,6 +8,8 @@ import type {
   ExportFormatList,
   ExportList,
   ExportRead,
+  InspectionRead,
+  InspectionRequest,
   LodRead,
   GenerationCreate,
   GenerationPlanRead,
@@ -23,6 +25,7 @@ import type {
   ModelUpdate,
   ModelVersionList,
   ModelVersionRead,
+  RepairRequest,
   ProjectCreate,
   ProjectList,
   ProjectRead,
@@ -271,6 +274,24 @@ export function createApiClient({ baseUrl, token, fetch: fetchImpl }: ApiClientO
       /** Starts a background job; the source version is never changed. */
       enhance: (id: string, body: EnhanceRequest, idempotencyKey?: string) =>
         request<JobRead>('POST', `/api/v1/models/${id}/enhance`, {
+          body,
+          headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+        }),
+    },
+    inspection: {
+      /** The version's health report (status "missing" until inspected, "running" meanwhile). */
+      get: (versionId: string) =>
+        request<InspectionRead>('GET', `/api/v1/model-versions/${versionId}/inspection`),
+      /** Starts inspecting in the background; nothing is changed. */
+      start: (versionId: string, body: InspectionRequest) =>
+        request<InspectionRead>('POST', `/api/v1/model-versions/${versionId}/inspection`, {
+          body,
+        }),
+    },
+    repairs: {
+      /** A repair job: only the operations given; the result is a new version. */
+      create: (modelId: string, body: RepairRequest, idempotencyKey?: string) =>
+        request<JobRead>('POST', `/api/v1/models/${modelId}/repairs`, {
           body,
           headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
         }),

@@ -21,6 +21,7 @@ from ai3d.processing import quads
 from ai3d.processing.geometry import (
     QUAD_PAIRS,
     HeavyTurn,
+    ProcessingResult,
     RemeshSettings,
     ScaleReference,
     Step,
@@ -28,6 +29,7 @@ from ai3d.processing.geometry import (
     process,
 )
 from ai3d.processing.mesh import load_model_scene, validate_mesh_file
+from ai3d.processing.repair import run_repairs
 from ai3d.services import resources
 from ai3d.services.models import save_enhanced_version, version_file
 from ai3d.workers import heavy
@@ -94,32 +96,7 @@ def _run(ctx: JobContext, workdir: Path) -> None:
     if ctx.heartbeat():
         raise _CancelledError
     ctx.stage("processing", "Processing geometry and textures.", 0.2)
-    scale_in: dict[str, Any] | None = job.params.get("scale")
-    try:
-        result = process(
-            scene,
-            job.quality_mode,
-            remove_ground_plane=bool(job.params.get("remove_ground")),
-            scale=ScaleReference(scale_in["axis"], float(scale_in["length_mm"]))
-            if scale_in
-            else None,
-            workdir=workdir,
-            cancel=ctx.heartbeat,  # polled while Blender runs (texture baking)
-            heavy_turn=_heavy_turn(ctx),
-            smoothing=int(job.params.get("smoothing") or 0),
-            smoothing_method=job.params.get("smoothing_method") or "taubin",
-            remesh_settings=_remesh_settings(job.params.get("remesh")),
-            upscale=job.params.get("upscale_textures"),
-            upscale_limits=UpscaleLimits(
-                max_input_px=ctx.settings.upscale_max_input_px,
-                tile_px=ctx.settings.upscale_tile_px,
-                available_bytes=resources.machine(ctx.settings.data_dir).memory_available_bytes,
-            ),
-        )
-    except ValueError as exc:
-        raise _FailedError("invalid_input", str(exc)) from exc
-    except (BlenderCancelledError, LocalAICancelledError):
-        raise _CancelledError from None
+    result = _processed(ctx, job, scene, workdir)
     scene = result.scene
     for step in result.steps:
         ctx.event(
@@ -183,6 +160,41 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             progress=1.0,
             data={"model_version_id": str(version.id)},
         )
+
+
+def _processed(
+    ctx: JobContext, job: GenerationJob, scene: trimesh.Scene, workdir: Path
+) -> ProcessingResult:
+    """Repairs (D70): only the operations asked for, in order; otherwise the quality
+    profile's processing."""
+    scale_in: dict[str, Any] | None = job.params.get("scale")
+    if job.params.get("repairs"):
+        return run_repairs(scene, list(job.params["repairs"]))
+    try:
+        return process(
+            scene,
+            job.quality_mode,
+            remove_ground_plane=bool(job.params.get("remove_ground")),
+            scale=ScaleReference(scale_in["axis"], float(scale_in["length_mm"]))
+            if scale_in
+            else None,
+            workdir=workdir,
+            cancel=ctx.heartbeat,  # polled while Blender runs (texture baking)
+            heavy_turn=_heavy_turn(ctx),
+            smoothing=int(job.params.get("smoothing") or 0),
+            smoothing_method=job.params.get("smoothing_method") or "taubin",
+            remesh_settings=_remesh_settings(job.params.get("remesh")),
+            upscale=job.params.get("upscale_textures"),
+            upscale_limits=UpscaleLimits(
+                max_input_px=ctx.settings.upscale_max_input_px,
+                tile_px=ctx.settings.upscale_tile_px,
+                available_bytes=resources.machine(ctx.settings.data_dir).memory_available_bytes,
+            ),
+        )
+    except ValueError as exc:
+        raise _FailedError("invalid_input", str(exc)) from exc
+    except (BlenderCancelledError, LocalAICancelledError):
+        raise _CancelledError from None
 
 
 def _checked_quads(scene: trimesh.Scene) -> dict[str, np.ndarray] | None:

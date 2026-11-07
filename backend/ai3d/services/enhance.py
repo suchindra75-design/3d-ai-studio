@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ai3d.core.errors import ConflictError, InvalidInputError
 from ai3d.core.timeutil import utcnow
 from ai3d.models import GenerationJob, ModelVersion
-from ai3d.models.enums import JobEventType, JobKind, JobStatus, ProcessingMode
+from ai3d.models.enums import JobEventType, JobKind, JobStatus, ProcessingMode, QualityMode
 from ai3d.processing.geometry import (
     BAKE_MAX_TEXTURE,
     PROFILES,
@@ -22,6 +22,7 @@ from ai3d.processing.geometry import (
     UPSCALE_DETAIL,
 )
 from ai3d.schemas.enhance import EnhancePlanRead, EnhanceRequest, EnhanceStepPlan
+from ai3d.schemas.inspection import RepairRequest
 from ai3d.services.jobs import add_event
 from ai3d.services.models import QUALITY_LABELS, get_model, get_version
 from ai3d_engine.blender import check_blender
@@ -164,6 +165,17 @@ def retry_enhance(
     db: Session, original: GenerationJob, *, idempotency_key: str | None = None
 ) -> GenerationJob:
     params = original.params or {}
+    if params.get("repairs"):
+        return create_repair_job(
+            db,
+            uuid.UUID(params["model_id"]),
+            RepairRequest(
+                source_version_id=original.source_model_version_id,
+                operations=params["repairs"],
+            ),
+            idempotency_key=idempotency_key,
+            parent_job_id=original.id,
+        )
     body = EnhanceRequest(
         quality_mode=original.quality_mode,
         source_version_id=original.source_model_version_id,
@@ -238,5 +250,71 @@ def create_enhance_job(
         JobEventType.STATUS,
         f"Queued: enhance version {source.version_number} of “{model.name}” "
         f"({QUALITY_LABELS[body.quality_mode]}). Runs on this computer.",
+    )
+    return job
+
+
+def create_repair_job(
+    db: Session,
+    model_id: uuid.UUID,
+    body: RepairRequest,
+    *,
+    idempotency_key: str | None = None,
+    parent_job_id: uuid.UUID | None = None,
+) -> GenerationJob:
+    """Repairs (D70) run as an enhance job that does only the operations asked for, in
+    that order, and saves the result as a new version; the source version is never
+    changed."""
+    from ai3d.processing.repair import OPERATIONS  # noqa: PLC0415 - heavy imports
+
+    if idempotency_key:
+        existing = db.scalar(
+            select(GenerationJob).where(GenerationJob.idempotency_key == idempotency_key)
+        )
+        if existing is not None:
+            if existing.kind != JobKind.ENHANCE or existing.params.get("model_id") != str(model_id):
+                raise ConflictError("This Idempotency-Key was already used for another request.")
+            return existing
+    model = get_model(db, model_id)
+    version_id = body.source_version_id or model.current_version_id
+    if version_id is None:
+        raise InvalidInputError("This model has no version to repair.")
+    source = get_version(db, version_id)
+    if source.model_id != model.id:
+        raise InvalidInputError("That version belongs to a different model.")
+    operations = [op.model_dump() for op in body.operations]
+    titles = [OPERATIONS[op.code].title for op in body.operations]
+    job = GenerationJob(
+        project_id=model.project_id,
+        kind=JobKind.ENHANCE,
+        status=JobStatus.QUEUED,
+        # Not used by repairs; the job table needs one.
+        quality_mode=QualityMode.FAST,
+        processing_mode=ProcessingMode.LOCAL,
+        source_model_version_id=source.id,
+        params={
+            "model_id": str(model.id),
+            "source_version_number": source.version_number,
+            "repairs": operations,
+            "provider_summary": [f"Repair: {t}" for t in titles],
+            "warnings": [],
+        },
+        idempotency_key=idempotency_key,
+        parent_job_id=parent_job_id,
+        queued_at=utcnow(),
+    )
+    db.add(job)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ConflictError("This Idempotency-Key was already used.") from None
+    add_event(
+        db,
+        job.id,
+        JobEventType.STATUS,
+        f"Queued: repair version {source.version_number} of “{model.name}” "
+        f"({', '.join(titles)}). Runs on this computer; version {source.version_number} is "
+        "not changed.",
     )
     return job

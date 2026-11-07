@@ -41,6 +41,9 @@ STEPS = (
     "export_obj",
     "export_stl",
     "export_fbx",
+    "inspect",
+    "inspect_print",
+    "inspect_deep",
 )
 
 
@@ -203,6 +206,26 @@ def step(name: str, source: Path, work: Path) -> dict[str, Any]:
         ]
     elif name.startswith("smooth_"):
         facts.update(_smooth(name, glb, work))
+    elif name.startswith("inspect"):
+        from ai3d.processing.inspect import inspect_file
+
+        # inspect: the default checks; inspect_print: with the 3D-printing checks;
+        # inspect_deep: self-intersections searched whatever the size.
+        report = inspect_file(
+            str(glb),
+            {
+                "printability": name == "inspect_print",
+                "self_intersections": "always" if name == "inspect_deep" else "auto",
+            },
+        )
+        facts["findings"] = {f["code"]: f["count"] for f in report["findings"]}
+        facts["skipped"] = [s["code"] for s in report["skipped"]]
+        search = report["measurements"]["integrity"].get("self_intersection_search")
+        if search:
+            facts["self_intersections"] = search
+        wall = report["measurements"]["fabrication"].get("wall_thickness")
+        if wall:
+            facts["wall_thickness"] = wall
     elif name.startswith("export_"):
         from ai3d.services.exports import _write_checked
 

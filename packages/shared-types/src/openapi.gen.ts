@@ -287,6 +287,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/model-versions/{version_id}/inspection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The version's health report (inspection), if it has one */
+        get: operations["get_inspection_api_v1_model_versions__version_id__inspection_get"];
+        put?: never;
+        /**
+         * Inspect the version's health (in the background; poll the GET)
+         * @description Checks geometry integrity, topology, surface, UVs and textures, and optionally 3D-printing suitability; nothing is changed. Returns at once with status `running`; refused with `not_enough_memory` when it would not fit in free memory.
+         */
+        post: operations["start_inspection_api_v1_model_versions__version_id__inspection_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-versions/{version_id}/inspection/report.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the health report as JSON */
+        get: operations["inspection_json_api_v1_model_versions__version_id__inspection_report_json_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-versions/{version_id}/inspection/report.md": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the health report as a readable document (Markdown) */
+        get: operations["inspection_markdown_api_v1_model_versions__version_id__inspection_report_md_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/model-versions/{version_id}/lod": {
         parameters: {
             query?: never;
@@ -392,6 +447,26 @@ export interface paths {
         put?: never;
         /** Preview the processing steps an enhancement would run */
         post: operations["plan_enhance_api_v1_models__model_id__enhance_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{model_id}/repairs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair a version into a new version (background job, on this machine)
+         * @description Runs only the operations given, in order; each reports exactly what it changed. The source version is never changed; the result is a new `enhanced` version. `remove_components` deletes only the pieces named.
+         */
+        post: operations["repair_api_v1_models__model_id__repairs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1034,6 +1109,45 @@ export interface components {
          * @enum {string}
          */
         ExportStatus: "pending" | "running" | "ready" | "failed";
+        /** FindingRead */
+        FindingRead: {
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "integrity" | "topology" | "surface" | "uv_texture" | "fabrication";
+            /** Code */
+            code: string;
+            /** Count */
+            count: number;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+            /** Explanation */
+            explanation: string;
+            locations: components["schemas"]["LocationsRead"];
+            /** Meshes */
+            meshes: string[];
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "exact" | "approximate" | "sampled";
+            /** Repair */
+            repair: ("recalculate_normals" | "fix_winding" | "remove_degenerate_faces" | "remove_duplicate_faces" | "merge_duplicate_vertices" | "fill_small_holes" | "separate_components" | "remove_components" | "repair_non_manifold") | null;
+            /** Repair Risk */
+            repair_risk: string | null;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "warning" | "info";
+            /** Title */
+            title: string;
+            /** Unit */
+            unit: string;
+        };
         /** GenerationCreate */
         GenerationCreate: {
             /**
@@ -1212,6 +1326,83 @@ export interface components {
          * @enum {string}
          */
         InputMode: "single_image" | "multi_view";
+        /** InspectionRead */
+        InspectionRead: {
+            /** Created At */
+            created_at: string | null;
+            /** Json Url */
+            json_url: string | null;
+            /** Markdown Url */
+            markdown_url: string | null;
+            /** Message */
+            message: string | null;
+            report: components["schemas"]["InspectionReportRead"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "missing" | "running" | "ready" | "failed";
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
+        /** InspectionReportRead */
+        InspectionReportRead: {
+            /** Findings */
+            findings: components["schemas"]["FindingRead"][];
+            /** Measurements */
+            measurements: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+            /** Meshes */
+            meshes: number;
+            /** Options */
+            options: {
+                [key: string]: unknown;
+            };
+            /** Report Version */
+            report_version: number;
+            /** Seconds */
+            seconds: number;
+            /** Skipped */
+            skipped: components["schemas"]["SkippedRead"][];
+            /** Triangles */
+            triangles: number;
+            /** Vertices */
+            vertices: number;
+        };
+        /** InspectionRequest */
+        InspectionRequest: {
+            /**
+             * Min Wall Mm
+             * @description Thinnest wall or feature to accept, in mm.
+             * @default 1
+             */
+            min_wall_mm?: number;
+            /**
+             * Overhang Degrees
+             * @description Steepest overhang that prints without supports.
+             * @default 45
+             */
+            overhang_degrees?: number;
+            /**
+             * Printability
+             * @description Also run the 3D-printing checks (wall thickness, overhangs…).
+             * @default false
+             */
+            printability?: boolean;
+            /**
+             * Self Intersections
+             * @description auto: only up to 2 million triangles (above, the search takes minutes).
+             * @default auto
+             * @enum {string}
+             */
+            self_intersections?: "auto" | "always" | "never";
+        };
         /**
          * JobAlternative
          * @description Another engine that can do the same job, offered when a job failed.
@@ -1416,6 +1607,22 @@ export interface components {
             os_version: string;
             /** Ram Total Bytes */
             ram_total_bytes: number | null;
+        };
+        /**
+         * LocationsRead
+         * @description Where a finding is, in the model's world space (glTF axes), at most 2,000.
+         */
+        LocationsRead: {
+            /** Points */
+            points: number[][];
+            /** Segments */
+            segments: number[][];
+            /** Shown */
+            shown: number;
+            /** Total */
+            total: number;
+            /** Triangles */
+            triangles: number[][];
         };
         /** LodLevelRead */
         LodLevelRead: {
@@ -1875,6 +2082,26 @@ export interface components {
              */
             target_faces?: number;
         };
+        /** RepairOperationIn */
+        RepairOperationIn: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "recalculate_normals" | "fix_winding" | "remove_degenerate_faces" | "remove_duplicate_faces" | "merge_duplicate_vertices" | "fill_small_holes" | "separate_components" | "remove_components" | "repair_non_manifold";
+            /**
+             * Pieces
+             * @description remove_components: the piece ids (from the inspection report) to delete.
+             */
+            pieces?: number[];
+        };
+        /** RepairRequest */
+        RepairRequest: {
+            /** Operations */
+            operations: components["schemas"]["RepairOperationIn"][];
+            /** Source Version Id */
+            source_version_id?: string | null;
+        };
         /**
          * ReportStatus
          * @enum {string}
@@ -1930,6 +2157,20 @@ export interface components {
              * @description The measured length in millimetres.
              */
             length_mm: number;
+        };
+        /** SkippedRead */
+        SkippedRead: {
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "integrity" | "topology" | "surface" | "uv_texture" | "fabrication";
+            /** Code */
+            code: string;
+            /** Reason */
+            reason: string;
+            /** Title */
+            title: string;
         };
         /**
          * SurfaceProvenance
@@ -2021,6 +2262,7 @@ export type ExportFormatRead = components['schemas']['ExportFormatRead'];
 export type ExportList = components['schemas']['ExportList'];
 export type ExportRead = components['schemas']['ExportRead'];
 export type ExportStatus = components['schemas']['ExportStatus'];
+export type FindingRead = components['schemas']['FindingRead'];
 export type GenerationCreate = components['schemas']['GenerationCreate'];
 export type GenerationInput = components['schemas']['GenerationInput'];
 export type GenerationPlanRead = components['schemas']['GenerationPlanRead'];
@@ -2030,6 +2272,9 @@ export type ImageKind = components['schemas']['ImageKind'];
 export type ImageList = components['schemas']['ImageList'];
 export type ImageRead = components['schemas']['ImageRead'];
 export type InputMode = components['schemas']['InputMode'];
+export type InspectionRead = components['schemas']['InspectionRead'];
+export type InspectionReportRead = components['schemas']['InspectionReportRead'];
+export type InspectionRequest = components['schemas']['InspectionRequest'];
 export type JobAlternative = components['schemas']['JobAlternative'];
 export type JobCostRead = components['schemas']['JobCostRead'];
 export type JobEventList = components['schemas']['JobEventList'];
@@ -2041,6 +2286,7 @@ export type JobList = components['schemas']['JobList'];
 export type JobRead = components['schemas']['JobRead'];
 export type JobStatus = components['schemas']['JobStatus'];
 export type LocalDeviceRead = components['schemas']['LocalDeviceRead'];
+export type LocationsRead = components['schemas']['LocationsRead'];
 export type LodLevelRead = components['schemas']['LodLevelRead'];
 export type LodRead = components['schemas']['LodRead'];
 export type MeshFileRead = components['schemas']['MeshFileRead'];
@@ -2073,10 +2319,13 @@ export type QualityModeInfo = components['schemas']['QualityModeInfo'];
 export type QualityReportRead = components['schemas']['QualityReportRead'];
 export type QualityWarningRead = components['schemas']['QualityWarningRead'];
 export type RemeshIn = components['schemas']['RemeshIn'];
+export type RepairOperationIn = components['schemas']['RepairOperationIn'];
+export type RepairRequest = components['schemas']['RepairRequest'];
 export type ReportStatus = components['schemas']['ReportStatus'];
 export type RetextureRequest = components['schemas']['RetextureRequest'];
 export type RetryRequest = components['schemas']['RetryRequest'];
 export type ScaleReferenceIn = components['schemas']['ScaleReferenceIn'];
+export type SkippedRead = components['schemas']['SkippedRead'];
 export type SurfaceProvenance = components['schemas']['SurfaceProvenance'];
 export type SystemInfo = components['schemas']['SystemInfo'];
 export type UploadItemResult = components['schemas']['UploadItemResult'];
@@ -2818,6 +3067,170 @@ export interface operations {
             };
         };
     };
+    get_inspection_api_v1_model_versions__version_id__inspection_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InspectionRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_inspection_api_v1_model_versions__version_id__inspection_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InspectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InspectionRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    inspection_json_api_v1_model_versions__version_id__inspection_report_json_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    inspection_markdown_api_v1_model_versions__version_id__inspection_report_md_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Markdown */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/markdown": unknown;
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_lod_api_v1_model_versions__version_id__lod_get: {
         parameters: {
             query?: never;
@@ -3169,6 +3582,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnhancePlanRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    repair_api_v1_models__model_id__repairs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRead"];
                 };
             };
             /** @description Client error */

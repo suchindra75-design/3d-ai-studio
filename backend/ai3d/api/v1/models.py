@@ -2,12 +2,13 @@ import uuid
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, Header, Response, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ai3d.api.deps import DatabaseDep, DbDep, ProvidersDep, RunnerDep, SettingsDep, StorageDep
 from ai3d.core.errors import NotFoundError
 from ai3d.models.enums import AssetKind
 from ai3d.schemas.enhance import EnhancePlanRead, EnhanceRequest, RetextureRequest
+from ai3d.schemas.inspection import InspectionRead, InspectionRequest, RepairRequest
 from ai3d.schemas.job import JobRead
 from ai3d.schemas.lod import LodRead
 from ai3d.schemas.model3d import (
@@ -18,6 +19,7 @@ from ai3d.schemas.model3d import (
     ModelVersionRead,
 )
 from ai3d.services import enhance as enhance_service
+from ai3d.services import inspection as inspection_service
 from ai3d.services import jobs as job_service
 from ai3d.services import lod as lod_service
 from ai3d.services import models as model_service
@@ -243,6 +245,82 @@ def get_lod_file(db: DbDep, storage: StorageDep, version_id: uuid.UUID, level: i
     return StreamingResponse(
         storage.open(asset.storage_key), media_type=asset.mime_type, headers=headers
     )
+
+
+@router.get(
+    "/model-versions/{version_id}/inspection",
+    response_model=InspectionRead,
+    summary="The version's health report (inspection), if it has one",
+)
+def get_inspection(db: DbDep, storage: StorageDep, version_id: uuid.UUID) -> InspectionRead:
+    return inspection_service.get_inspection(db, storage, version_id)
+
+
+@router.post(
+    "/model-versions/{version_id}/inspection",
+    response_model=InspectionRead,
+    summary="Inspect the version's health (in the background; poll the GET)",
+    description="Checks geometry integrity, topology, surface, UVs and textures, and "
+    "optionally 3D-printing suitability; nothing is changed. Returns at once with status "
+    "`running`; refused with `not_enough_memory` when it would not fit in free memory.",
+)
+def start_inspection(
+    database: DatabaseDep,
+    storage: StorageDep,
+    settings: SettingsDep,
+    version_id: uuid.UUID,
+    body: InspectionRequest,
+) -> InspectionRead:
+    return inspection_service.start(database, storage, settings, version_id, body)
+
+
+@router.get(
+    "/model-versions/{version_id}/inspection/report.json",
+    summary="Download the health report as JSON",
+)
+def inspection_json(db: DbDep, storage: StorageDep, version_id: uuid.UUID) -> JSONResponse:
+    report = inspection_service.read_report(db, storage, version_id)
+    name = f"health-report-{version_id}.json"
+    return JSONResponse(report, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.get(
+    "/model-versions/{version_id}/inspection/report.md",
+    summary="Download the health report as a readable document (Markdown)",
+    response_class=Response,
+    responses={200: {"content": {"text/markdown": {}}, "description": "Markdown"}},
+)
+def inspection_markdown(db: DbDep, storage: StorageDep, version_id: uuid.UUID) -> Response:
+    text = inspection_service.markdown(db, storage, version_id)
+    name = f"health-report-{version_id}.md"
+    return Response(
+        text,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@router.post(
+    "/models/{model_id}/repairs",
+    response_model=JobRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Repair a version into a new version (background job, on this machine)",
+    description="Runs only the operations given, in order; each reports exactly what it "
+    "changed. The source version is never changed; the result is a new `enhanced` version. "
+    "`remove_components` deletes only the pieces named.",
+)
+def repair(
+    *,
+    model_id: uuid.UUID,
+    body: RepairRequest,
+    db: DbDep,
+    providers: ProvidersDep,
+    runner: RunnerDep,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=255)] = None,
+) -> JobRead:
+    job = enhance_service.create_repair_job(db, model_id, body, idempotency_key=idempotency_key)
+    runner.wake()
+    return job_service.to_read(db, providers, job_service.get_job(db, job.id))
 
 
 @router.post(

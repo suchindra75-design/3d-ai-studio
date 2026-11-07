@@ -787,6 +787,124 @@
         "title": "ExportStatus",
         "type": "string"
       },
+      "FindingRead": {
+        "properties": {
+          "category": {
+            "enum": [
+              "integrity",
+              "topology",
+              "surface",
+              "uv_texture",
+              "fabrication"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "number"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "locations": {
+            "$ref": "#/components/schemas/LocationsRead"
+          },
+          "meshes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Meshes",
+            "type": "array"
+          },
+          "method": {
+            "enum": [
+              "exact",
+              "approximate",
+              "sampled"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "repair": {
+            "anyOf": [
+              {
+                "enum": [
+                  "recalculate_normals",
+                  "fix_winding",
+                  "remove_degenerate_faces",
+                  "remove_duplicate_faces",
+                  "merge_duplicate_vertices",
+                  "fill_small_holes",
+                  "separate_components",
+                  "remove_components",
+                  "repair_non_manifold"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair"
+          },
+          "repair_risk": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Risk"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "category",
+          "severity",
+          "title",
+          "count",
+          "unit",
+          "explanation",
+          "method",
+          "repair",
+          "repair_risk",
+          "meshes",
+          "locations",
+          "details"
+        ],
+        "title": "FindingRead",
+        "type": "object"
+      },
       "GenerationCreate": {
         "properties": {
           "cloud_upload_consent": {
@@ -1309,6 +1427,194 @@
         ],
         "title": "InputMode",
         "type": "string"
+      },
+      "InspectionRead": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "json_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Json Url"
+          },
+          "markdown_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Markdown Url"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InspectionReportRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "missing",
+              "running",
+              "ready",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version_id": {
+            "format": "uuid",
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "status",
+          "message",
+          "report",
+          "created_at",
+          "json_url",
+          "markdown_url"
+        ],
+        "title": "InspectionRead",
+        "type": "object"
+      },
+      "InspectionReportRead": {
+        "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingRead"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "measurements": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Measurements",
+            "type": "object"
+          },
+          "meshes": {
+            "title": "Meshes",
+            "type": "integer"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "report_version": {
+            "title": "Report Version",
+            "type": "integer"
+          },
+          "seconds": {
+            "title": "Seconds",
+            "type": "number"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/SkippedRead"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "triangles": {
+            "title": "Triangles",
+            "type": "integer"
+          },
+          "vertices": {
+            "title": "Vertices",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "report_version",
+          "triangles",
+          "vertices",
+          "meshes",
+          "findings",
+          "skipped",
+          "measurements",
+          "options",
+          "seconds"
+        ],
+        "title": "InspectionReportRead",
+        "type": "object"
+      },
+      "InspectionRequest": {
+        "properties": {
+          "min_wall_mm": {
+            "default": 1.0,
+            "description": "Thinnest wall or feature to accept, in mm.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 100.0,
+            "title": "Min Wall Mm",
+            "type": "number"
+          },
+          "overhang_degrees": {
+            "default": 45,
+            "description": "Steepest overhang that prints without supports.",
+            "maximum": 80.0,
+            "minimum": 10.0,
+            "title": "Overhang Degrees",
+            "type": "number"
+          },
+          "printability": {
+            "default": false,
+            "description": "Also run the 3D-printing checks (wall thickness, overhangs\u2026).",
+            "title": "Printability",
+            "type": "boolean"
+          },
+          "self_intersections": {
+            "default": "auto",
+            "description": "auto: only up to 2 million triangles (above, the search takes minutes).",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "title": "Self Intersections",
+            "type": "string"
+          }
+        },
+        "title": "InspectionRequest",
+        "type": "object"
       },
       "JobAlternative": {
         "description": "Another engine that can do the same job, offered when a job failed.",
@@ -1958,6 +2264,58 @@
           "last_seen_at"
         ],
         "title": "LocalDeviceRead",
+        "type": "object"
+      },
+      "LocationsRead": {
+        "description": "Where a finding is, in the model's world space (glTF axes), at most 2,000.",
+        "properties": {
+          "points": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "segments": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "shown": {
+            "title": "Shown",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "triangles": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Triangles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points",
+          "segments",
+          "triangles",
+          "shown",
+          "total"
+        ],
+        "title": "LocationsRead",
         "type": "object"
       },
       "LodLevelRead": {
@@ -3213,6 +3571,69 @@
         "title": "RemeshIn",
         "type": "object"
       },
+      "RepairOperationIn": {
+        "properties": {
+          "code": {
+            "enum": [
+              "recalculate_normals",
+              "fix_winding",
+              "remove_degenerate_faces",
+              "remove_duplicate_faces",
+              "merge_duplicate_vertices",
+              "fill_small_holes",
+              "separate_components",
+              "remove_components",
+              "repair_non_manifold"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "pieces": {
+            "description": "remove_components: the piece ids (from the inspection report) to delete.",
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 10000,
+            "title": "Pieces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "RepairOperationIn",
+        "type": "object"
+      },
+      "RepairRequest": {
+        "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/RepairOperationIn"
+            },
+            "maxItems": 9,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          },
+          "source_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Version Id"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "title": "RepairRequest",
+        "type": "object"
+      },
       "ReportStatus": {
         "enum": [
           "pass",
@@ -3316,6 +3737,41 @@
           "length_mm"
         ],
         "title": "ScaleReferenceIn",
+        "type": "object"
+      },
+      "SkippedRead": {
+        "properties": {
+          "category": {
+            "enum": [
+              "integrity",
+              "topology",
+              "surface",
+              "uv_texture",
+              "fabrication"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "category",
+          "title",
+          "reason"
+        ],
+        "title": "SkippedRead",
         "type": "object"
       },
       "SurfaceProvenance": {
@@ -4499,6 +4955,221 @@
         ]
       }
     },
+    "/api/v1/model-versions/{version_id}/inspection": {
+      "get": {
+        "operationId": "get_inspection_api_v1_model_versions__version_id__inspection_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InspectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "The version's health report (inspection), if it has one",
+        "tags": [
+          "models"
+        ]
+      },
+      "post": {
+        "description": "Checks geometry integrity, topology, surface, UVs and textures, and optionally 3D-printing suitability; nothing is changed. Returns at once with status `running`; refused with `not_enough_memory` when it would not fit in free memory.",
+        "operationId": "start_inspection_api_v1_model_versions__version_id__inspection_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InspectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InspectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Inspect the version's health (in the background; poll the GET)",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/model-versions/{version_id}/inspection/report.json": {
+      "get": {
+        "operationId": "inspection_json_api_v1_model_versions__version_id__inspection_report_json_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Download the health report as JSON",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/model-versions/{version_id}/inspection/report.md": {
+      "get": {
+        "operationId": "inspection_markdown_api_v1_model_versions__version_id__inspection_report_md_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/markdown": {}
+            },
+            "description": "Markdown"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Download the health report as a readable document (Markdown)",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/model-versions/{version_id}/lod": {
       "get": {
         "operationId": "get_lod_api_v1_model_versions__version_id__lod_get",
@@ -5008,6 +5679,87 @@
           }
         },
         "summary": "Preview the processing steps an enhancement would run",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/repairs": {
+      "post": {
+        "description": "Runs only the operations given, in order; each reports exactly what it changed. The source version is never changed; the result is a new `enhanced` version. `remove_components` deletes only the pieces named.",
+        "operationId": "repair_api_v1_models__model_id__repairs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Repair a version into a new version (background job, on this machine)",
         "tags": [
           "models"
         ]
