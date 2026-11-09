@@ -106,6 +106,63 @@ def test_merging_duplicates_keeps_seams() -> None:
     assert len(scene.geometry["part0"].vertices) == 960
 
 
+def _with_hand_set_normals(*, open_side: bool = False) -> tuple[trimesh.Scene, dict[Any, Any]]:
+    """Two boxes in one mesh with unusual stored normals, plus a duplicate triangle, a
+    zero-area one and a duplicated vertex for the repairs to remove (or, with
+    ``open_side``, one side of the second box missing: a hole to fill)."""
+    box = trimesh.creation.box()
+    far = trimesh.creation.box()
+    far.apply_translation([3, 0, 0])
+    rng = np.random.default_rng(2)
+    normals = rng.normal(size=(16, 3))
+    normals /= np.linalg.norm(normals, axis=1)[:, None]
+    vertices = np.vstack([box.vertices, far.vertices, box.vertices[:1]])
+    normals = np.vstack([normals, normals[:1]])
+    if open_side:
+        faces = np.vstack([box.faces, far.faces[2:] + 8, [[16, 1, 2]]])
+    else:
+        extra = [box.faces[0], [0, 0, 1], [16, 1, 2]]
+        faces = np.vstack([box.faces, far.faces + 8, extra])
+    mesh = trimesh.Trimesh(vertices, faces, vertex_normals=normals, process=False)
+    by_position = {tuple(v): n for v, n in zip(vertices, normals, strict=True)}
+    return _scene(mesh), by_position
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {"code": "remove_degenerate_faces"},
+        {"code": "remove_duplicate_faces"},
+        {"code": "merge_duplicate_vertices"},
+        {"code": "repair_non_manifold"},
+        {"code": "fix_winding"},
+        {"code": "separate_components"},
+        {"code": "remove_components", "pieces": [1]},
+        {"code": "fill_small_holes"},
+    ],
+    ids=lambda op: op["code"],
+)
+def test_repairs_keep_the_stored_normals(operation: dict[str, Any]) -> None:
+    # trimesh drops stored normals whenever faces change; a repair must not (they carry
+    # hand-set hard edges). Checked after a GLB round trip, as the new version is saved.
+    filling = operation["code"] == "fill_small_holes"
+    scene, by_position = _with_hand_set_normals(open_side=filling)
+    result = repair.run_repairs(scene, [operation])
+    assert result.steps[0].status == "applied" if filling else True
+    saved = trimesh.load_scene(
+        io.BytesIO(scene.export(file_type="glb")), file_type="glb", process=False
+    )
+    checked = 0
+    for mesh in saved.geometry.values():
+        assert not mesh.vertex_attributes  # nothing extra is written to the file
+        stored = mesh._cache.cache.get("vertex_normals")
+        assert stored is not None
+        for vertex, normal in zip(mesh.vertices, stored, strict=True):
+            np.testing.assert_allclose(normal, by_position[tuple(vertex)], atol=1e-6)
+            checked += 1
+    assert checked >= 8
+
+
 def test_filling_small_holes_only_on_plain_meshes() -> None:
     box = trimesh.creation.box()
     box.update_faces(np.arange(len(box.faces)) >= 2)

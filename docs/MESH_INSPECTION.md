@@ -57,7 +57,7 @@ changed and can be made current again from **Versions**.
 | Fabrication (optional) | Not watertight | exact | Necessary for printing, **never sufficient**: watertightness alone is not reported as "printable". |
 | | Several shells | exact | Closed pieces. |
 | | Overhangs | exact angle | Triangles facing down more steeply than 45° (adjustable) from +Y as stored, excluding those on the build plate. Whether supports are needed depends on the printer and the orientation. |
-| | Thin walls or features | sampled | From 2,000 area-weighted surface points (fixed seed), rays straight inwards along the triangle's normal and the smoothed surface normal, to the first surface facing the other way (within 60°); the longer reading is kept. Reported: minimum, 5th percentile and median thickness, and the points under the limit. The 5th percentile is the robust figure; the minimum is one sample. Can overestimate by up to about 40% where the two directions differ, and at sharp tips; misses thin spots between samples; not meaningful where the surface folds through itself. Tested on boxes and plates of known thickness, including a noisy one. In millimetres only when the model has a real-world scale; otherwise in model units, and the finding says so. "Minimum feature size" is the same measurement. |
+| | Thin walls or features | sampled | From 2,000 area-weighted surface points (fixed seed), rays straight inwards along the triangle's normal and the smoothed surface normal, to the first surface facing the other way (within 60°); the longer reading is kept. Reported: minimum, 5th percentile and median thickness, and the points under the limit (a reading within the welding tolerance of the limit counts as at the limit). The 5th percentile is the robust figure; the minimum is one sample. Can overestimate by up to about 40% where the two directions differ, and at sharp tips; misses thin spots between samples; not meaningful where the surface folds through itself. Tested on boxes and plates of known thickness, including a noisy one. In millimetres only when the model has a real-world scale; otherwise in model units, and the finding says so. "Minimum feature size" is the same measurement. |
 | | Shells inside other shells | approximate | One oblique ray per closed piece, counting crossings of other pieces. A ray grazing an edge can miscount. Up to 200 closed pieces. |
 
 Wall thickness and internal shells are measured only on watertight models: without a
@@ -77,7 +77,8 @@ closed surface, "inside" is not defined.
 | Remove chosen pieces | Deletes the pieces you ticked, and only those | Everything else | **Yes: destructive.** Confirmed separately. Refused when it would remove every piece. |
 | Repair non-manifold edges | Removes duplicate and zero-area triangles where they make edges non-manifold | Everything else | No. Edges where three or more real surfaces meet are reported and left: any automatic fix would change the shape. |
 
-Each repair's result says exactly what it changed (counts) or why it did nothing. A
+Stored normals stay as they were on every vertex that stays (and so do hand-set hard
+edges); only **Recalculate normals** changes them. Each repair's result says exactly what it changed (counts) or why it did nothing. A
 repair that changes nothing makes no new version. A repair that fails (an error)
 makes no version and leaves the source untouched; an interrupted one runs again
 from the start, and only one version results (tested).

@@ -198,6 +198,19 @@ def test_printability_measures_wall_thickness_in_millimetres() -> None:
     assert found.count > 0
 
 
+def test_a_wall_exactly_at_the_limit_is_not_thin() -> None:
+    # Rays start just inside the surface; the reading is from the surface itself, so a
+    # 1 mm wall measures 1 mm (not 0.9999999) and passes a 1 mm limit.
+    options = ins.Options(printability=True, min_wall_mm=1.0, units_per_mm=0.001)
+    exact = ins.inspect_scene(_scene(_thin_plate(0.001)), options)
+    assert exact.measurements["fabrication"]["wall_thickness"]["min"] == pytest.approx(
+        1.0, abs=1e-6
+    )
+    assert "thin_walls" not in _codes(exact)
+    under = ins.inspect_scene(_scene(_thin_plate(0.00099)), options)
+    assert _codes(under)["thin_walls"].count > 0
+
+
 def test_printability_without_a_scale_says_so() -> None:
     report = ins.inspect_scene(_scene(_ball()), ins.Options(printability=True, min_wall_mm=5))
     found = _codes(report)["thin_walls"]  # a radius-1 ball is under 5 units thick

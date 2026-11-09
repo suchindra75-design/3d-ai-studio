@@ -1178,14 +1178,15 @@ def _wall_thickness(ctx: _Context) -> None:
     smoothed = np.einsum("ij,ijk->ik", weights, smooth[model.welded_faces[chosen]])
     smoothed /= np.maximum(np.linalg.norm(smoothed, axis=1), 1e-300)[:, None]
     thickness = np.full(count, np.nan)
+    inset = model.diagonal * 1e-7  # the welding tolerance
     for i in range(count):
         own = ctx.normals[chosen[i]]
         readings = []
         for n in (own, smoothed[i]) if float(own @ smoothed[i]) < 0.999 else (own,):
-            start = points[i] - n * model.diagonal * 1e-7
+            start = points[i] - n * inset  # just inside, so the ray misses its own surface
             distance, _ = _ray_hits(grid, start, -n, nearest=True, skip=int(chosen[i]))
             if distance is not None:
-                readings.append(distance)
+                readings.append(distance + inset)  # measured from the surface itself
         if readings:
             thickness[i] = max(readings) * to_unit
     measured = thickness[np.isfinite(thickness)]
@@ -1202,7 +1203,10 @@ def _wall_thickness(ctx: _Context) -> None:
     fab["wall_thickness"] = stats
     fab["minimum_feature_size"] = stats["min"]
     threshold = options.min_wall_mm
-    thin = np.flatnonzero(np.isfinite(thickness) & (thickness < threshold))
+    # Within the welding tolerance of the limit counts as at the limit (a 1 mm wall
+    # measured as 0.9999999 mm is a 1 mm wall).
+    tolerance = inset * to_unit
+    thin = np.flatnonzero(np.isfinite(thickness) & (thickness < threshold - tolerance))
     if not len(thin):
         return
     note = (

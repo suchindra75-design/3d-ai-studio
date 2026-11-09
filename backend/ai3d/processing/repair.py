@@ -118,6 +118,33 @@ def _meshes(scene: trimesh.Scene) -> list[tuple[str, trimesh.Trimesh]]:
     return [(n, g) for n, g in scene.geometry.items() if isinstance(g, trimesh.Trimesh)]
 
 
+_CARRIED_NORMALS = "_ai3d_stored_normals"
+
+
+def _carry_normals(scene: trimesh.Scene) -> None:
+    """trimesh forgets a mesh's stored normals whenever its faces change (they live in a
+    cache that is cleared), so removing a triangle would also drop the file's normals
+    and with them hand-set hard edges. Carry them as a vertex attribute, which trimesh
+    re-indexes along with the vertices when they are removed, merged or split."""
+    for _, mesh in _meshes(scene):
+        stored = mesh._cache.cache.get("vertex_normals")
+        if stored is not None and len(stored) == len(mesh.vertices):
+            mesh.vertex_attributes[_CARRIED_NORMALS] = np.array(stored, dtype=np.float64)
+
+
+def _carried(mesh: trimesh.Trimesh) -> np.ndarray | None:
+    carried = mesh.vertex_attributes.get(_CARRIED_NORMALS)
+    return None if carried is None else np.asarray(carried)
+
+
+def _restore_normals(scene: trimesh.Scene) -> None:
+    for _, mesh in _meshes(scene):
+        carried = _carried(mesh)
+        mesh.vertex_attributes.pop(_CARRIED_NORMALS, None)
+        if carried is not None and len(carried) == len(mesh.vertices):
+            mesh._cache["vertex_normals"] = np.asarray(carried)  # as trimesh's setter stores them
+
+
 def _welded_faces(mesh: trimesh.Trimesh) -> np.ndarray:
     """The mesh's faces over welded positions (seams joined), as the inspection sees them."""
     extent = float(np.ptp(mesh.vertices, axis=0).max()) if len(mesh.vertices) else 1.0
@@ -245,27 +272,73 @@ def merge_duplicate_vertices(scene: trimesh.Scene) -> Step:
     )
 
 
+def _position_keys(vertices: np.ndarray) -> np.ndarray:
+    rows = np.ascontiguousarray(vertices, dtype=np.float64)
+    keys: np.ndarray = rows.view(np.dtype((np.void, rows.itemsize * 3))).ravel()
+    return keys
+
+
+def _normals_at(old: np.ndarray, normals: np.ndarray, new: np.ndarray) -> np.ndarray | None:
+    """Stored normals for ``new`` vertices, taken from ``old`` ones at the same position;
+    None when vertices at one position had different normals (a hand-set hard edge) or a
+    new vertex has no old one."""
+    keys, first, inverse = np.unique(_position_keys(old), return_index=True, return_inverse=True)
+    per_position = normals[first]
+    if not np.allclose(per_position[inverse.ravel()], normals, atol=1e-6):
+        return None
+    wanted = _position_keys(new)
+    where = np.minimum(np.searchsorted(keys, wanted), len(keys) - 1)
+    if len(keys) == 0 or (keys[where] != wanted).any():
+        return None
+    found: np.ndarray = per_position[where]
+    return found
+
+
 def fill_small_holes(scene: trimesh.Scene) -> Step:
+    before = dict(_meshes(scene))
     step = geometry.fill_holes(scene)
-    return Step(
-        "fill_small_holes",
-        OPERATIONS["fill_small_holes"].title,
-        step.status,
-        step.detail
-        + (
+    lost = 0
+    for name, mesh in _meshes(scene):
+        # Filling works on a copy with vertices at one position joined, which becomes
+        # the mesh: hand the stored normals on by position where that is unambiguous.
+        old = before.get(name)
+        carried = None if old is None else _carried(old)
+        if old is None or mesh is old or carried is None:
+            continue
+        normals = _normals_at(old.vertices, carried, mesh.vertices)
+        if normals is None:
+            lost += 1
+        else:
+            mesh.vertex_attributes[_CARRIED_NORMALS] = normals
+    detail = step.detail
+    if step.status == "applied":
+        detail += (
             " Only openings of three or four edges are filled; larger ones are left as they are."
-            if step.status == "applied"
-            else ""
-        ),
-    )
+        )
+    if lost:
+        detail += (
+            f" The stored normals of {lost:,} mesh(es) could not be kept (vertices at one point "
+            "had different normals, and filling joins them); the viewer computes smooth ones."
+        )
+    return Step("fill_small_holes", OPERATIONS["fill_small_holes"].title, step.status, detail)
 
 
 def separate_components(scene: trimesh.Scene) -> Step:
     parts = 0
     for name, mesh in _meshes(scene):
-        pieces = mesh.split(only_watertight=False)
-        if len(pieces) <= 1:
+        # As mesh.split does, keeping each piece's faces to carry stored normals along.
+        components = trimesh.graph.connected_components(
+            edges=mesh.face_adjacency, nodes=np.arange(len(mesh.faces)), min_len=1
+        )
+        if len(components) <= 1:
             continue
+        pieces: list[trimesh.Trimesh] = list(
+            mesh.submesh(components, only_watertight=False, append=False)  # type: ignore[arg-type]
+        )
+        carried = _carried(mesh)
+        if carried is not None:
+            for piece, faces in zip(pieces, components, strict=True):
+                piece.vertex_attributes[_CARRIED_NORMALS] = carried[np.unique(mesh.faces[faces])]
         nodes = [n for n in scene.graph.nodes_geometry if scene.graph[n][1] == name]
         transforms = [scene.graph[n][0] for n in nodes]
         scene.delete_geometry(name)
@@ -344,17 +417,28 @@ def repair_non_manifold(scene: trimesh.Scene) -> Step:
 
 
 def run_repairs(scene: trimesh.Scene, operations: list[dict[str, Any]]) -> ProcessingResult:
-    """Run the operations in the order given; each records exactly what it changed."""
+    """Run the operations in the order given; each records exactly what it changed.
+    Stored normals stay as they were (on the vertices that stay) unless the operation
+    is recalculate_normals."""
     result = ProcessingResult(scene=scene)
     for operation in operations:
         code = operation["code"]
-        if code == "remove_components":
-            step = remove_components(scene, [int(p) for p in operation.get("pieces") or []])
-        elif code == "fix_winding":
-            step = geometry.fix_normals(scene)
-            step = Step("fix_winding", OPERATIONS["fix_winding"].title, step.status, step.detail)
-        else:
-            step = _SIMPLE[code](scene)
+        if code == "recalculate_normals":
+            result.steps.append(recalculate_normals(scene))
+            continue
+        _carry_normals(scene)
+        try:
+            if code == "remove_components":
+                step = remove_components(scene, [int(p) for p in operation.get("pieces") or []])
+            elif code == "fix_winding":
+                step = geometry.fix_normals(scene)
+                step = Step(
+                    "fix_winding", OPERATIONS["fix_winding"].title, step.status, step.detail
+                )
+            else:
+                step = _SIMPLE[code](scene)
+        finally:
+            _restore_normals(scene)
         result.steps.append(step)
     return result
 
