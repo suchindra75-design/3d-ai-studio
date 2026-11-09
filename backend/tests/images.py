@@ -21,6 +21,36 @@ def blurred(width: int = 800, height: int = 600, seed: int = 0) -> Image.Image:
     return textured(width, height, seed).filter(ImageFilter.GaussianBlur(12))
 
 
+def vase(
+    background: tuple[int, int, int] = (215, 215, 210),
+    colour: tuple[int, int, int] = (150, 70, 40),
+    *,
+    size: tuple[int, int] = (800, 600),
+    centre: tuple[float, float] = (0.5, 0.5),
+    scale: float = 1.0,
+    noise: float = 6.0,
+) -> tuple[Image.Image, np.ndarray]:
+    """A shaded vase with a handle on a plain background, and its true mask.
+
+    ``centre`` is a fraction of the picture; ``scale`` 1 makes the vase about two thirds
+    of the picture's height.
+    """
+    width, height = size
+    unit = height / 900 * scale
+    cx, cy = centre[0] * width, centre[1] * height
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    body = ((xx - cx) / (220 * unit)) ** 2 + ((yy - cy) / (300 * unit)) ** 2 < 1
+    neck = (np.abs(xx - cx) < 70 * unit) & (yy > cy - 420 * unit) & (yy < cy - 200 * unit)
+    ring = np.abs(np.hypot(xx - (cx + 250 * unit), yy - cy) - 80 * unit) < 18 * unit
+    mask = body | neck | (ring & (xx > cx + 180 * unit))
+    shade = np.clip(1 - (xx - cx + 120 * unit) ** 2 / (2 * (220 * unit) ** 2), 0.0, 1.0)
+    pixels = np.empty((height, width, 3), np.float32)
+    pixels[:] = background
+    pixels[mask] = np.asarray(colour, np.float32) * (0.35 + 0.65 * shade[mask])[:, None]
+    pixels += np.random.default_rng(1).normal(0, noise, pixels.shape)
+    return Image.fromarray(np.clip(pixels, 0, 255).astype("uint8")), mask
+
+
 def encode(img: Image.Image, fmt: str = "JPEG", **kwargs: object) -> bytes:
     buffer = io.BytesIO()
     img.save(buffer, format=fmt, **kwargs)

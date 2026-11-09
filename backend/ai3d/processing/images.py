@@ -35,6 +35,8 @@ UNDEREXPOSED = 0.15
 OVEREXPOSED = 0.85
 HIGHLIGHT_CLIP_WARN = 0.05
 LOW_CONTRAST = 0.08
+# A frame edge counts as cutting the object when the object covers this share of it.
+FRAME_TOUCH_SHARE = 0.02
 
 Severity = Literal["info", "warning", "error"]
 
@@ -191,6 +193,53 @@ def oriented(img: Image.Image) -> Image.Image:
     return ImageOps.exif_transpose(img)
 
 
+def frame_touches(mask: np.ndarray) -> list[str]:
+    """Edges of the photo ("top", "bottom", "left", "right") that the object runs off.
+
+    ``mask`` is True on the object. An edge counts when the object covers at least
+    ``FRAME_TOUCH_SHARE`` of a 2-pixel band along it, so a stray pixel does not.
+    """
+    if mask.size == 0:
+        return []
+    bands = {
+        "top": mask[:2, :],
+        "bottom": mask[-2:, :],
+        "left": mask[:, :2],
+        "right": mask[:, -2:],
+    }
+    return [side for side, band in bands.items() if band.mean() >= FRAME_TOUCH_SHARE]
+
+
+def join_sides(sides: list[str]) -> str:
+    """["top", "left", "right"] -> "top, left and right"."""
+    return sides[0] if len(sides) == 1 else ", ".join(sides[:-1]) + f" and {sides[-1]}"
+
+
+def _transparency_warnings(subject: np.ndarray) -> list[QualityWarning]:
+    """Framing problems visible from a photo's own transparency (True = object)."""
+    if subject.mean() < 0.01:
+        return [
+            QualityWarning(
+                "no_subject",
+                "error",
+                "The photo is almost entirely transparent, so there is no object to model.",
+            )
+        ]
+    touches = frame_touches(subject)
+    if not touches:
+        return []
+    return [
+        QualityWarning(
+            "subject_cropped",
+            "warning",
+            f"The object runs off the {join_sides(touches)} "
+            f"edge{'s' if len(touches) > 1 else ''} of the photo. Single-photo AI can only "
+            "model what is in the frame, so it will be cut flat there. Leave space around "
+            "the whole object.",
+        )
+    ]
+
+
 def analyze(img: Image.Image, meta: ImageMetadata) -> ImageAnalysis:
     """Cheap per-image quality signals for reconstruction suitability."""
     rgba = img.convert("RGBA") if meta.has_alpha else None
@@ -285,6 +334,9 @@ def analyze(img: Image.Image, meta: ImageMetadata) -> ImageAnalysis:
                 "Very low contrast. Plain, texture-less surfaces are hard to reconstruct.",
             )
         )
+
+    if mask is not None:
+        warnings.extend(_transparency_warnings(alpha_arr > 127))
 
     if meta.has_gps:
         warnings.append(

@@ -211,7 +211,10 @@
           "action": {
             "anyOf": [
               {
-                "const": "measure_overlap",
+                "enum": [
+                  "measure_overlap",
+                  "check_cutout"
+                ],
                 "type": "string"
               },
               {
@@ -367,6 +370,69 @@
         ],
         "title": "CredentialSource",
         "type": "string"
+      },
+      "CutoutRead": {
+        "description": "What local generation's background removal makes of the photo (on request).",
+        "properties": {
+          "background_match": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of the colours along the object's edge that also occur in the background beside it (high = the object blends in).",
+            "title": "Background Match"
+          },
+          "background_removed": {
+            "description": "False when the photo's own transparency is used instead.",
+            "title": "Background Removed",
+            "type": "boolean"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "coverage": {
+            "description": "Share of the photo inside the cut-out.",
+            "title": "Coverage",
+            "type": "number"
+          },
+          "touches": {
+            "description": "Photo edges the object runs off.",
+            "items": {
+              "enum": [
+                "top",
+                "bottom",
+                "left",
+                "right"
+              ],
+              "type": "string"
+            },
+            "title": "Touches",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/QualityWarningRead"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "background_removed",
+          "coverage",
+          "touches",
+          "background_match",
+          "warnings",
+          "checked_at"
+        ],
+        "title": "CutoutRead",
+        "type": "object"
       },
       "EnhancePlanRead": {
         "properties": {
@@ -1197,6 +1263,16 @@
             "title": "Contrast",
             "type": "number"
           },
+          "cutout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CutoutRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "megapixels": {
             "title": "Megapixels",
             "type": "number"
@@ -1232,7 +1308,8 @@
           "clipped_shadows",
           "megapixels",
           "subject_coverage",
-          "warnings"
+          "warnings",
+          "cutout"
         ],
         "title": "ImageAnalysisRead",
         "type": "object"
@@ -1299,6 +1376,19 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "cutout_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The picture local AI generation receives (after a cut-out check).",
+            "readOnly": true,
+            "title": "Cutout Url"
           },
           "exif": {
             "additionalProperties": true,
@@ -1414,7 +1504,8 @@
           "analysis",
           "created_at",
           "file_url",
-          "thumbnail_url"
+          "thumbnail_url",
+          "cutout_url"
         ],
         "title": "ImageRead",
         "type": "object"
@@ -4295,6 +4386,55 @@
         ]
       }
     },
+    "/api/v1/images/{image_id}/cutout": {
+      "get": {
+        "operationId": "get_image_cutout_api_v1_images__image_id__cutout_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Image Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {}
+            },
+            "description": "Cut-out preview"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "The picture local AI generation receives (after a cut-out check)",
+        "tags": [
+          "images"
+        ]
+      }
+    },
     "/api/v1/images/{image_id}/file": {
       "get": {
         "operationId": "get_image_file_api_v1_images__image_id__file_get",
@@ -6399,6 +6539,60 @@
           }
         },
         "summary": "Assess whether the project's photos are ready for reconstruction",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{project_id}/capture-assessment/cutout": {
+      "post": {
+        "description": "Runs local generation's background removal on this machine for each photo without a current result, checks framing and how well the object stands out, and stores the picture the AI would receive (`/images/{id}/cutout`). Nothing is uploaded. Takes a few seconds per photo.",
+        "operationId": "check_cutout_api_v1_projects__project_id__capture_assessment_cutout_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureAssessment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Preview the cut-out local generation would make (single-image projects)",
         "tags": [
           "projects"
         ]

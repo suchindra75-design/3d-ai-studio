@@ -104,6 +104,34 @@ def test_3mf_colours_are_a_colour_group(tmp_path: Path) -> None:
     assert len(mesh.faces) == len(_coloured_box().to_mesh().faces)
 
 
+def test_a_textured_model_keeps_its_colours_in_3mf(tmp_path: Path) -> None:
+    """3MF has no textures: the texture's colour at each vertex becomes a colour group
+    (refined local AI models are textured, and 3MF is for colour printing)."""
+    box = trimesh.creation.box(extents=(0.2, 0.5, 0.1)).subdivide().subdivide()
+    box.unmerge_vertices()
+    height = (box.vertices[:, 1] - box.vertices[:, 1].min()) / np.ptp(box.vertices[:, 1])
+    image = np.zeros((64, 64, 3), np.uint8)
+    image[:32] = (20, 40, 220)  # top half of the texture: blue (sRGB)
+    image[32:] = (220, 30, 20)  # bottom half: red
+    uv = np.stack([np.full(len(height), 0.5), np.where(height > 0.5, 0.9, 0.1)], axis=1)
+    material = trimesh.visual.material.PBRMaterial(baseColorTexture=Image.fromarray(image))
+    box.visual = trimesh.visual.TextureVisuals(uv=uv, material=material)
+    scene = trimesh.Scene(box)
+    facts = exporters.scene_facts(scene)
+    assert facts.textured
+    assert not facts.coloured
+    out = tmp_path / "box.3mf"
+    exporters.write(scene, ExportFormat.THREE_MF, out)
+    assert exporters.validate(out, ExportFormat.THREE_MF, facts)["coloured"] is True
+    model = zipfile.ZipFile(out).read("3D/3dmodel.model").decode()
+    # Written as the texture's own sRGB colours, top blue and bottom red.
+    assert 'color="#1428DC"' in model
+    assert 'color="#DC1E14"' in model
+    assert "colour group. A texture becomes per-vertex colours" in " ".join(
+        exporters.format_info(ExportFormat.THREE_MF).notes
+    )
+
+
 @pytest.mark.skipif(not USD, reason="needs Pixar USD (the usdz extra)")
 def test_usdz_colours_feed_the_material(tmp_path: Path) -> None:
     from pxr import Usd, UsdGeom  # noqa: PLC0415 - optional

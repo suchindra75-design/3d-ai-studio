@@ -24,6 +24,7 @@ import { useId, useState, type FormEvent } from 'react';
 import {
   invalidateProjectData,
   useCaptureAssessment,
+  useCheckCutout,
   useMeasureOverlap,
   useDeleteImage,
   useDeleteProject,
@@ -172,6 +173,7 @@ export function ProjectWorkspaceScreen({ projectId }: { projectId: string }) {
   const images = useImages(projectId);
   const capture = useCaptureAssessment(projectId);
   const measureOverlap = useMeasureOverlap(projectId);
+  const checkCutout = useCheckCutout(projectId);
   const systemInfo = useSystemInfo();
   const deleteImage = useDeleteImage();
   const jobs = useJobs(projectId);
@@ -296,6 +298,9 @@ export function ProjectWorkspaceScreen({ projectId }: { projectId: string }) {
             measuring={measureOverlap.isPending}
             measureError={measureOverlap.error}
             onMeasureOverlap={() => measureOverlap.mutate()}
+            checkingCutout={checkCutout.isPending}
+            cutoutError={checkCutout.error}
+            onCheckCutout={() => checkCutout.mutate()}
             onSelectImage={setSelectedId}
           />
           <CaptureGuide mode={p.input_mode} />

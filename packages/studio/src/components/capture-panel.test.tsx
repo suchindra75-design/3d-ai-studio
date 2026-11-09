@@ -67,3 +67,41 @@ it('runs the overlap measurement from its check', async () => {
   );
   expect(screen.getByRole('button', { name: /Matching features/ })).toBeDisabled();
 });
+
+it('runs the cut-out check from its check', async () => {
+  const onCheckCutout = vi.fn();
+  const single: CaptureAssessment = {
+    ...assessment,
+    input_mode: 'single_image',
+    checks: [
+      {
+        code: 'cutout',
+        status: 'not_assessed',
+        title: 'Cut-out not checked yet',
+        message: '…',
+        image_ids: [],
+        action: 'check_cutout',
+      },
+    ],
+  };
+  const { rerender } = renderWithStudio(
+    <CapturePanel
+      assessment={single}
+      loading={false}
+      onSelectImage={vi.fn()}
+      onCheckCutout={onCheckCutout}
+    />,
+  );
+  await userEvent.click(screen.getByRole('button', { name: 'Check cut-out' }));
+  expect(onCheckCutout).toHaveBeenCalledTimes(1);
+  rerender(
+    <CapturePanel
+      assessment={single}
+      loading={false}
+      onSelectImage={vi.fn()}
+      onCheckCutout={onCheckCutout}
+      checkingCutout
+    />,
+  );
+  expect(screen.getByRole('button', { name: /Cutting out/ })).toBeDisabled();
+});

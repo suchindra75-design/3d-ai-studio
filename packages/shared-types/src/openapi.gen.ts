@@ -110,6 +110,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/images/{image_id}/cutout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The picture local AI generation receives (after a cut-out check) */
+        get: operations["get_image_cutout_api_v1_images__image_id__cutout_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/images/{image_id}/file": {
         parameters: {
             query?: never;
@@ -608,6 +625,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/capture-assessment/cutout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview the cut-out local generation would make (single-image projects)
+         * @description Runs local generation's background removal on this machine for each photo without a current result, checks framing and how well the object stands out, and stores the picture the AI would receive (`/images/{id}/cutout`). Nothing is uploaded. Takes a few seconds per photo.
+         */
+        post: operations["check_cutout_api_v1_projects__project_id__capture_assessment_cutout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/capture-assessment/overlap": {
         parameters: {
             query?: never;
@@ -908,7 +945,7 @@ export interface components {
         /** CaptureCheck */
         CaptureCheck: {
             /** Action */
-            action: "measure_overlap" | null;
+            action: ("measure_overlap" | "check_cutout") | null;
             /** Code */
             code: string;
             /** Image Ids */
@@ -961,6 +998,39 @@ export interface components {
          * @enum {string}
          */
         CredentialSource: "none" | "environment" | "stored";
+        /**
+         * CutoutRead
+         * @description What local generation's background removal makes of the photo (on request).
+         */
+        CutoutRead: {
+            /**
+             * Background Match
+             * @description Share of the colours along the object's edge that also occur in the background beside it (high = the object blends in).
+             */
+            background_match: number | null;
+            /**
+             * Background Removed
+             * @description False when the photo's own transparency is used instead.
+             */
+            background_removed: boolean;
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /**
+             * Coverage
+             * @description Share of the photo inside the cut-out.
+             */
+            coverage: number;
+            /**
+             * Touches
+             * @description Photo edges the object runs off.
+             */
+            touches: ("top" | "bottom" | "left" | "right")[];
+            /** Warnings */
+            warnings: components["schemas"]["QualityWarningRead"][];
+        };
         /** EnhancePlanRead */
         EnhancePlanRead: {
             /** Notes */
@@ -1246,6 +1316,7 @@ export interface components {
             clipped_shadows: number;
             /** Contrast */
             contrast: number;
+            cutout: components["schemas"]["CutoutRead"] | null;
             /** Megapixels */
             megapixels: number;
             /** Sharpness */
@@ -1279,6 +1350,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Cutout Url
+             * @description The picture local AI generation receives (after a cut-out check).
+             */
+            readonly cutout_url: string | null;
             /** Exif */
             exif: {
                 [key: string]: unknown;
@@ -2250,6 +2326,7 @@ export type ConsentGrant = components['schemas']['ConsentGrant'];
 export type CostEstimateRead = components['schemas']['CostEstimateRead'];
 export type CredentialCheckRead = components['schemas']['CredentialCheckRead'];
 export type CredentialSource = components['schemas']['CredentialSource'];
+export type CutoutRead = components['schemas']['CutoutRead'];
 export type EnhancePlanRead = components['schemas']['EnhancePlanRead'];
 export type EnhanceRequest = components['schemas']['EnhanceRequest'];
 export type EnhanceStepPlan = components['schemas']['EnhanceStepPlan'];
@@ -2585,6 +2662,46 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_image_cutout_api_v1_images__image_id__cutout_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                image_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cut-out preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
             };
             /** @description Client error */
             "4XX": {
@@ -4067,6 +4184,46 @@ export interface operations {
         };
     };
     capture_assessment_api_v1_projects__project_id__capture_assessment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaptureAssessment"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    check_cutout_api_v1_projects__project_id__capture_assessment_cutout_post: {
         parameters: {
             query?: never;
             header?: never;

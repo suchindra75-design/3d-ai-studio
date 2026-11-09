@@ -7,6 +7,7 @@ export type {
   CostEstimateRead,
   CredentialCheckRead,
   CredentialSource,
+  CutoutRead,
   EnhancePlanRead,
   EnhanceRequest,
   EnhanceStepPlan,

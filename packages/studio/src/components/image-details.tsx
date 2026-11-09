@@ -1,6 +1,6 @@
 'use client';
 
-import type { ImageRead, QualityWarningRead } from '@ai3d/shared-types';
+import type { CutoutRead, ImageRead, QualityWarningRead } from '@ai3d/shared-types';
 import { Badge, Button, ConfirmDialog } from '@ai3d/ui';
 import { formatBytes, formatPercent } from '@ai3d/utilities';
 import { CircleAlert, ExternalLink, Info, Trash2, TriangleAlert, X } from 'lucide-react';
@@ -23,6 +23,36 @@ const severityIcon = {
   warning: <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-label="Warning" />,
   info: <Info className="mt-0.5 size-4 shrink-0 text-accent" aria-label="Note" />,
 } satisfies Record<QualityWarningRead['severity'], ReactNode>;
+
+function CutoutPreview({ src, name, cutout }: { src: string; name: string; cutout: CutoutRead }) {
+  const problems = cutout.warnings.filter((w) => w.severity !== 'info');
+  return (
+    <figure aria-label="What the AI will see" className="mb-3">
+      <figcaption className="mb-1.5 text-[13px] font-medium">What the AI will see</figcaption>
+      {/* eslint-disable-next-line @next/next/no-img-element -- served by the backend */}
+      <img
+        src={src}
+        alt={`Cut-out of ${name} as local AI generation receives it`}
+        className="mx-auto max-h-56 rounded-md bg-surface-raised object-contain"
+      />
+      <p className="mt-1.5 text-xs text-subtle-foreground">
+        {cutout.background_removed
+          ? 'Background removed on this computer, as local generation will do it. Check that no part is missing.'
+          : 'Your photo’s own transparency is used as the cut-out.'}
+      </p>
+      {problems.length > 0 ? (
+        <ul className="mt-2 flex flex-col gap-2">
+          {problems.map((warning) => (
+            <li key={warning.code} className="flex gap-2 text-[13px] text-muted-foreground">
+              {severityIcon[warning.severity]}
+              <span>{warning.message}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </figure>
+  );
+}
 
 interface ImageDetailsProps {
   image: ImageRead;
@@ -81,6 +111,14 @@ export function ImageDetails({ image, onClose, onDelete, deleting }: ImageDetail
             No problems detected for reconstruction.
           </p>
         )}
+
+        {analysis.cutout && image.cutout_url ? (
+          <CutoutPreview
+            src={api.url(image.cutout_url)}
+            name={image.original_filename}
+            cutout={analysis.cutout}
+          />
+        ) : null}
 
         <dl className="divide-y divide-border border-y border-border">
           <Row label="Format">{image.mime_type.replace('image/', '').toUpperCase()}</Row>

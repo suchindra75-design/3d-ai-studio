@@ -1,6 +1,10 @@
 """Local single-image AI generation job: photo → TripoSR → GLB, on this computer.
 
-preparing → background → loading → generating → meshing → validating → saving
+preparing → background → loading → generating → meshing → refining → validating → saving
+
+Refining (``processing/refine.py``) removes loose fragments, smooths and simplifies
+the surface and bakes a texture with the photo projected onto the front. If it
+fails, the model is kept as TripoSR made it and the job says so.
 
 Nothing is uploaded. An interrupted run simply starts again from the photo
 (recovery re-queues it); it costs nothing.
@@ -13,8 +17,13 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
+import numpy as np
+import trimesh
+from PIL import Image
+
 from ai3d.models.enums import JobEventType, JobStatus
 from ai3d.processing.mesh import validate_mesh_file
+from ai3d.processing.refine import RefineSettings, refine
 from ai3d.providers.base import ProviderResult
 from ai3d.providers.local_ai import LocalAIProvider
 from ai3d.services import resources
@@ -38,7 +47,7 @@ _SPAN: dict[str, tuple[float, float]] = {
     "background": (0.08, 0.14),
     "loading": (0.14, 0.3),
     "generating": (0.3, 0.6),
-    "meshing": (0.6, 0.92),
+    "meshing": (0.6, 0.86),
 }
 _MESSAGES: dict[str, str] = {
     "starting": "Starting the local AI engine.",
@@ -128,8 +137,9 @@ def _run(ctx: JobContext, workdir: Path) -> None:
         data={"local_ai": result},
     )
 
+    glb, refined = _refine(ctx, result, settings.get("refine"))
+
     ctx.stage("validating", "Checking the 3D file.", 0.94)
-    glb = Path(result["glb"])
     report = validate_mesh_file(glb)
     if not report.usable:
         reason = "; ".join(i.message for i in report.issues if i.severity == "error")
@@ -143,7 +153,11 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             ctx.settings,
             job=job,
             provider=LocalAIProvider,
-            result=ProviderResult(mesh_path=glb, mesh_format="glb", metadata={"local_ai": result}),
+            result=ProviderResult(
+                mesh_path=glb,
+                mesh_format="glb",
+                metadata={"local_ai": result} | ({"refine": refined} if refined else {}),
+            ),
             report=report,
         )
     if ctx.finish(
@@ -160,6 +174,69 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             progress=1.0,
             data={"model_version_id": str(version.id), "report_status": report.status.value},
         )
+
+
+def _keep_alive(ctx: JobContext) -> None:
+    ctx.heartbeat()  # raises when the runner stops or the lease is lost
+
+
+def _refine(
+    ctx: JobContext, result: dict[str, Any], options: Any
+) -> tuple[Path, dict[str, Any] | None]:
+    """The refined model's path and report; TripoSR's own model if refining is not
+    planned (jobs planned before it existed) or fails."""
+    glb = Path(result["glb"])
+    if not isinstance(options, dict):
+        return glb, None
+    ctx.stage("refining", "Cleaning up the surface and baking its texture.", 0.87)
+    try:
+        mesh = trimesh.load(glb, force="mesh")
+        if not isinstance(mesh, trimesh.Trimesh):
+            raise TypeError("TripoSR's file did not open as one mesh")
+        photo = None
+        cutout = result.get("cutout_image")
+        if cutout and Path(cutout).is_file():
+            with Image.open(cutout) as opened:
+                photo = np.asarray(opened.convert("RGBA"))
+        refined, report = refine(
+            mesh,
+            RefineSettings(
+                triangles=int(options["triangles"]), texture_size=int(options["texture_size"])
+            ),
+            photo,
+            on_step=lambda _: _keep_alive(ctx),
+        )
+        output = glb.with_name("refined.glb")
+        refined.export(output, file_type="glb", include_normals=True)
+    except Exception as exc:  # the unrefined model is still a usable result
+        log.warning("refining failed", exc_info=True, extra={"job_id": str(ctx.job_id)})
+        ctx.event(
+            JobEventType.LOG,
+            f"Refining the model did not work ({type(exc).__name__}: {exc}); "
+            "it is kept as TripoSR made it.",
+            stage="refining",
+        )
+        return glb, {"error": f"{type(exc).__name__}: {exc}"}
+    details = report.to_dict()
+    pieces = report.fragments_removed
+    removed = f", {pieces} loose fragment{'s' if pieces != 1 else ''} removed" if pieces else ""
+    if report.photo_projected:
+        photo_part = (
+            f"the photo was projected onto {report.photo_share:.0%} of the surface "
+            f"(outline overlap {report.photo_fit_iou:.0%})"
+        )
+    else:
+        photo_part = report.note or "no photo was available to project"
+    size = report.texture_size
+    ctx.event(
+        JobEventType.LOG,
+        f"Refined in {sum(report.seconds.values()):.0f} s: {report.triangles_before:,} → "
+        f"{report.triangles_after:,} triangles{removed}; colours baked into a "
+        f"{size}×{size} px texture, and {photo_part}.",
+        stage="refining",
+        data={"refine": details},
+    )
+    return output, details
 
 
 def run_local_generation(ctx: JobContext) -> None:

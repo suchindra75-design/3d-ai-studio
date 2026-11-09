@@ -30,6 +30,9 @@ interface CapturePanelProps {
   onMeasureOverlap?: () => void;
   measuring?: boolean;
   measureError?: unknown;
+  onCheckCutout?: () => void;
+  checkingCutout?: boolean;
+  cutoutError?: unknown;
 }
 
 export function CapturePanel({
@@ -39,6 +42,9 @@ export function CapturePanel({
   onMeasureOverlap,
   measuring = false,
   measureError = null,
+  onCheckCutout,
+  checkingCutout = false,
+  cutoutError = null,
 }: CapturePanelProps) {
   return (
     <section aria-label="Capture assessment" className="rounded-lg border border-border bg-surface">
@@ -91,6 +97,21 @@ export function CapturePanel({
                           : 'Measure again'}
                     </Button>
                     {measureError ? <ErrorState error={measureError} /> : null}
+                  </div>
+                ) : null}
+                {check.action === 'check_cutout' && onCheckCutout ? (
+                  <div className="mt-2 flex flex-col gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="self-start"
+                      disabled={checkingCutout}
+                      onClick={onCheckCutout}
+                    >
+                      {checkingCutout ? <Spinner label="Checking the cut-out" /> : null}
+                      {checkingCutout ? 'Cutting out…' : 'Check cut-out'}
+                    </Button>
+                    {cutoutError ? <ErrorState error={cutoutError} /> : null}
                   </div>
                 ) : null}
               </div>

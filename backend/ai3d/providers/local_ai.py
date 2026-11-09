@@ -33,6 +33,12 @@ _RESOLUTION: dict[QualityMode, int] = {
     QualityMode.HIGH_QUALITY: 256,
     QualityMode.PROFESSIONAL: 320,
 }
+# Refinement (processing/refine.py): triangles kept and texture size per profile.
+_REFINE: dict[QualityMode, tuple[int, int]] = {
+    QualityMode.FAST: (20_000, 1024),
+    QualityMode.HIGH_QUALITY: (40_000, 2048),
+    QualityMode.PROFESSIONAL: (80_000, 2048),
+}
 
 
 class _RunsInProcessError(NotImplementedError):
@@ -62,13 +68,14 @@ class LocalAIProvider(Provider):
             # Limit for the metadata-free working copy; it is never uploaded.
             max_input_bytes=50 * 1024 * 1024,
             output_formats=("glb",),
-            supports_texture=False,  # colours are stored per vertex
+            supports_texture=True,  # baked by processing/refine.py
             supports_pbr=False,
             cancel="supported",
             reports_progress=True,
             notes=(
                 "AI-generated from one photo: the sides the camera did not see are invented.",
-                "Colours are per-vertex (no texture image); size is not measured.",
+                "Colours are baked into a texture; the front uses the photo itself, "
+                "the other sides the model's own colours. Size is not measured.",
                 "The background is removed automatically; one clearly visible object works best.",
             ),
         )
@@ -80,12 +87,18 @@ class LocalAIProvider(Provider):
     @classmethod
     def plan(cls, kind: JobKind, quality_mode: QualityMode) -> ProviderPlan:
         resolution = _RESOLUTION[quality_mode]
+        triangles, texture = _REFINE[quality_mode]
         return ProviderPlan(
-            settings={"resolution": resolution},
+            settings={
+                "resolution": resolution,
+                "refine": {"triangles": triangles, "texture_size": texture},
+            },
             summary=(
                 "Background removed on this computer",
                 f"Surface extracted on a {resolution}³ grid",
-                "Colours per vertex",
+                f"Cleaned up and simplified to about {triangles:,} triangles",
+                f"Colours baked into a {texture}×{texture} px texture, "
+                "with the photo projected onto the front",
             ),
             estimate=CostEstimate(
                 amount=0, unit="USD", usd=0.0, basis="Runs on this computer; nothing is paid."

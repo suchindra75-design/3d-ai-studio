@@ -121,6 +121,11 @@ def main(request_path: str, result_path: str) -> None:
     if (alpha > 127).mean() < 0.01:
         raise ValueError("No object was found in the photo (background removal left nothing).")
     image = resize_foreground(image, float(request.get("foreground_ratio", 0.85)))
+    if request.get("cutout_image"):
+        # The square cut-out the model sees, with its transparency: the app projects
+        # it back onto the model's front when texturing (backend processing/refine.py).
+        side = min(image.width, int(request.get("cutout_max_size", 2048)))
+        image.resize((side, side), Image.LANCZOS).save(request["cutout_image"])
     rgba = np.asarray(image).astype(np.float32) / 255.0
     rgb = rgba[:, :, :3] * rgba[:, :, 3:4] + (1 - rgba[:, :, 3:4]) * 0.5
     prepared = Image.fromarray((rgb * 255.0).astype(np.uint8))

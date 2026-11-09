@@ -10,6 +10,7 @@ from ai3d.models import Image
 from ai3d.schemas.image import ImageList, ImageRead, UploadResponse
 from ai3d.services import images as image_service
 from ai3d.storage import StorageBackend
+from ai3d.storage.keys import image_cutout_key
 
 router = APIRouter(tags=["images"])
 
@@ -99,6 +100,27 @@ def get_image_file(db: DbDep, storage: StorageDep, image_id: uuid.UUID) -> Respo
 def get_image_thumbnail(db: DbDep, storage: StorageDep, image_id: uuid.UUID) -> Response:
     image = image_service.get_image(db, image_id)
     return _serve(storage, image.thumbnail_key, "image/webp", f"{image.sha256}-thumb")
+
+
+@router.get(
+    "/images/{image_id}/cutout",
+    summary="The picture local AI generation receives (after a cut-out check)",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}, "description": "Cut-out preview"}},
+)
+def get_image_cutout(db: DbDep, storage: StorageDep, image_id: uuid.UUID) -> Response:
+    image = image_service.get_image(db, image_id)
+    found = image.analysis.get("cutout")
+    if not isinstance(found, dict):
+        raise NotFoundError("This photo's cut-out has not been checked yet.")
+    response = _serve(
+        storage,
+        image_cutout_key(image.project_id, image.id),
+        "image/png",
+        f"{image.sha256}-cutout-{found.get('checked_at', '')}",
+    )
+    response.headers["Cache-Control"] = "private, no-cache"  # replaced when checked again
+    return response
 
 
 @router.delete(

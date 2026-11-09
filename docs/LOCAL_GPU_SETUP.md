@@ -131,8 +131,41 @@ with an Intel macOS wheel.
 
 Optional. Turns a single photo into a 3D model without uploading it: the
 background is removed (U²-Net), TripoSR predicts the shape and its colours,
-and the result is an AI-generated mesh with per-vertex colours. Hidden sides
-are invented and the size is not measured; the app labels the model so.
+and the app then refines the result (below). Hidden sides are invented and
+the size is not measured; the app labels the model so.
+
+**Refining** (our own code, `backend/ai3d/processing/refine.py`, about 10 s on
+the CPU). TripoSR's raw output is a dense surface (up to about 200,000
+triangles) with one colour per corner and often a few loose specks. Each
+generation is turned into a lighter textured model:
+
+| Step | What it does |
+|---|---|
+| Fragments | Loose pieces under 1% of the largest piece's area are removed. |
+| Smoothing | 10 Taubin passes take out the grid's stair-steps without shrinking the model. Broad bumps TripoSR built into the shape stay. |
+| Simplifying | To about 20,000 / 40,000 / 80,000 triangles (Fast / High quality / Professional). Folds and edges shared by three or more triangles that simplifying can leave are mended, so a closed model stays closed. |
+| Texture | The surface is unwrapped and its colours baked into a 1024 / 2048 / 2048 px texture. |
+| Photo | Where the camera saw the surface, the photo itself is projected on: much sharper than TripoSR's colours. It fades out towards grazing angles and is not used on hidden parts. Before projecting, the model's outline is lined up with the cut-out; if they overlap less than 60%, the photo is not projected and the job log says so. |
+
+The job log reports each step (triangles before and after, fragments removed,
+how much of the surface shows the photo). If refining fails, the model is kept
+as TripoSR made it and the log says why. What it cannot do: the sides the
+camera did not see are still TripoSR's guesses, and parts missing from the
+cut-out stay missing.
+
+**Check the cut-out first.** In a single-image project, the capture check offers
+**Check cut-out**. It runs the same background removal on the same copy of the
+photo (a few seconds, on this computer) and shows, in the photo's details, the
+picture the AI will receive. It warns when:
+
+- the object runs off an edge of the photo (that side will be cut flat);
+- the object blends into the background: most colours along its edge also occur
+  just outside it, so the mask can lose parts, thin ones first;
+- the object is very small in the photo, or no object was found.
+
+These are heuristics; the preview itself is exact, so look for missing parts
+there. Photos with their own transparency need no engine; for them the
+edge check also runs at upload.
 
 Install (needs [uv](https://docs.astral.sh/uv/) and about 4 GB of free disk):
 

@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 SCRIPT = Path(__file__).resolve().parent.parent / "local_ai_scripts" / "triposr_generate.py"
 UPSCALE_SCRIPT = SCRIPT.with_name("upscale_texture.py")
+CUTOUT_SCRIPT = SCRIPT.with_name("cutout_preview.py")
 TAIL_LINES = 30
 STAGES = ("starting", "background", "loading", "generating", "meshing")
 
@@ -127,12 +128,14 @@ def build_request(
     resolution: int,
     device: str = "auto",
     threads: int | None = None,
+    cutout_image: Path | None = None,
 ) -> dict[str, Any]:
     if not 32 <= resolution <= 512:
         raise ValueError("resolution must be between 32 and 512")
     if device not in {"auto", "cpu"}:
         raise ValueError("device must be 'auto' or 'cpu'")
-    return {
+    extra = {} if cutout_image is None else {"cutout_image": str(cutout_image)}
+    return extra | {
         "source_dir": str(root / info["source_dir"]),
         "weights_dir": str(root / "models" / "triposr"),
         "dino_config": str(root / "models" / "dino-vitb16" / "config.json"),
@@ -181,7 +184,9 @@ def generate(
     device: str = "auto",
     poll_seconds: float = 0.5,
 ) -> dict[str, Any]:
-    """Turn one photo into ``workdir/model.glb``. Returns the script's result.
+    """Turn one photo into ``workdir/model.glb``. Returns the script's result, with
+    the paths of the GLB, the picture the model saw (``prepared_image``) and that
+    picture's cut-out with transparency (``cutout_image``, used for texturing).
 
     Raises LocalAINotInstalledError, LocalAICancelledError or LocalAIFailedError.
     """
@@ -197,6 +202,7 @@ def generate(
         prepared_image=workdir / "prepared.png",
         resolution=resolution,
         device=device,
+        cutout_image=workdir / "cutout.png",
     )
     result = _run_script(
         SCRIPT,
@@ -210,6 +216,37 @@ def generate(
     )
     result["glb"] = str(workdir / "model.glb")
     result["prepared_image"] = str(workdir / "prepared.png")
+    if (workdir / "cutout.png").is_file():
+        result["cutout_image"] = str(workdir / "cutout.png")
+    return result
+
+
+def cut_out(image: Path, workdir: Path, *, timeout: float = 120.0) -> dict[str, Any]:
+    """The background mask local generation would use for ``image``, as ``workdir/mask.png``.
+
+    Same model and code as :func:`generate` (U²-Net, or the photo's own transparency).
+    Raises LocalAINotInstalledError or LocalAIFailedError.
+    """
+    state = status()
+    if not state.installed:
+        raise LocalAINotInstalledError(state.problem or "not installed")
+    workdir.mkdir(parents=True, exist_ok=True)
+    request = {
+        "image": str(image),
+        "mask": str(workdir / "mask.png"),
+        "u2net": str(state.path / "models" / "u2net.onnx"),
+    }
+    result = _run_script(
+        CUTOUT_SCRIPT,
+        request,
+        workdir,
+        state=state,
+        timeout=timeout,
+        cancel=None,
+        on_progress=None,
+        poll_seconds=0.2,
+    )
+    result["mask"] = str(workdir / "mask.png")
     return result
 
 

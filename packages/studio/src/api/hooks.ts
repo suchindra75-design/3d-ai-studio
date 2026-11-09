@@ -152,6 +152,19 @@ export function useMeasureOverlap(projectId: string) {
   });
 }
 
+export function useCheckCutout(projectId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.projects.checkCutout(projectId),
+    onSuccess: (assessment) => {
+      client.setQueryData(queryKeys.capture(projectId), assessment);
+      // Each photo now carries its cut-out result and preview.
+      void client.invalidateQueries({ queryKey: queryKeys.images(projectId) });
+    },
+  });
+}
+
 export function useDeleteImage() {
   const api = useApi();
   const client = useQueryClient();

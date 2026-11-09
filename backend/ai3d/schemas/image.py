@@ -14,6 +14,25 @@ class QualityWarningRead(Schema):
     message: str
 
 
+class CutoutRead(Schema):
+    """What local generation's background removal makes of the photo (on request)."""
+
+    background_removed: bool = Field(
+        description="False when the photo's own transparency is used instead."
+    )
+    coverage: float = Field(description="Share of the photo inside the cut-out.")
+    touches: list[Literal["top", "bottom", "left", "right"]] = Field(
+        default_factory=list, description="Photo edges the object runs off."
+    )
+    background_match: float | None = Field(
+        default=None,
+        description="Share of the colours along the object's edge that also occur in the "
+        "background beside it (high = the object blends in).",
+    )
+    warnings: list[QualityWarningRead] = Field(default_factory=list)
+    checked_at: datetime
+
+
 class ImageAnalysisRead(Schema):
     sharpness: float
     brightness: float
@@ -23,6 +42,7 @@ class ImageAnalysisRead(Schema):
     megapixels: float
     subject_coverage: float | None = None
     warnings: list[QualityWarningRead] = Field(default_factory=list)
+    cutout: CutoutRead | None = None
 
 
 class ImageRead(APIModel):
@@ -55,6 +75,15 @@ class ImageRead(APIModel):
     @property
     def thumbnail_url(self) -> str:
         return f"/api/v1/images/{self.id}/thumbnail"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def cutout_url(self) -> str | None:
+        """The picture local AI generation receives (after a cut-out check)."""
+        cutout = self.analysis.cutout
+        if cutout is None:
+            return None
+        return f"/api/v1/images/{self.id}/cutout?v={int(cutout.checked_at.timestamp())}"
 
 
 class ImageList(Schema):

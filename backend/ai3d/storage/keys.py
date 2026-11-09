@@ -44,6 +44,11 @@ def image_derived_key(project_id: uuid.UUID, image_id: uuid.UUID, extension: str
     return f"projects/{project_id}/images/{image_id}/derived.{extension}"
 
 
+def image_cutout_key(project_id: uuid.UUID, image_id: uuid.UUID) -> str:
+    """Preview of the cut-out local generation makes: what the AI sees (PNG)."""
+    return f"projects/{project_id}/images/{image_id}/cutout.png"
+
+
 def overlap_analysis_key(project_id: uuid.UUID) -> str:
     """Cached photo-overlap measurement (JSON) for the project's current photo set."""
     return f"projects/{project_id}/analysis/overlap.json"

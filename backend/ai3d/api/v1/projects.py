@@ -118,3 +118,18 @@ def measure_overlap(
     db: DbDep, storage: StorageDep, settings: SettingsDep, project_id: uuid.UUID
 ) -> CaptureAssessment:
     return capture_service.measure_overlap(db, storage, settings, project_id)
+
+
+@router.post(
+    "/{project_id}/capture-assessment/cutout",
+    response_model=CaptureAssessment,
+    summary="Preview the cut-out local generation would make (single-image projects)",
+    description="Runs local generation's background removal on this machine for each photo "
+    "without a current result, checks framing and how well the object stands out, and "
+    "stores the picture the AI would receive (`/images/{id}/cutout`). Nothing is uploaded. "
+    "Takes a few seconds per photo.",
+)
+def check_cutout(
+    db: DbDep, storage: StorageDep, settings: SettingsDep, project_id: uuid.UUID
+) -> CaptureAssessment:
+    return capture_service.check_cutouts(db, storage, settings, project_id)

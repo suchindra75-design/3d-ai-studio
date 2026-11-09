@@ -23,6 +23,7 @@ export function fakeApi(overrides: DeepPartial<ApiClient> = {}): ApiClient {
       delete: vi.fn(),
       captureAssessment: vi.fn(),
       measureOverlap: vi.fn(),
+      checkCutout: vi.fn(),
     },
     images: { list: vi.fn(), get: vi.fn(), delete: vi.fn(), upload: vi.fn() },
     devices: { local: vi.fn() },

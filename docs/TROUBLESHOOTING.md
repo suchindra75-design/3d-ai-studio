@@ -106,6 +106,18 @@ looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/Applications/COLMAP.app` and
 - *"No object was found in the photo"*: the background removal kept nothing.
   Use a photo with one clearly visible object that fills a good part of the
   frame, or a PNG whose background is already transparent.
+- Parts are missing from the model (ears, handles, legs) or it is cut flat on
+  one side: press **Check cut-out** in the capture check and look at "What the
+  AI will see" in the photo's details. Leave space around the object, use a
+  plain background that contrasts with it, or upload a PNG with the background
+  already removed (its transparency is used as it is).
+- The job log says *"the photo was not projected"* (*"outline did not line up"*):
+  the model's outline overlapped the cut-out less than 60%, usually because the
+  cut-out kept background or lost large parts. The model is still textured with
+  TripoSR's own colours; check the cut-out and try a cleaner photo.
+- *"Refining the model did not work … it is kept as TripoSR made it"*: the model
+  is TripoSR's raw output (dense, colours per vertex). Please report the job's
+  log; generating again usually gives the same result.
 - The first generation after installing is slow (several minutes) while the
   operating system checks the new libraries; later runs take about 1.5
   minutes on a 6-core CPU.

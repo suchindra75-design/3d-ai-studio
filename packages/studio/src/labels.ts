@@ -68,6 +68,7 @@ export const jobStageLabel: Record<string, string> = {
   mapping: 'Placing cameras',
   filtering: 'Filtering points',
   meshing: 'Building the surface',
+  refining: 'Refining the model',
   texturing: 'Texturing',
   generating: 'Generating',
   downloading: 'Downloading result',

@@ -25,6 +25,7 @@ from ai3d.models import Image
 from ai3d.models.enums import InputMode, QualityLevel
 from ai3d.processing.overlap import OverlapResult, assess_overlap
 from ai3d.schemas.capture import CaptureAssessment, CaptureCheck
+from ai3d.services import cutout as cutout_service
 from ai3d.services.images import list_images
 from ai3d.services.projects import get_project
 from ai3d.storage import StorageBackend
@@ -83,6 +84,9 @@ def _single_image_checks(images: list[Image]) -> list[CaptureCheck]:
             image_ids=[i.id for i in poor],
         )
     )
+    cutout = _cutout_check(images)
+    if cutout is not None:
+        checks.append(cutout)
     checks.append(
         CaptureCheck(
             code="unseen_surfaces",
@@ -94,6 +98,66 @@ def _single_image_checks(images: list[Image]) -> list[CaptureCheck]:
         )
     )
     return checks
+
+
+def _cutout_check(images: list[Image]) -> CaptureCheck | None:
+    """What local generation's background removal makes of the photos (run on request)."""
+    done = [i for i in images if cutout_service.has_result(i)]
+    pending = [i for i in images if not cutout_service.has_result(i)]
+    if pending and any(cutout_service.can_check(i) for i in pending):
+        return CaptureCheck(
+            code="cutout",
+            status="not_assessed",
+            title="Cut-out not checked yet",
+            message="See what local AI generation will see: the object cut out from its "
+            "background, framed as the AI receives it. Takes a few seconds per photo, on "
+            "this computer.",
+            action="check_cutout",
+        )
+    if not done:
+        return None  # needs the local AI engine, which is not installed
+    results = {i.id: i.analysis["cutout"] for i in done}
+    problems: dict[str, tuple[str, str, list[uuid.UUID]]] = {}
+    for image_id, result in results.items():
+        for warning in result.get("warnings", []):
+            if warning.get("severity") not in {"warning", "error"}:
+                continue
+            code = str(warning["code"])
+            entry = problems.setdefault(code, (warning["severity"], warning["message"], []))
+            entry[2].append(image_id)
+    if not problems:
+        return CaptureCheck(
+            code="cutout",
+            status="pass",
+            title="Clean cut-out",
+            message="The object stands out from its background and fits in the frame. Open "
+            "the photo to see exactly what the AI will receive.",
+            image_ids=list(results),
+        )
+    titles = {
+        "no_subject": "No object found",
+        "subject_cropped": "Object runs off the photo",
+        "low_edge_contrast": "Object blends into the background",
+        "subject_small": "Object is small in the photo",
+    }
+    worst = "fail" if any(p[0] == "error" for p in problems.values()) else "warning"
+    first = next(iter(problems))
+    return CaptureCheck(
+        code="cutout",
+        status=worst,
+        title=titles.get(first, "Cut-out needs attention")
+        + (f" (+{len(problems) - 1} more)" if len(problems) > 1 else ""),
+        message=" ".join(p[1] for p in problems.values()),
+        image_ids=list(dict.fromkeys(i for p in problems.values() for i in p[2])),
+    )
+
+
+def check_cutouts(
+    db: Session, storage: StorageBackend, settings: Settings, project_id: uuid.UUID
+) -> CaptureAssessment:
+    """Run the cut-out preview for the project's photos, then reassess."""
+    cutout_service.check_project(db, storage, settings, project_id)
+    return assess_capture(db, project_id, storage)
 
 
 def _plural(n: int, word: str) -> str:

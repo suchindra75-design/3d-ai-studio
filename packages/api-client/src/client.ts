@@ -167,6 +167,9 @@ export function createApiClient({ baseUrl, token, fetch: fetchImpl }: ApiClientO
       /** Feature-matches the photos on the backend (seconds per 10 photos) and caches the result. */
       measureOverlap: (id: string) =>
         request<CaptureAssessment>('POST', `/api/v1/projects/${id}/capture-assessment/overlap`),
+      /** Runs local generation's background removal on the photos (seconds per photo). */
+      checkCutout: (id: string) =>
+        request<CaptureAssessment>('POST', `/api/v1/projects/${id}/capture-assessment/cutout`),
       /** Backend path of the project's backup ZIP (photos, models, versions, reports). */
       backupPath: (id: string) => `/api/v1/projects/${id}/backup`,
       /** Creates a new project from a backup ZIP made by this app. */

@@ -108,7 +108,7 @@ GLB export ◄─ optimise ◄─ validate mesh ◄─ texture processing ◄─
 | 1 | Upload | Streamed to temp file, SHA-256, size limit, dedupe | **done** |
 | 2 | Validation | Pillow content sniffing (JPEG/PNG/WebP), decompression-bomb guard, truncation check, animated-image rejection | **done** |
 | 3 | Preprocess | EXIF orientation applied, resized to provider limits, **EXIF/GPS stripped**, sRGB | 2 |
-| 4 | Segmentation | Skip if PNG/WebP already has alpha (subject coverage measured in Phase 1); else optional local segmentation model (licence-checked) or provider-side background removal | 2 |
+| 4 | Segmentation | Skip if PNG/WebP already has alpha (subject coverage and frame edges checked at upload); else the local engine's U²-Net or provider-side background removal. The capture check's **Check cut-out** previews the local mask and the AI's view, and flags cropped, small or background-matching objects (`ai3d.processing.cutout`) | done for local generation |
 | 5 | Quality analysis | Sharpness (variance of Laplacian), exposure, clipping, contrast, resolution | **done** |
 | 6 | Generation | Provider `submit` → store `provider_task_id` immediately → `poll` | 2 |
 | 7 | Retrieval | Download GLB to storage as `provider_raw` asset (checksummed) | 2 |
@@ -200,8 +200,8 @@ provider `local-triposr`, see LOCAL_GPU_SETUP.md); the others are candidates:
 
 | Model | Code / weights licence | Min VRAM | Devices | Notes |
 |---|---|---|---|---|
-| TripoSR | MIT / MIT | CPU works | CPU (verified, Intel Mac); CUDA (untested) | **Integrated** (Phase 8) |
-| Stable Fast 3D | Stability AI Community License | ≈6 GB | CUDA; MPS experimental; CPU | Free below US$1M annual revenue |
+| TripoSR | MIT / MIT | CPU works | CPU (verified, Intel Mac); CUDA (untested) | **Integrated** (Phase 8); output refined by our own code (`processing/refine.py`, LOCAL_GPU_SETUP.md) |
+| Stable Fast 3D | Stability AI Community License | ≈6 GB | CUDA; MPS experimental; CPU | Free below US$1M annual revenue; gated download (Hugging Face account and licence acceptance). Tried 2026-11-09 on an Intel Mac CPU: runs after small patches for PyTorch 2.2 (about 4 min per photo); sharper front colours and lighter meshes than raw TripoSR, shapes still guessed. Not integrated: the licence terms conflict with D8 and with shipping a product |
 | SPAR3D | Stability AI Community License | 10.5 GB (≈7 GB low-VRAM) | CUDA; MPS experimental | Same licence terms |
 | TRELLIS | MIT / MIT (some submodules separate) | ≥16 GB | CUDA, Linux-tested | |
 | TRELLIS.2 (4B) | MIT / MIT | ≥24 GB | CUDA 12.4, Linux-tested | Uses nvdiffrast/nvdiffrec |

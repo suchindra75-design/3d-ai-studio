@@ -16,7 +16,7 @@ class CaptureCheck(Schema):
     message: str
     image_ids: list[uuid.UUID] = Field(default_factory=list)
     # Something the user can run to complete this check.
-    action: Literal["measure_overlap"] | None = None
+    action: Literal["measure_overlap", "check_cutout"] | None = None
 
 
 class CaptureAssessment(Schema):

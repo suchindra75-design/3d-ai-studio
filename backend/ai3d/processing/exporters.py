@@ -129,7 +129,8 @@ def formats() -> list[FormatInfo]:
             False,
             (
                 "For 3D printing: millimetres, Z up. Per-vertex colours are included as a 3MF "
-                "colour group; textures are not.",
+                "colour group. A texture becomes per-vertex colours (its colour at each "
+                "corner), so detail finer than the triangles is lost.",
             ),
             keeps_colour=True,
         ),
@@ -268,15 +269,44 @@ def _srgb_colour_scene(scene: trimesh.Scene) -> trimesh.Scene:
     return copy
 
 
+def _srgb_colours_with_textures(scene: trimesh.Scene) -> trimesh.Scene:
+    """A copy whose per-vertex colours are sRGB, in which textured meshes without
+    per-vertex colours get their base-colour texture's colour at each vertex, for
+    formats that keep colours but not textures (3MF). Kept in sRGB throughout: 8-bit
+    linear values would round dark colours coarsely."""
+    copy = _srgb_colour_scene(scene)
+    for geometry in copy.geometry.values():
+        if not isinstance(geometry, trimesh.Trimesh) or _vertex_colours(geometry) is not None:
+            continue
+        image = _base_image(geometry)
+        uv = getattr(geometry.visual, "uv", None)
+        if image is None or uv is None or len(uv) != len(geometry.vertices):
+            continue
+        pixels = np.asarray(image.convert("RGB"))
+        height, width = pixels.shape[:2]
+        uv = np.asarray(uv, dtype=np.float64)
+        x = np.clip(np.round((uv[:, 0] % 1.0) * (width - 1)).astype(np.int64), 0, width - 1)
+        y = np.clip(np.round((1.0 - uv[:, 1] % 1.0) * (height - 1)).astype(np.int64), 0, height - 1)
+        srgb = pixels[y, x].astype(np.float64) / 255.0
+        factor = getattr(getattr(geometry.visual, "material", None), "baseColorFactor", None)
+        if factor is not None:
+            srgb = srgb * (np.asarray(factor[:3], dtype=np.float64) / 255.0)
+        colours = np.full((len(uv), 4), 255, dtype=np.uint8)
+        colours[:, :3] = np.round(srgb * 255.0).astype(np.uint8)
+        geometry.visual = trimesh.visual.ColorVisuals(geometry, vertex_colors=colours)
+    return copy
+
+
 _3MF_CORE = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 _3MF_MATERIAL = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02"
 
 
 def _write_coloured_3mf(mesh: trimesh.Trimesh, dest: Path) -> None:
-    """3MF core + Materials extension: one colour per vertex (m:colorgroup)."""
+    """3MF core + Materials extension: one colour per vertex (m:colorgroup). The
+    mesh's vertex colours are already sRGB (:func:`_srgb_colours_with_textures`)."""
     per_vertex = _vertex_colours(mesh)
     assert per_vertex is not None
-    srgb = _linear_to_srgb(per_vertex[:, :3])
+    srgb = per_vertex[:, :3]
     colours = "".join(f'<m:color color="#{r:02X}{g:02X}{b:02X}"/>' for r, g, b in srgb)
     vertices = "".join(
         f'<vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>' for x, y, z in mesh.vertices
@@ -534,7 +564,7 @@ def write(
     elif fmt == ExportFormat.STL:
         dest.write_bytes(_as_bytes(_for_printing(scene).export(file_type="stl")))
     elif fmt == ExportFormat.THREE_MF:
-        mesh = _for_printing(scene)
+        mesh = _for_printing(_srgb_colours_with_textures(scene))
         if _has_colours(mesh):
             _write_coloured_3mf(mesh, dest)
         else:
