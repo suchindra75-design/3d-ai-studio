@@ -15,6 +15,7 @@ from ai3d.providers.base import (
     CostEstimate,
     CredentialCheck,
     GenerationRequest,
+    MultiViewLimits,
     Provider,
     ProviderCapabilities,
     ProviderPlan,
@@ -63,7 +64,9 @@ class LocalAIProvider(Provider):
     def capabilities(cls) -> ProviderCapabilities:
         return ProviderCapabilities(
             single_image=True,
-            multi_view=None,
+            # The shape comes from the front photo; the other views correct its depth
+            # and colour their sides (processing/refine.py).
+            multi_view=MultiViewLimits(min_images=2, max_images=4, required_roles=("front",)),
             accepted_mime_types=("image/jpeg", "image/png", "image/webp"),
             # Limit for the metadata-free working copy; it is never uploaded.
             max_input_bytes=50 * 1024 * 1024,
@@ -88,6 +91,14 @@ class LocalAIProvider(Provider):
     def plan(cls, kind: JobKind, quality_mode: QualityMode) -> ProviderPlan:
         resolution = _RESOLUTION[quality_mode]
         triangles, texture = _REFINE[quality_mode]
+        views = (
+            (
+                "Shape from the front photo; the other views correct its depth and colour "
+                "their sides",
+            )
+            if kind == JobKind.MULTI_VIEW_TO_3D
+            else ()
+        )
         return ProviderPlan(
             settings={
                 "resolution": resolution,
@@ -95,6 +106,7 @@ class LocalAIProvider(Provider):
             },
             summary=(
                 "Background removed on this computer",
+                *views,
                 f"Surface extracted on a {resolution}³ grid",
                 f"Cleaned up and simplified to about {triangles:,} triangles",
                 f"Colours baked into a {texture}×{texture} px texture, "

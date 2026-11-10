@@ -129,12 +129,15 @@ def build_request(
     device: str = "auto",
     threads: int | None = None,
     cutout_image: Path | None = None,
+    extra_images: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     if not 32 <= resolution <= 512:
         raise ValueError("resolution must be between 32 and 512")
     if device not in {"auto", "cpu"}:
         raise ValueError("device must be 'auto' or 'cpu'")
-    extra = {} if cutout_image is None else {"cutout_image": str(cutout_image)}
+    extra: dict[str, Any] = {} if cutout_image is None else {"cutout_image": str(cutout_image)}
+    if extra_images:
+        extra["extra_images"] = extra_images
     return extra | {
         "source_dir": str(root / info["source_dir"]),
         "weights_dir": str(root / "models" / "triposr"),
@@ -183,10 +186,15 @@ def generate(
     on_progress: ProgressCallback | None = None,
     device: str = "auto",
     poll_seconds: float = 0.5,
+    other_views: list[tuple[str, Path]] | None = None,
 ) -> dict[str, Any]:
     """Turn one photo into ``workdir/model.glb``. Returns the script's result, with
     the paths of the GLB, the picture the model saw (``prepared_image``) and that
     picture's cut-out with transparency (``cutout_image``, used for texturing).
+
+    ``other_views`` are (role, photo) pairs of the object's other sides; they are
+    cut out and framed like the front photo (the result's ``views``, each with its
+    ``cutout`` and ``crop_side``), not used for the shape.
 
     Raises LocalAINotInstalledError, LocalAICancelledError or LocalAIFailedError.
     """
@@ -203,6 +211,10 @@ def generate(
         resolution=resolution,
         device=device,
         cutout_image=workdir / "cutout.png",
+        extra_images=[
+            {"role": role, "image": str(photo), "cutout": str(workdir / f"cutout-{role}.png")}
+            for role, photo in other_views or ()
+        ],
     )
     result = _run_script(
         SCRIPT,

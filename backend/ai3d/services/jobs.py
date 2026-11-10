@@ -189,7 +189,10 @@ def _choose_kind(
         return JobKind.IMAGE_TO_3D
     if body.provider is not None:
         return JobKind.MULTI_VIEW_TO_3D
-    if processing_mode == ProcessingMode.LOCAL:
+    # Photos labelled as views (front, left, back, right) ask for AI multi-view, which
+    # the local AI engine also does; unlabelled sets are for photogrammetry.
+    labelled = count <= len(VIEW_ORDER) and any(item.role != "source" for item in body.inputs)
+    if processing_mode == ProcessingMode.LOCAL and not labelled:
         return JobKind.PHOTOGRAMMETRY
     # In Automatic mode a real capture set is better measured than invented (and AI
     # multi-view takes at most four photos).
@@ -286,11 +289,12 @@ def _no_local_engine_message(manager: ProviderManager, kind: JobKind) -> str:
             f"{reason or ''} Local photogrammetry works from many overlapping photos; "
             "otherwise choose Cloud or Automatic processing."
         ).replace("  ", " ")
+    reason = manager.unavailable_reason(LocalAIProvider.key)
     return (
-        "No local engine turns 2–4 photos into 3D. Local photogrammetry needs "
-        f"{PHOTOGRAMMETRY_MIN}+ overlapping photos; otherwise choose Cloud or Automatic "
-        "processing."
-    )
+        "Turning 2–4 views (front, left, back, right) into 3D on this computer needs the "
+        f"local AI engine. {reason or ''} Local photogrammetry needs {PHOTOGRAMMETRY_MIN}+ "
+        "overlapping photos; otherwise choose Cloud or Automatic processing."
+    ).replace("  ", " ")
 
 
 def _choose_provider(

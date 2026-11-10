@@ -147,17 +147,27 @@ def test_missing_colmap_blocks_with_the_reason(
 
 
 def test_automatic_mode_measures_capture_sets_and_keeps_small_sets_on_ai(
-    client: TestClient, make_project: MakeProject, engine_available: Callable[[bool], None]
+    client: TestClient,
+    make_project: MakeProject,
+    engine_available: Callable[[bool], None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine_available(True)
     project, ids = _photos(client, make_project, _distinct_photos(22))
     plan = _plan(client, project["id"], ids, processing_mode="auto")
     assert plan["kind"] == "photogrammetry"
     assert "photos stay on this computer" in " ".join(plan["warnings"])
-    # Three photos are better suited to AI multi-view (the mock provider in tests).
+    # Three photos are better suited to AI multi-view: the local AI engine when it is
+    # installed (it takes up to four views), otherwise the cloud (the mock in tests).
+    monkeypatch.setattr("ai3d.providers.local_ai.check_local_ai", lambda: "not installed")
     small = _plan(client, project["id"], ids[:3], processing_mode="auto")
     assert small["kind"] == "multi_view_to_3d"
     assert small["route"] == "cloud"
+    monkeypatch.setattr("ai3d.providers.local_ai.check_local_ai", lambda: None)
+    small = _plan(client, project["id"], ids[:3], processing_mode="auto")
+    assert small["kind"] == "multi_view_to_3d"
+    assert small["route"] == "local"
+    assert small["provider"]["key"] == "local-triposr"
 
 
 def test_large_sets_need_photogrammetry(

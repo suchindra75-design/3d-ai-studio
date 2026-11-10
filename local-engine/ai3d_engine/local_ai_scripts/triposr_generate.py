@@ -95,6 +95,64 @@ def to_gltf(mesh):
     return mesh
 
 
+def other_view(extra: dict, u2net: str, ratio: float, max_size: int) -> dict:
+    """A photo of another side, cut out and framed like the front photo: the app uses
+    it to correct the depth and colour that side (backend processing/refine.py)."""
+    import numpy as np
+    from PIL import Image
+    from tsr.utils import resize_foreground
+
+    with Image.open(extra["image"]) as opened:
+        opened.load()
+        other, removed = cut_out(opened, u2net)
+    if (np.asarray(other.getchannel("A")) > 127).mean() < 0.01:
+        return {"role": extra["role"], "ok": False, "error": "no object found"}
+    other = resize_foreground(other, ratio)
+    side = min(other.width, max_size)
+    other.resize((side, side), Image.LANCZOS).save(extra["cutout"])
+    return {
+        "role": extra["role"],
+        "ok": True,
+        "cutout": extra["cutout"],
+        "crop_side": other.width,  # the square's side in pixels of the photo
+        "background_removed": removed,
+    }
+
+
+def prepare(request: dict) -> tuple:
+    """The picture TripoSR receives (cut out, framed, on grey), whether the background
+    was removed, the framing square's side in photo pixels, and the other views."""
+    import numpy as np
+    from PIL import Image
+    from tsr.utils import resize_foreground
+
+    with Image.open(request["image"]) as opened:
+        opened.load()
+        image, removed = cut_out(opened, request["u2net"])
+    alpha = np.asarray(image.getchannel("A"))
+    if (alpha > 127).mean() < 0.01:
+        raise ValueError("No object was found in the photo (background removal left nothing).")
+    ratio = float(request.get("foreground_ratio", 0.85))
+    image = resize_foreground(image, ratio)
+    crop_side = image.width  # the square's side in pixels of the photo
+    max_size = int(request.get("cutout_max_size", 2048))
+    if request.get("cutout_image"):
+        # The square cut-out the model sees, with its transparency: the app projects
+        # it back onto the model's front when texturing (backend processing/refine.py).
+        side = min(image.width, max_size)
+        image.resize((side, side), Image.LANCZOS).save(request["cutout_image"])
+    # Photos of the other sides, cut out and framed the same way.
+    views = [
+        other_view(extra, request["u2net"], ratio, max_size)
+        for extra in request.get("extra_images", [])
+    ]
+    rgba = np.asarray(image).astype(np.float32) / 255.0
+    rgb = rgba[:, :, :3] * rgba[:, :, 3:4] + (1 - rgba[:, :, 3:4]) * 0.5
+    prepared = Image.fromarray((rgb * 255.0).astype(np.uint8))
+    prepared.save(request["prepared_image"])
+    return prepared, removed, crop_side, views
+
+
 def main(request_path: str, result_path: str) -> None:
     request = json.loads(Path(request_path).read_text(encoding="utf-8"))
     timings: dict[str, float] = {}
@@ -103,33 +161,15 @@ def main(request_path: str, result_path: str) -> None:
     progress("starting", 0.0)
     install_shims(request["dino_config"])
 
-    import numpy as np
     import torch
-    from PIL import Image
     from tsr.system import TSR
-    from tsr.utils import resize_foreground
 
     torch.set_num_threads(int(request.get("threads") or torch.get_num_threads()))
     device = "cuda" if request.get("device") != "cpu" and torch.cuda.is_available() else "cpu"
 
     progress("background", 0.0)
     t = time.perf_counter()
-    with Image.open(request["image"]) as opened:
-        opened.load()
-        image, removed = cut_out(opened, request["u2net"])
-    alpha = np.asarray(image.getchannel("A"))
-    if (alpha > 127).mean() < 0.01:
-        raise ValueError("No object was found in the photo (background removal left nothing).")
-    image = resize_foreground(image, float(request.get("foreground_ratio", 0.85)))
-    if request.get("cutout_image"):
-        # The square cut-out the model sees, with its transparency: the app projects
-        # it back onto the model's front when texturing (backend processing/refine.py).
-        side = min(image.width, int(request.get("cutout_max_size", 2048)))
-        image.resize((side, side), Image.LANCZOS).save(request["cutout_image"])
-    rgba = np.asarray(image).astype(np.float32) / 255.0
-    rgb = rgba[:, :, :3] * rgba[:, :, 3:4] + (1 - rgba[:, :, 3:4]) * 0.5
-    prepared = Image.fromarray((rgb * 255.0).astype(np.uint8))
-    prepared.save(request["prepared_image"])
+    prepared, removed, crop_side, views = prepare(request)
     timings["background"] = time.perf_counter() - t
 
     progress("loading", 0.0)
@@ -161,6 +201,8 @@ def main(request_path: str, result_path: str) -> None:
         "device": device,
         "threads": torch.get_num_threads(),
         "background_removed": removed,
+        "crop_side": crop_side,
+        "views": views,
         "vertices": len(mesh.vertices),
         "triangles": len(mesh.faces),
         "timings": {k: round(v, 2) for k, v in timings.items()},

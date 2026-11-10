@@ -115,6 +115,13 @@ looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/Applications/COLMAP.app` and
   the model's outline overlapped the cut-out less than 60%, usually because the
   cut-out kept background or lost large parts. The model is still textured with
   TripoSR's own colours; check the cut-out and try a cleaner photo.
+- With several views, the job log says *"The depth was not corrected: The side
+  outline did not match the model's"*: the side photo shows the object at a very
+  different size or cut off at the top, or it is not a side view. Take the views
+  from about the same distance, with the whole top of the object in every photo.
+- With several views, a side or the face looks doubled: the shape comes from the
+  front photo, and the side photo's details do not land exactly on it. Use the
+  model from the front photo alone if that side matters most.
 - *"Refining the model did not work … it is kept as TripoSR made it"*: the model
   is TripoSR's raw output (dense, colours per vertex). Please report the job's
   log; generating again usually gives the same result.

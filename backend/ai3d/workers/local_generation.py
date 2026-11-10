@@ -6,6 +6,10 @@ Refining (``processing/refine.py``) removes loose fragments, smooths and simplif
 the surface and bakes a texture with the photo projected onto the front. If it
 fails, the model is kept as TripoSR made it and the job says so.
 
+With several views (front, left, back, right), TripoSR makes the shape from the
+front photo; the others are cut out by the engine too, and refining uses them to
+correct the depth and colour the sides they show.
+
 Nothing is uploaded. An interrupted run simply starts again from the photo
 (recovery re-queues it); it costs nothing.
 """
@@ -21,9 +25,10 @@ import numpy as np
 import trimesh
 from PIL import Image
 
+from ai3d.models import Image as ImageRow
 from ai3d.models.enums import JobEventType, JobStatus
 from ai3d.processing.mesh import validate_mesh_file
-from ai3d.processing.refine import RefineSettings, refine
+from ai3d.processing.refine import RefineSettings, ViewPhoto, refine
 from ai3d.providers.base import ProviderResult
 from ai3d.providers.local_ai import LocalAIProvider
 from ai3d.services import resources
@@ -103,7 +108,12 @@ def _run(ctx: JobContext, workdir: Path) -> None:
     if job.cancel_requested:
         raise _CancelledError
     ctx.stage("preparing", "Preparing the photo on this computer.", 0.02)
-    (photo,) = _prepare_inputs(ctx, job, LocalAIProvider, workdir)
+    photos = _prepare_inputs(ctx, job, LocalAIProvider, workdir)
+    # Photo pixels as taken, per working-copy pixel (copies of large photos are smaller).
+    scales = _pixel_scales(ctx, job, [p.path for p in photos])
+    front = next((i for i, p in enumerate(photos) if p.role in ("front", "source")), 0)
+    photo = photos[front]
+    others = [(p.role, p.path, scales[i]) for i, p in enumerate(photos) if i != front]
     if not heavy.wait_turn(ctx, "Waiting for another local job on this computer to finish."):
         raise _CancelledError
     # The plan checked the disk; it may have filled up while the job waited.
@@ -123,9 +133,13 @@ def _run(ctx: JobContext, workdir: Path) -> None:
             timeout=float(ctx.settings.local_ai_timeout_seconds),
             cancel=_cancel_check(ctx, deadline),
             on_progress=_Progress(ctx),
+            other_views=[(role, path) for role, path, _ in others],
         )
     finally:
         heavy.release()
+    result["front_pixel_scale"] = scales[front]
+    for view in result.get("views", []):
+        view["pixel_scale"] = next((s for r, _, s in others if r == view["role"]), 1.0)
     timings = result.get("timings", {})
     ctx.event(
         JobEventType.LOG,
@@ -176,6 +190,44 @@ def _run(ctx: JobContext, workdir: Path) -> None:
         )
 
 
+def _views_part(views: list[dict[str, Any]], depth: dict[str, Any] | None) -> str:
+    """What the other views did, for the job log ("" without other views)."""
+    if not views and not depth:
+        return ""
+    parts = []
+    if depth and depth.get("applied"):
+        parts.append(
+            f"The side photos corrected the depth ({depth['depth_before']:.2f} → "
+            f"{depth['depth_after']:.2f} model units front to back)"
+        )
+    elif depth:
+        notes = [v.get("note") for v in depth.get("views", []) if v.get("note")]
+        reason = notes[0] if notes else depth.get("note", "")
+        parts.append(f"The depth was not corrected: {reason}".rstrip(": "))
+    used = [v["role"] for v in views if v.get("used")]
+    unused = [v["role"] for v in views if not v.get("used")]
+    if used:
+        plural = "s" if len(used) > 1 else ""
+        parts.append(f"the {', '.join(used)} photo{plural} coloured those sides")
+    if unused:
+        plural, verb = ("s", "were") if len(unused) > 1 else ("", "was")
+        parts.append(f"the {', '.join(unused)} photo{plural} did not line up and {verb} not used")
+    return " " + "; ".join(parts) + "."
+
+
+def _pixel_scales(ctx: JobContext, job: Any, paths: list[Path]) -> list[float]:
+    """Per input: pixels of the photo as taken per pixel of its working copy."""
+    scales = []
+    with ctx.session() as db:
+        for item, path in zip(job.inputs, paths, strict=True):
+            source = db.get(ImageRow, item.image_id) if item.image_id else None
+            with Image.open(path) as opened:
+                copy = max(opened.size)
+            original = max(source.width, source.height) if source else copy
+            scales.append(original / copy if copy else 1.0)
+    return scales
+
+
 def _keep_alive(ctx: JobContext) -> None:
     ctx.heartbeat()  # raises when the runner stops or the lease is lost
 
@@ -198,6 +250,14 @@ def _refine(
         if cutout and Path(cutout).is_file():
             with Image.open(cutout) as opened:
                 photo = np.asarray(opened.convert("RGBA"))
+        views = []
+        for view in result.get("views", []):
+            if view.get("ok") and Path(view["cutout"]).is_file():
+                with Image.open(view["cutout"]) as opened:
+                    picture = np.asarray(opened.convert("RGBA"))
+                side = float(view["crop_side"]) * float(view.get("pixel_scale", 1.0))
+                views.append(ViewPhoto(view["role"], picture, side))
+        crop_side = result.get("crop_side")
         refined, report = refine(
             mesh,
             RefineSettings(
@@ -205,6 +265,12 @@ def _refine(
             ),
             photo,
             on_step=lambda _: _keep_alive(ctx),
+            views=views,
+            photo_crop_side=(
+                float(crop_side) * float(result.get("front_pixel_scale", 1.0))
+                if crop_side
+                else None
+            ),
         )
         output = glb.with_name("refined.glb")
         refined.export(output, file_type="glb", include_normals=True)
@@ -232,7 +298,7 @@ def _refine(
         JobEventType.LOG,
         f"Refined in {sum(report.seconds.values()):.0f} s: {report.triangles_before:,} → "
         f"{report.triangles_after:,} triangles{removed}; colours baked into a "
-        f"{size}×{size} px texture, and {photo_part}.",
+        f"{size}×{size} px texture, and {photo_part}.{_views_part(report.views, report.depth)}",
         stage="refining",
         data={"refine": details},
     )

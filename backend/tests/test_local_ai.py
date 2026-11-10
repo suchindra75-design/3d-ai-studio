@@ -51,14 +51,14 @@ def _stand_in(calls: list[dict[str, Any]], *, fail: Exception | None = None) -> 
         sphere.visual.vertex_colors = np.tile([40, 160, 60, 255], (len(sphere.vertices), 1))
         glb = workdir / "model.glb"
         glb.write_bytes(sphere.export(file_type="glb"))
-        # The cut-out the engine saves: the sphere's outline from TripoSR's camera.
+        # The cut-outs the engine saves: the sphere's outline from each view's camera.
         cutout = workdir / "cutout.png"
-        outline = np.zeros((256, 256), np.uint8)
-        pixels = refine._pinhole(np.asarray(sphere.vertices), 256)
-        for triangle in pixels[sphere.faces]:
-            cv2.fillPoly(outline, [np.round(triangle).astype(np.int32)], 255)
-        colour = np.full((256, 256, 3), (230, 120, 20), np.uint8)
-        Image.fromarray(np.dstack([colour, outline])).save(cutout)
+        _outline_picture(sphere, None, (230, 120, 20)).save(cutout)
+        views = []
+        for role, _ in options.get("other_views") or ():
+            path = workdir / f"cutout-{role}.png"
+            _outline_picture(sphere, role, (20, 60, 230)).save(path)
+            views.append({"role": role, "ok": True, "cutout": str(path), "crop_side": 256})
         return {
             "ok": True,
             "device": "cpu",
@@ -68,9 +68,22 @@ def _stand_in(calls: list[dict[str, Any]], *, fail: Exception | None = None) -> 
             "seconds_wall": 3.0,
             "glb": str(glb),
             "cutout_image": str(cutout),
+            "crop_side": 256,
+            "views": views,
         }
 
     return generate
+
+
+def _outline_picture(shape: trimesh.Trimesh, role: str | None, colour: tuple[int, ...]) -> Any:
+    """The shape's outline from a view's camera (None: the front), in one colour."""
+    vertices = np.asarray(shape.vertices)
+    if role is not None:
+        vertices = vertices @ refine.turn_towards(np.array(refine.VIEW_DIRECTIONS[role])).T
+    outline = np.zeros((256, 256), np.uint8)
+    for triangle in refine._pinhole(vertices, 256)[shape.faces]:
+        cv2.fillPoly(outline, [np.round(triangle).astype(np.int32)], 255)
+    return Image.fromarray(np.dstack([np.full((256, 256, 3), colour, np.uint8), outline]))
 
 
 @pytest.fixture
@@ -174,6 +187,50 @@ def test_local_generation_job_saves_an_ai_generated_model(
     back = mesh.vertices[:, 2] < -0.3
     assert np.abs(colours[front].mean(axis=0) - (230, 120, 20)).max() < 20
     assert np.abs(colours[back].mean(axis=0) - (110, 209, 136)).max() < 10
+
+
+def test_labelled_views_go_to_the_local_engine_which_uses_them_all(
+    client: TestClient,
+    runner: JobRunner,
+    make_image_project: Any,
+    installed: list[dict[str, Any]],
+) -> None:
+    project, ids = make_image_project(3, input_mode="multi_view")
+    inputs = [
+        {"image_id": ids[0], "role": "front"},
+        {"image_id": ids[1], "role": "left"},
+        {"image_id": ids[2], "role": "back"},
+    ]
+    for mode in ("local", "auto"):
+        plan = client.post(
+            PLAN.format(project["id"]), json={"inputs": inputs, "processing_mode": mode}
+        ).json()
+        assert plan["ok"] is True, plan
+        assert plan["kind"] == "multi_view_to_3d"
+        assert plan["provider"]["key"] == LOCAL
+        assert plan["requires_consent"] is False  # nothing is uploaded
+        assert any("other views correct its depth" in line for line in plan["provider_summary"])
+    # Without view labels, several photos in Local mode are still for photogrammetry.
+    plan = client.post(
+        PLAN.format(project["id"]),
+        json={"inputs": [{"image_id": i} for i in ids], "processing_mode": "local"},
+    ).json()
+    assert plan["kind"] == "photogrammetry"
+
+    job = client.post(
+        f"/api/v1/projects/{project['id']}/generations",
+        json={"inputs": inputs, "processing_mode": "local"},
+    ).json()
+    runner.run_until_idle()
+    job = client.get(f"/api/v1/jobs/{job['id']}").json()
+    assert job["status"] == "succeeded", job
+    (call,) = installed
+    assert [role for role, _ in call["other_views"]] == ["left", "back"]
+    events = client.get(f"/api/v1/jobs/{job['id']}/events").json()["items"]
+    (refined,) = [e for e in events if (e["message"] or "").startswith("Refined in")]
+    assert "the left, back photos coloured those sides" in refined["message"]
+    details = refined["data"]["refine"]
+    assert {v["role"]: v["used"] for v in details["views"]} == {"left": True, "back": True}
 
 
 def test_a_failed_refinement_keeps_the_model_as_generated(

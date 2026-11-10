@@ -147,8 +147,31 @@ generation is turned into a lighter textured model:
 | Texture | The surface is unwrapped and its colours baked into a 1024 / 2048 / 2048 px texture. |
 | Photo | Where the camera saw the surface, the photo itself is projected on: much sharper than TripoSR's colours. It fades out towards grazing angles and is not used on hidden parts. Before projecting, the model's outline is lined up with the cut-out; if they overlap less than 60%, the photo is not projected and the job log says so. |
 
+**With several photos** (a multiple-photos project; in the Generate panel set the
+**Front** view and any of **Left**, **Back**, **Right**), the shape still comes from
+the front photo, and the others are used as well:
+
+- *Depth*: TripoSR guesses how deep the object is; the side photos' outlines show
+  it. The model is stretched or squeezed front to back, height band by height band,
+  to match them. The photos are lined up by the upper half of the outline (for a
+  person: head, neck, shoulders), so they should be taken from about the same
+  distance (within about 20%) and show the top of the object. The middle of each
+  band is corrected fully, parts further out to the sides (arms) not at all, and
+  the correction changes gradually with height; at most 3× deeper.
+- *Colour*: each photo is projected onto what its camera saw. The front photo
+  comes first; the others fill what it cannot see, their brightness matched to the
+  front photo's where both see the same colour.
+- Each photo is checked: a side photo whose outline does not match the model's is
+  not used, and the job log says which were used.
+
+"Left" is the object's own left (for a person facing the camera, the side on the
+right of the front photo). If left and right are swapped, the depth step notices
+and turns them round. What it cannot do: the face and other fine shapes still come
+from one photo, so side photos can look doubled there; where TripoSR built odd
+geometry (a ledge where the arms end), it can show as a dark band.
+
 The job log reports each step (triangles before and after, fragments removed,
-how much of the surface shows the photo). If refining fails, the model is kept
+how much of the surface shows the photos, how the depth changed). If refining fails, the model is kept
 as TripoSR made it and the log says why. What it cannot do: the sides the
 camera did not see are still TripoSR's guesses, and parts missing from the
 cut-out stay missing.

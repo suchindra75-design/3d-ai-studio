@@ -254,3 +254,92 @@ def test_refined_models_stay_closed() -> None:
     assert counts.min() == 2
     assert welded.is_winding_consistent
     assert welded.volume > 0
+
+
+# -- several views ------------------------------------------------------------------
+
+
+def _ellipsoid(radii: tuple[float, float, float], colour: tuple[int, ...]) -> trimesh.Trimesh:
+    shape = trimesh.creation.icosphere(subdivisions=5, radius=1.0)
+    shape.vertices = shape.vertices * np.array(radii)
+    rgb = np.tile(colour, (len(shape.vertices), 1))
+    shape.visual.vertex_colors = np.hstack([rgb, np.full((len(rgb), 1), 255)]).astype(np.uint8)
+    return shape
+
+
+def _view_picture(
+    shape: trimesh.Trimesh, role: str | None, colour: tuple[int, ...], size: int = 512
+) -> np.ndarray:
+    """The shape's outline as seen from a view's camera, filled with one colour."""
+    vertices = np.asarray(shape.vertices)
+    if role is not None:
+        vertices = vertices @ rf.turn_towards(np.array(rf.VIEW_DIRECTIONS[role])).T
+    pixels = rf._pinhole(vertices, size)
+    alpha = np.zeros((size, size), np.uint8)
+    for triangle in pixels[shape.faces]:
+        cv2.fillPoly(alpha, [np.round(triangle).astype(np.int32)], 255)
+    return np.dstack([np.full((size, size, 3), colour, np.uint8), alpha])
+
+
+GREY, GREEN, BLUE_SRGB, MAGENTA = (51, 51, 51), (0, 200, 0), (0, 0, 220), (200, 0, 200)
+
+
+def test_side_photos_correct_a_model_that_is_too_flat() -> None:
+    """TripoSR guessed the object 0.2 deep; its side photo shows it is 0.5 deep."""
+    real = _ellipsoid((0.25, 0.4, 0.25), GREY)
+    model = _ellipsoid((0.25, 0.4, 0.1), GREY)
+    front = _view_picture(real, None, GREEN)
+    side = 1000.0  # both photos framed alike (same camera, same distance)
+    views = [
+        rf.ViewPhoto("left", _view_picture(real, "left", BLUE_SRGB), side),
+        rf.ViewPhoto("back", _view_picture(real, "back", MAGENTA), side),
+    ]
+    refined, report = rf.refine(
+        model,
+        rf.RefineSettings(triangles=6000, texture_size=1024),
+        front,
+        views=views,
+        photo_crop_side=side,
+    )
+    assert report.depth is not None
+    assert report.depth["applied"] is True
+    (left,) = report.depth["views"]
+    assert left["used"] is True
+    assert left["flipped"] is False
+    assert left["match"] > 0.9
+    depth = float(np.ptp(refined.vertices[:, 2]))
+    assert depth == pytest.approx(0.5, rel=0.12)  # was 0.2
+    assert float(np.ptp(refined.vertices[:, 0])) == pytest.approx(0.5, rel=0.05)  # unchanged
+    # Each side shows its own photo; the front keeps the front photo (the corrected
+    # surface is not a perfect ellipsoid, so a few points tilt and mix in some side).
+    v = refined.vertices
+    front_dev = np.abs(_texture_colours(refined, v[v[:, 2] > 0.2]) - GREEN).max(axis=1)
+    assert (front_dev < 30).mean() > 0.85
+    assert np.abs(_texture_colours(refined, v[v[:, 0] > 0.22]).mean(axis=0) - BLUE_SRGB).max() < 40
+    assert np.abs(_texture_colours(refined, v[v[:, 2] < -0.2]).mean(axis=0) - MAGENTA).max() < 40
+    assert {entry["role"]: entry["used"] for entry in report.views} == {"left": True, "back": True}
+
+
+def test_a_side_photo_that_does_not_fit_leaves_the_depth_alone() -> None:
+    model = _ellipsoid((0.25, 0.4, 0.1), GREY)
+    front = _view_picture(model, None, GREEN)
+    # A shape widest at the top and narrowing to a point: nothing like the model's
+    # side, which widens from the top down to the middle.
+    stripe = np.zeros((512, 512, 4), np.uint8)
+    cv2.fillPoly(stripe, [np.array([[100, 60], [412, 60], [256, 460]], np.int32)], (0, 0, 220, 255))
+    _, report = rf.refine(
+        model,
+        rf.RefineSettings(triangles=4000, texture_size=512),
+        front,
+        views=[rf.ViewPhoto("left", stripe, 1000.0)],
+        photo_crop_side=1000.0,
+    )
+    assert report.depth is not None
+    assert report.depth["applied"] is False
+    assert "did not match" in report.depth["views"][0]["note"]
+
+
+def test_views_are_turned_to_face_the_front_camera() -> None:
+    for role, direction in rf.VIEW_DIRECTIONS.items():
+        turned = rf.turn_towards(np.array(direction)) @ np.array(direction)
+        assert turned == pytest.approx([0.0, 0.0, 1.0], abs=1e-9), role
