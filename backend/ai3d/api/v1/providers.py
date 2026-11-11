@@ -5,6 +5,7 @@ from ai3d.api.deps import DbDep, ProvidersDep
 from ai3d.schemas.provider import (
     CredentialCheckRead,
     MultiViewLimitsRead,
+    ProviderBaseUrlUpdate,
     ProviderCapabilitiesRead,
     ProviderKeyUpdate,
     ProviderList,
@@ -19,6 +20,9 @@ def _read(db: Session, manager: ProviderManager, key: str) -> ProviderRead:
     cls = manager.provider_class(key)
     credential = manager.credential(db, key)
     caps = cls.capabilities()
+    base_url, base_url_source = (
+        manager.base_url(db, key) if cls.base_url_setting else (None, credential.source.NONE)
+    )
     return ProviderRead(
         key=cls.key,
         display_name=cls.display_name,
@@ -35,6 +39,10 @@ def _read(db: Session, manager: ProviderManager, key: str) -> ProviderRead:
         api_key_env_var=f"AI3D_{cls.api_key_setting.upper()}" if cls.api_key_setting else None,
         credential_error=credential.error,
         unavailable_reason=manager.unavailable_reason(key),
+        requires_base_url=cls.base_url_setting is not None,
+        base_url=base_url,
+        base_url_source=base_url_source,
+        base_url_env_var=f"AI3D_{cls.base_url_setting.upper()}" if cls.base_url_setting else None,
         capabilities=ProviderCapabilitiesRead(
             single_image=caps.single_image,
             multi_view=MultiViewLimitsRead(
@@ -85,6 +93,24 @@ def set_api_key(
 @router.delete("/{key}/api-key", response_model=ProviderRead, summary="Remove the stored API key")
 def delete_api_key(db: DbDep, manager: ProvidersDep, key: str) -> ProviderRead:
     manager.delete_key(db, key)
+    return _read(db, manager, key)
+
+
+@router.put(
+    "/{key}/base-url",
+    response_model=ProviderRead,
+    summary="Set the address of a server you run (the GPU server)",
+)
+def set_base_url(
+    db: DbDep, manager: ProvidersDep, key: str, body: ProviderBaseUrlUpdate
+) -> ProviderRead:
+    manager.store_base_url(db, key, body.base_url)
+    return _read(db, manager, key)
+
+
+@router.delete("/{key}/base-url", response_model=ProviderRead, summary="Remove the stored address")
+def delete_base_url(db: DbDep, manager: ProvidersDep, key: str) -> ProviderRead:
+    manager.delete_base_url(db, key)
     return _read(db, manager, key)
 
 

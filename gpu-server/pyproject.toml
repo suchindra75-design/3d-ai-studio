@@ -1,0 +1,28 @@
+[project]
+name = "ai3d-gpu-server"
+version = "0.1.0"
+description = "AI 3D Studio GPU server: runs TRELLIS image-to-3D on your own NVIDIA GPU machine"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10,<3.13"
+# The server itself. TRELLIS and its GPU libraries are installed by the Dockerfile
+# (they need CUDA and are not installable from PyPI alone).
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.18",
+    "pydantic>=2.9",
+    "pillow>=10.0",
+    "numpy>=1.24",
+    "trimesh>=4.0",
+]
+
+[project.scripts]
+ai3d-gpu-server = "ai3d_gpu.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ai3d_gpu"]

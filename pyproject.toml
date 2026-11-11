@@ -32,11 +32,14 @@ allowed-confusables = ["×", "–", "’"]
 [tool.ruff.lint.per-file-ignores]
 "backend/tests/**" = ["S", "PLR", "N802"]
 "local-engine/tests/**" = ["S", "PLR"]
+"gpu-server/tests/**" = ["S", "PLR"]
+# Imports torch and TRELLIS only when the GPU backend loads (they exist only in its image).
+"gpu-server/ai3d_gpu/backends/trellis.py" = ["PLC0415"]
 # Runs in the local AI engine's environment; imports must follow the stand-in modules.
 "local-engine/ai3d_engine/local_ai_scripts/**" = ["PLC0415"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ai3d", "ai3d_engine", "tests"]
+known-first-party = ["ai3d", "ai3d_engine", "ai3d_gpu", "tests"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -46,8 +49,8 @@ python_version = "3.11"
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
-packages = ["ai3d", "ai3d_engine"]
-mypy_path = ["backend", "local-engine"]
+packages = ["ai3d", "ai3d_engine", "ai3d_gpu"]
+mypy_path = ["backend", "local-engine", "gpu-server"]
 exclude = ["migrations/versions/"]
 
 [[tool.mypy.overrides]]
@@ -55,7 +58,10 @@ module = ["cv2", "cv2.*", "fast_simplification", "scipy", "scipy.*", "open3d", "
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests", "local-engine/tests"]
+testpaths = ["backend/tests", "local-engine/tests", "gpu-server/tests"]
+# The GPU server is not a workspace member (its GPU dependencies live in its Docker
+# image); everything its tests need is already in the dev environment.
+pythonpath = ["gpu-server"]
 addopts = "-ra --strict-markers"
 markers = [
     "slow: tests that take more than a few seconds",

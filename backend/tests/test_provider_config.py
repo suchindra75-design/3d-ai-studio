@@ -26,7 +26,18 @@ def _provider(client: TestClient, key: str) -> dict[str, object]:
 
 def test_list_providers(client: TestClient) -> None:
     items = {p["key"]: p for p in client.get("/api/v1/providers").json()["items"]}
-    assert list(items) == ["tripo", "meshy", "local-photogrammetry", "local-triposr", "mock"]
+    assert list(items) == [
+        "gpu-server",
+        "tripo",
+        "meshy",
+        "local-photogrammetry",
+        "local-triposr",
+        "mock",
+    ]
+    gpu = items["gpu-server"]
+    assert gpu["configured"] is False  # needs an address and a token
+    assert gpu["requires_base_url"] is True
+    assert gpu["uploads_images"] is True  # photos leave this computer (to your server)
     tripo = items["tripo"]
     assert tripo["configured"] is False
     assert tripo["credential_source"] == "none"

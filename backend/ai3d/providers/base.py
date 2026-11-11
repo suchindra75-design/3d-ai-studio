@@ -189,6 +189,12 @@ class Provider(ABC):
     pricing_url: ClassVar[str | None] = None
     # Settings attribute holding the environment key, e.g. "tripo_api_key".
     api_key_setting: ClassVar[str | None] = None
+    # For servers the user runs: settings attribute holding the address (also
+    # storable through the API); the provider needs one to be configured.
+    base_url_setting: ClassVar[str | None] = None
+    # True when the result should be cleaned up and textured on this computer
+    # (processing/refine.py), using the framed photos the provider returns.
+    refines_output: ClassVar[bool] = False
 
     def __init__(
         self,

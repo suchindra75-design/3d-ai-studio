@@ -343,3 +343,24 @@ def test_views_are_turned_to_face_the_front_camera() -> None:
     for role, direction in rf.VIEW_DIRECTIONS.items():
         turned = rf.turn_towards(np.array(direction)) @ np.array(direction)
         assert turned == pytest.approx([0.0, 0.0, 1.0], abs=1e-9), role
+
+
+@pytest.mark.parametrize("made_at", [0.0, 90.0, 200.0])
+def test_a_model_made_in_its_own_pose_is_turned_to_face_the_photo(made_at: float) -> None:
+    """A figure with a nose and a coloured face, made turned away (as TRELLIS makes
+    models); the front photo shows its face. Front and back outlines are mirror
+    images, so the colours decide between them."""
+    body = _ellipsoid((0.25, 0.4, 0.18), GREY)
+    nose = _ellipsoid((0.04, 0.04, 0.08), GREY)
+    nose.apply_translation([0.08, 0.15, 0.17])  # off-centre: the outline is not symmetric
+    figure = trimesh.util.concatenate([body, nose])
+    colours = np.tile([51, 51, 51, 255], (len(figure.vertices), 1))
+    colours[figure.vertices[:, 2] > 0.05] = (0, 120, 0, 255)  # the face is green (linear)
+    figure.visual.vertex_colors = colours.astype(np.uint8)
+    photo = _view_picture(figure, None, (0, 180, 0))  # green where the camera sees
+    turned = figure.copy()
+    turned.vertices = np.asarray(figure.vertices) @ rf.turn_about_up(made_at).T
+    fixed, info = rf.orient_to_photo(turned, photo)
+    undo = (360.0 - made_at) % 360.0
+    assert min(abs(info["yaw_degrees"] - undo), 360 - abs(info["yaw_degrees"] - undo)) <= 5
+    assert np.abs(np.asarray(fixed.vertices) - np.asarray(figure.vertices)).max() < 0.05

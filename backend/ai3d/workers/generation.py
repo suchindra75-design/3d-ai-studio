@@ -26,6 +26,7 @@ from ai3d.providers.base import (
     ProviderError,
     ProviderErrorCode,
     ProviderInput,
+    ProviderResult,
     TaskStatus,
 )
 from ai3d.services.images import ensure_provider_copy
@@ -320,6 +321,8 @@ def _finish_task(
 
     ctx.stage("downloading", f"Downloading the model from {name}.", 0.92)
     result = provider.download_result(tracking.task_id, status, workdir)
+    if provider_cls.refines_output:
+        result = _refined(ctx, job, result)
 
     ctx.stage("validating", "Checking the 3D file.", 0.95)
     report = validate_mesh_file(result.mesh_path, file_type=result.mesh_format)
@@ -369,6 +372,32 @@ def _finish_task(
             data={"model_version_id": str(version.id), "report_status": report.status.value},
         )
     log.info("generation succeeded", extra={"job_id": str(job.id), "provider": provider_cls.key})
+
+
+def _refined(ctx: JobContext, job: GenerationJob, result: ProviderResult) -> ProviderResult:
+    """A provider's model cleaned up and textured here with the photos it framed
+    (the GPU server's TRELLIS models: turned to face the front photo first; TRELLIS
+    already shapes every side, so side photos colour but do not reshape it)."""
+    from ai3d.workers.refining import RefineInputs, refine_model  # noqa: PLC0415
+
+    framed = {str(v["role"]): v for v in result.metadata.get("cutouts", [])}
+    front = framed.pop("front", None) or framed.pop("source", None)
+    inputs = RefineInputs(
+        source="the GPU server",
+        photo=Path(front["cutout"]) if front else None,
+        views=[(role, Path(v["cutout"]), v.get("crop_side")) for role, v in framed.items()],
+        orient=True,
+        correct_depth=False,
+    )
+    options = (job.params.get("provider_settings") or {}).get("refine")
+    path, details = refine_model(ctx, result.mesh_path, options, inputs, progress=0.93)
+    metadata = dict(result.metadata) | ({"refine": details} if details else {})
+    return ProviderResult(
+        mesh_path=path,
+        mesh_format="glb",
+        preview_path=result.preview_path,
+        metadata=metadata,
+    )
 
 
 def _instantiate(ctx: JobContext, job: GenerationJob) -> tuple[type[Provider], Provider] | None:

@@ -2,6 +2,7 @@
 
 from ai3d.core.config import Settings
 from ai3d.providers.base import Provider
+from ai3d.providers.gpu_server import GpuServerProvider
 from ai3d.providers.local_ai import LocalAIProvider
 from ai3d.providers.local_photogrammetry import LocalPhotogrammetryProvider
 from ai3d.providers.meshy import MeshyProvider
@@ -9,6 +10,7 @@ from ai3d.providers.tripo import TripoProvider
 
 # Order = preference when the user lets the app choose.
 _REAL_PROVIDERS: tuple[type[Provider], ...] = (
+    GpuServerProvider,  # the user's own server: preferred over third-party services
     TripoProvider,
     MeshyProvider,
     LocalPhotogrammetryProvider,

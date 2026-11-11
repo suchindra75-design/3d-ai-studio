@@ -205,6 +205,25 @@ export function useDeleteProviderKey() {
   });
 }
 
+export function useSetProviderBaseUrl() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, baseUrl }: { key: string; baseUrl: string }) =>
+      api.providers.setBaseUrl(key, baseUrl),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.providers }),
+  });
+}
+
+export function useDeleteProviderBaseUrl() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.providers.deleteBaseUrl(key),
+    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.providers }),
+  });
+}
+
 export function useCheckProvider() {
   const api = useApi();
   return useMutation({ mutationFn: (key: string) => api.providers.check(key) });

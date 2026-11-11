@@ -3184,6 +3184,21 @@
         "title": "ProjectUpdate",
         "type": "object"
       },
+      "ProviderBaseUrlUpdate": {
+        "properties": {
+          "base_url": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Base Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_url"
+        ],
+        "title": "ProviderBaseUrlUpdate",
+        "type": "object"
+      },
       "ProviderCapabilitiesRead": {
         "properties": {
           "accepted_mime_types": {
@@ -3349,6 +3364,32 @@
             ],
             "title": "Api Key Hint"
           },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "base_url_env_var": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url Env Var"
+          },
+          "base_url_source": {
+            "$ref": "#/components/schemas/CredentialSource",
+            "default": "none"
+          },
           "capabilities": {
             "$ref": "#/components/schemas/ProviderCapabilitiesRead"
           },
@@ -3422,6 +3463,11 @@
             "title": "Requires Api Key",
             "type": "boolean"
           },
+          "requires_base_url": {
+            "default": false,
+            "title": "Requires Base Url",
+            "type": "boolean"
+          },
           "unavailable_reason": {
             "anyOf": [
               {
@@ -3455,6 +3501,10 @@
           "api_key_env_var",
           "credential_error",
           "unavailable_reason",
+          "requires_base_url",
+          "base_url",
+          "base_url_source",
+          "base_url_env_var",
           "capabilities"
         ],
         "title": "ProviderRead",
@@ -7244,6 +7294,118 @@
           }
         },
         "summary": "Store an API key (encrypted at rest; never returned)",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{key}/base-url": {
+      "delete": {
+        "operationId": "delete_base_url_api_v1_providers__key__base_url_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Remove the stored address",
+        "tags": [
+          "providers"
+        ]
+      },
+      "put": {
+        "operationId": "set_base_url_api_v1_providers__key__base_url_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderBaseUrlUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Set the address of a server you run (the GPU server)",
         "tags": [
           "providers"
         ]

@@ -98,6 +98,9 @@ class Settings(BaseSettings):
     tripo_api_key: SecretStr | None = None
     meshy_api_key: SecretStr | None = None
     tripo_base_url: str = "https://openapi.tripo3d.ai/v3"
+    # Your own GPU server (gpu-server/, docs/GPU_SERVER.md); also settable in the app.
+    gpu_server_url: str | None = None
+    gpu_server_token: SecretStr | None = None
     meshy_base_url: str = "https://api.meshy.ai/openapi/v1"
 
     # Background jobs (run in-process by default).

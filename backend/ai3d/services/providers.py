@@ -20,6 +20,7 @@ from ai3d.models import AIProvider, ProviderConfiguration
 from ai3d.models.enums import CredentialSource
 from ai3d.providers import Provider, ProviderRegistry
 from ai3d.providers.base import CredentialCheck, ProviderError
+from ai3d.providers.gpu_server import check_server_url
 
 log = logging.getLogger(__name__)
 
@@ -129,11 +130,50 @@ class ProviderManager:
     def unavailable_reason(self, key: str) -> str | None:
         return self.provider_class(key).unavailable_reason(self.settings)
 
+    def base_url(self, db: Session, key: str) -> tuple[str | None, CredentialSource]:
+        """The address of a server the user runs: environment first, then stored."""
+        cls = self.provider_class(key)
+        if cls.base_url_setting is None:
+            return getattr(self.settings, f"{key}_base_url", None), CredentialSource.NONE
+        env_value = getattr(self.settings, cls.base_url_setting, None)
+        if env_value:
+            return str(env_value), CredentialSource.ENVIRONMENT
+        config = self._default_config(db, key)
+        stored = (config.settings or {}).get("base_url") if config is not None else None
+        if isinstance(stored, str) and stored:
+            return stored, CredentialSource.STORED
+        return None, CredentialSource.NONE
+
     def is_configured(self, db: Session, key: str) -> bool:
         cls = self.provider_class(key)
         if cls.unavailable_reason(self.settings) is not None:
             return False
+        if cls.base_url_setting is not None and self.base_url(db, key)[0] is None:
+            return False
         return cls.api_key_setting is None or self.credential(db, key).usable
+
+    def store_base_url(self, db: Session, key: str, base_url: str) -> None:
+        cls = self.provider_class(key)
+        if cls.base_url_setting is None:
+            raise InvalidInputError(f"{cls.display_name} has a fixed address.")
+        try:
+            url = check_server_url(base_url)
+        except ValueError as exc:
+            raise InvalidInputError(str(exc)) from exc
+        config = self._default_config(db, key)
+        if config is None:
+            config = ProviderConfiguration(provider_id=self._provider_row(db, key).id)
+            db.add(config)
+        config.settings = {**(config.settings or {}), "base_url": url}
+        db.commit()
+        log.info("provider address stored", extra={"provider": key})
+
+    def delete_base_url(self, db: Session, key: str) -> None:
+        self.provider_class(key)
+        config = self._default_config(db, key)
+        if config is not None and (config.settings or {}).get("base_url"):
+            config.settings = {k: v for k, v in config.settings.items() if k != "base_url"}
+            db.commit()
 
     def store_key(self, db: Session, key: str, api_key: str) -> None:
         cls = self.provider_class(key)
@@ -175,7 +215,7 @@ class ProviderManager:
             )
         provider = cls(
             api_key=credential.api_key,
-            base_url=getattr(self.settings, f"{key}_base_url", None),
+            base_url=self.base_url(db, key)[0],
             transport=self.transport,
             max_model_bytes=self.settings.max_model_bytes,
         )

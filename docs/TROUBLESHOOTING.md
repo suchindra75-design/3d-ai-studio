@@ -96,6 +96,10 @@ looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/Applications/COLMAP.app` and
 `AI3D_COLMAP_PATH=/path/to/colmap` in a `.env` file in the app's data folder
 (Settings → Data folder → *Open*) and restart the app.
 
+## Your GPU server (TRELLIS)
+
+See [GPU_SERVER.md → Troubleshooting](GPU_SERVER.md#troubleshooting).
+
 ## Local AI engine (TripoSR)
 
 - *"not installed"* in the provider list or plan: run

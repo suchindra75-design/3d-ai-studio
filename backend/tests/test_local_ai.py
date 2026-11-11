@@ -243,7 +243,7 @@ def test_a_failed_refinement_keeps_the_model_as_generated(
     def broken(*args: Any, **kwargs: Any) -> Any:
         raise ValueError("no charts")
 
-    monkeypatch.setattr(worker, "refine", broken)
+    monkeypatch.setattr("ai3d.workers.refining.refine", broken)
     project, ids = make_image_project(1)
     job = client.post(
         f"/api/v1/projects/{project['id']}/generations",

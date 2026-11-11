@@ -93,6 +93,7 @@ class RefineReport:
     photo_share: float = 0.0  # share of the surface coloured (mostly) from the photos
     views: list[dict[str, Any]] = field(default_factory=list)  # the other photos
     depth: dict[str, Any] | None = None  # the depth correction from side photos
+    orientation: dict[str, Any] | None = None  # the turn found to face the front photo
     note: str | None = None
     seconds: dict[str, float] = field(default_factory=dict)
 
@@ -879,6 +880,83 @@ def correct_depth(
     return result, summary
 
 
+# --- facing the front photo ------------------------------------------------------
+#
+# Some models (TRELLIS) are made in the object's own pose, not facing the camera.
+# The turn about the vertical axis whose outline best matches the front cut-out is
+# found first (15° steps, then 2.5°); turns half a circle apart have mirrored
+# outlines that often match equally (a person's front and back), so among the turns
+# that match about as well, the one that puts the photo's colours where the model's
+# own colours are wins.
+
+ORIENT_STEP = 15.0
+ORIENT_FINE = (-10.0, 10.0, 2.5)
+ORIENT_TRIANGLES = 20_000
+ORIENT_TIE = 0.03  # outline overlap within this of the best counts as a tie
+
+
+def turn_about_up(degrees: float) -> np.ndarray:
+    """Rotation about the vertical (Y) axis; positive turns +Z towards +X."""
+    a = np.radians(degrees)
+    return np.array([[np.cos(a), 0.0, np.sin(a)], [0.0, 1.0, 0.0], [-np.sin(a), 0.0, np.cos(a)]])
+
+
+def _colour_mismatch(
+    mesh: trimesh.Trimesh, fit: CameraFit, colours: np.ndarray, photo: np.ndarray
+) -> float:
+    """Mean difference between the model's colours and the photo's where the camera
+    sees the model (0..1; lower is better)."""
+    points = np.asarray(mesh.vertices)
+    seen = _visible(mesh, fit, points)
+    sampled = _sample(photo.astype(np.float32) / 255.0, fit.to_pixels(points, photo.shape[0]))
+    inside = seen & (sampled[:, 3] > 0.5)
+    if inside.sum() < 50:
+        return 1.0
+    return float(np.abs(sampled[inside, :3] - colours[inside]).mean())
+
+
+def orient_to_photo(
+    mesh: trimesh.Trimesh, photo: np.ndarray
+) -> tuple[trimesh.Trimesh, dict[str, Any]]:
+    """The model turned to face the front photo, and how the turn was found."""
+    small = mesh
+    if len(mesh.faces) > ORIENT_TRIANGLES:
+        small, _ = simplify_mesh(mesh, ORIENT_TRIANGLES)
+    colours = _vertex_colours_srgb(small)
+    has_colour = float(np.ptp(colours)) > 0.02
+    vertices = np.asarray(small.vertices)
+    alpha = photo[..., 3]
+
+    def outline_fit(yaw: float) -> tuple[trimesh.Trimesh, CameraFit]:
+        turned = trimesh.Trimesh(vertices @ turn_about_up(yaw).T, small.faces, process=False)
+        return turned, fit_camera(turned, alpha)
+
+    coarse = {yaw: outline_fit(yaw) for yaw in np.arange(0.0, 360.0, ORIENT_STEP)}
+    best_iou = max(fit.iou for _, fit in coarse.values())
+    ties = [yaw for yaw, (_, fit) in coarse.items() if fit.iou >= best_iou - ORIENT_TIE]
+    mismatch: dict[float, float] = {}
+    if has_colour and len(ties) > 1:
+        mismatch = {
+            yaw: _colour_mismatch(coarse[yaw][0], coarse[yaw][1], colours, photo) for yaw in ties
+        }
+        chosen = min(ties, key=lambda yaw: mismatch[yaw])
+    else:
+        chosen = max(ties, key=lambda yaw: coarse[yaw][1].iou)
+    fine = {
+        (chosen + step) % 360.0: outline_fit((chosen + step) % 360.0)[1].iou
+        for step in np.arange(ORIENT_FINE[0], ORIENT_FINE[1] + 1e-9, ORIENT_FINE[2])
+    }
+    yaw = max(fine, key=lambda angle: fine[angle])
+    turned = mesh.copy()
+    turned.vertices = np.asarray(mesh.vertices) @ turn_about_up(yaw).T
+    return turned, {
+        "yaw_degrees": round(float(yaw), 1),
+        "outline_overlap": round(float(fine[yaw]), 3),
+        "tied_turns": [round(float(t), 1) for t in ties],
+        "decided_by_colour": bool(mismatch),
+    }
+
+
 # --- baking -----------------------------------------------------------------------
 
 
@@ -1151,6 +1229,7 @@ def refine(
     *,
     views: list[ViewPhoto] | None = None,
     photo_crop_side: float | None = None,
+    orient: bool = False,
 ) -> tuple[trimesh.Trimesh, RefineReport]:
     """Clean up, simplify, unwrap and texture a generated model.
 
@@ -1159,8 +1238,9 @@ def refine(
     transparency), or None to bake from the vertex colours only.
     ``views``: photos of the other sides; with ``photo_crop_side`` (the front
     square's side in pixels of the photo as taken) the side views also correct the
-    depth. ``on_step`` is called with each finished step's name (the job worker uses
-    it to show it is still alive).
+    depth. With ``orient`` the model is first turned to face the front photo (for
+    models that are not made facing the camera, e.g. TRELLIS). ``on_step`` is called
+    with each finished step's name (the job worker uses it to show it is still alive).
     """
     report = RefineReport(triangles_before=len(mesh.faces), texture_size=settings.texture_size)
     clock = time.perf_counter()
@@ -1175,6 +1255,9 @@ def refine(
 
     views = list(views or ())
     mesh, report.fragments_removed, report.fragment_area_share = remove_fragments(mesh)
+    if orient and photo is not None:
+        mesh, report.orientation = orient_to_photo(mesh, _fit_picture(photo))
+        lap("orienting")
     flipped: dict[str, bool] = {}
     if photo is not None and photo_crop_side and any(v.role in ("left", "right") for v in views):
         front = fit_camera(mesh, _fit_picture(photo)[..., 3])

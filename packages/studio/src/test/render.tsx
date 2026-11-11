@@ -27,7 +27,14 @@ export function fakeApi(overrides: DeepPartial<ApiClient> = {}): ApiClient {
     },
     images: { list: vi.fn(), get: vi.fn(), delete: vi.fn(), upload: vi.fn() },
     devices: { local: vi.fn() },
-    providers: { list: vi.fn(), setApiKey: vi.fn(), deleteApiKey: vi.fn(), check: vi.fn() },
+    providers: {
+      list: vi.fn(),
+      setApiKey: vi.fn(),
+      deleteApiKey: vi.fn(),
+      setBaseUrl: vi.fn(),
+      deleteBaseUrl: vi.fn(),
+      check: vi.fn(),
+    },
     generations: { plan: vi.fn(), create: vi.fn() },
     jobs: {
       list: vi.fn(),

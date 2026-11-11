@@ -46,6 +46,11 @@ class ProviderRead(Schema):
     credential_error: str | None
     # Set when the engine cannot run here (e.g. COLMAP is not installed).
     unavailable_reason: str | None = None
+    # Servers the user runs (the GPU server): their address, which is not secret.
+    requires_base_url: bool = False
+    base_url: str | None = None
+    base_url_source: CredentialSource = CredentialSource.NONE
+    base_url_env_var: str | None = None
     capabilities: ProviderCapabilitiesRead
 
 
@@ -55,6 +60,10 @@ class ProviderList(Schema):
 
 class ProviderKeyUpdate(Schema):
     api_key: str = Field(min_length=1, max_length=512, repr=False)
+
+
+class ProviderBaseUrlUpdate(Schema):
+    base_url: str = Field(min_length=1, max_length=512)
 
 
 class CredentialCheckRead(Schema):

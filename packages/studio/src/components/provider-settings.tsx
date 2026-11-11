@@ -19,11 +19,88 @@ import { useId, useState, type FormEvent } from 'react';
 
 import {
   useCheckProvider,
+  useDeleteProviderBaseUrl,
   useDeleteProviderKey,
   useProviders,
+  useSetProviderBaseUrl,
   useSetProviderKey,
 } from '../api/hooks';
 import { ErrorState } from './page';
+
+function ServerAddress({ provider }: { provider: ProviderRead }) {
+  const inputId = useId();
+  const [address, setAddress] = useState('');
+  const save = useSetProviderBaseUrl();
+  const remove = useDeleteProviderBaseUrl();
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!address.trim()) return;
+    save.mutate(
+      { key: provider.key, baseUrl: address.trim() },
+      { onSuccess: () => setAddress('') },
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs">
+        {provider.base_url ? (
+          <>
+            Server: <code className="font-mono">{provider.base_url}</code>
+            {provider.base_url_source === 'environment' ? (
+              <>
+                {' '}
+                (from <code className="font-mono">{provider.base_url_env_var}</code>)
+              </>
+            ) : null}
+          </>
+        ) : (
+          <>
+            No server address. Add one below or set{' '}
+            <code className="font-mono">{provider.base_url_env_var}</code> for the backend.
+          </>
+        )}
+      </p>
+      <form onSubmit={submit} className="flex flex-col gap-1.5">
+        <Label htmlFor={inputId}>
+          {provider.base_url ? 'Change server address' : 'Server address'}
+        </Label>
+        <div className="flex flex-wrap gap-2">
+          <Input
+            id={inputId}
+            type="url"
+            autoComplete="off"
+            spellCheck={false}
+            value={address}
+            onChange={(event) => setAddress(event.target.value)}
+            className="min-w-0 flex-1"
+            placeholder="https://your-gpu-server:8800"
+          />
+          <Button type="submit" variant="secondary" disabled={!address.trim() || save.isPending}>
+            Save address
+          </Button>
+          {provider.base_url_source === 'stored' ? (
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(provider.key)}
+            >
+              Remove address
+            </Button>
+          ) : null}
+        </div>
+        <FieldHint>
+          Use https:// (the access token goes with every request); http:// only for this computer,
+          e.g. an SSH tunnel.
+        </FieldHint>
+      </form>
+      {save.isError ? <ErrorState error={save.error} /> : null}
+      {remove.isError ? <ErrorState error={remove.error} /> : null}
+    </div>
+  );
+}
 
 function KeyStatus({ provider }: { provider: ProviderRead }) {
   if (!provider.requires_api_key) {
@@ -36,21 +113,27 @@ function KeyStatus({ provider }: { provider: ProviderRead }) {
   if (provider.credential_error) {
     return <span className="text-danger">{provider.credential_error}</span>;
   }
+  const what = provider.requires_base_url ? 'token' : 'key';
+  const What = provider.requires_base_url ? 'Access token' : 'Key';
   switch (provider.credential_source) {
     case 'environment':
       return (
         <span>
-          Key from the <code className="font-mono">{provider.api_key_env_var}</code> environment
+          {What} from the <code className="font-mono">{provider.api_key_env_var}</code> environment
           variable ({provider.api_key_hint}).
         </span>
       );
     case 'stored':
-      return <span>Key stored encrypted on this machine ({provider.api_key_hint}).</span>;
+      return (
+        <span>
+          {What} stored encrypted on this machine ({provider.api_key_hint}).
+        </span>
+      );
     default:
       return (
         <span>
-          No key. Add one below or set <code className="font-mono">{provider.api_key_env_var}</code>{' '}
-          for the backend.
+          No {what}. Add one below or set{' '}
+          <code className="font-mono">{provider.api_key_env_var}</code> for the backend.
         </span>
       );
   }
@@ -62,6 +145,7 @@ function ProviderRow({ provider }: { provider: ProviderRead }) {
   const save = useSetProviderKey();
   const remove = useDeleteProviderKey();
   const check = useCheckProvider();
+  const server = provider.requires_base_url;
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -77,7 +161,9 @@ function ProviderRow({ provider }: { provider: ProviderRead }) {
         {provider.kind === 'mock' ? (
           <Badge variant="warning">Test provider</Badge>
         ) : (
-          <Badge variant="outline">{provider.uploads_images ? 'Cloud' : 'Local'}</Badge>
+          <Badge variant="outline">
+            {server ? 'Your server' : provider.uploads_images ? 'Cloud' : 'Local'}
+          </Badge>
         )}
         {provider.configured ? (
           <Badge variant="success">
@@ -120,6 +206,7 @@ function ProviderRow({ provider }: { provider: ProviderRead }) {
           ) : null}
         </p>
       ) : null}
+      {server ? <ServerAddress provider={provider} /> : null}
       <p className="text-xs">
         <KeyStatus provider={provider} />
       </p>
@@ -127,7 +214,13 @@ function ProviderRow({ provider }: { provider: ProviderRead }) {
       {provider.requires_api_key ? (
         <form onSubmit={submit} className="flex flex-col gap-1.5">
           <Label htmlFor={inputId}>
-            {provider.credential_source === 'none' ? 'API key' : 'Replace stored key'}
+            {server
+              ? provider.credential_source === 'none'
+                ? 'Access token'
+                : 'Replace stored token'
+              : provider.credential_source === 'none'
+                ? 'API key'
+                : 'Replace stored key'}
           </Label>
           <div className="flex flex-wrap gap-2">
             <Input
@@ -143,7 +236,7 @@ function ProviderRow({ provider }: { provider: ProviderRead }) {
               }
             />
             <Button type="submit" variant="secondary" disabled={!apiKey.trim() || save.isPending}>
-              Save key
+              {server ? 'Save token' : 'Save key'}
             </Button>
           </div>
           <FieldHint>
@@ -161,7 +254,7 @@ function ProviderRow({ provider }: { provider: ProviderRead }) {
             disabled={check.isPending}
             onClick={() => check.mutate(provider.key)}
           >
-            {check.isPending ? 'Checking…' : 'Check key'}
+            {check.isPending ? 'Checking…' : server ? 'Check connection' : 'Check key'}
           </Button>
         ) : null}
         {provider.credential_source === 'stored' ? (
@@ -174,7 +267,7 @@ function ProviderRow({ provider }: { provider: ProviderRead }) {
               remove.mutate(provider.key);
             }}
           >
-            Remove stored key
+            {server ? 'Remove stored token' : 'Remove stored key'}
           </Button>
         ) : null}
         {check.data ? (

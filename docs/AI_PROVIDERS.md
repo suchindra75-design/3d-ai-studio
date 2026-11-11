@@ -107,6 +107,7 @@ failure. The key/balance and paid levels have not been run (no keys here).
 | Engine | Cost | Requirements |
 |---|---|---|
 | Photogrammetry (COLMAP, Phase 4) | free (BSD) | 20+ overlapping photos; CPU for poses, NVIDIA CUDA for dense surfaces |
+| Your GPU server (TRELLIS) | free model (MIT); you pay the GPU machine's hourly rental | one photo or 2–4 views shaped together; NVIDIA GPU ≥ 16 GB; the app textures the result ([GPU_SERVER.md](GPU_SERVER.md)). Written against TRELLIS's published code; not yet run on a GPU |
 | Local AI (TripoSR, Phase 8) | free (MIT code and weights) | one photo, or 2–4 labelled views (shape from the front, depth and colours from the others); CPU works (≈1.5 min on an Intel Mac), NVIDIA used when present; installed with `ai3d-local-ai install` ([LOCAL_GPU_SETUP.md](LOCAL_GPU_SETUP.md)). The result is refined by our own code: fragments removed, smoothed, simplified, textured with the photo projected onto the front |
 | Other local AI models | free to run; **licences vary** | see `AI_PIPELINE.md` §8 (Stability Community License revenue cap, Hunyuan territory exclusions, nvdiffrast non-commercial) |
 

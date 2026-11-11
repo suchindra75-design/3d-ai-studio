@@ -199,6 +199,13 @@ export function createApiClient({ baseUrl, token, fetch: fetchImpl }: ApiClientO
         }),
       deleteApiKey: (key: string) =>
         request<ProviderRead>('DELETE', `/api/v1/providers/${key}/api-key`),
+      /** The address of a server you run (the GPU server); not secret. */
+      setBaseUrl: (key: string, baseUrl: string) =>
+        request<ProviderRead>('PUT', `/api/v1/providers/${key}/base-url`, {
+          body: { base_url: baseUrl },
+        }),
+      deleteBaseUrl: (key: string) =>
+        request<ProviderRead>('DELETE', `/api/v1/providers/${key}/base-url`),
       check: (key: string) =>
         request<CredentialCheckRead>('POST', `/api/v1/providers/${key}/check`),
     },

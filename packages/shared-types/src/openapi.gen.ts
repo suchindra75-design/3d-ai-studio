@@ -815,6 +815,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/providers/{key}/base-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the address of a server you run (the GPU server) */
+        put: operations["set_base_url_api_v1_providers__key__base_url_put"];
+        post?: never;
+        /** Remove the stored address */
+        delete: operations["delete_base_url_api_v1_providers__key__base_url_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers/{key}/check": {
         parameters: {
             query?: never;
@@ -1977,6 +1995,11 @@ export interface components {
             name?: string | null;
             status?: components["schemas"]["ProjectStatus"] | null;
         };
+        /** ProviderBaseUrlUpdate */
+        ProviderBaseUrlUpdate: {
+            /** Base Url */
+            base_url: string;
+        };
         /** ProviderCapabilitiesRead */
         ProviderCapabilitiesRead: {
             /** Accepted Mime Types */
@@ -2034,6 +2057,12 @@ export interface components {
             api_key_env_var: string | null;
             /** Api Key Hint */
             api_key_hint: string | null;
+            /** Base Url */
+            base_url: string | null;
+            /** Base Url Env Var */
+            base_url_env_var: string | null;
+            /** @default none */
+            base_url_source: components["schemas"]["CredentialSource"];
             capabilities: components["schemas"]["ProviderCapabilitiesRead"];
             /** Configured */
             configured: boolean;
@@ -2055,6 +2084,11 @@ export interface components {
             pricing_url: string | null;
             /** Requires Api Key */
             requires_api_key: boolean;
+            /**
+             * Requires Base Url
+             * @default false
+             */
+            requires_base_url: boolean;
             /** Unavailable Reason */
             unavailable_reason: string | null;
             /**
@@ -2383,6 +2417,7 @@ export type ProjectList = components['schemas']['ProjectList'];
 export type ProjectRead = components['schemas']['ProjectRead'];
 export type ProjectStatus = components['schemas']['ProjectStatus'];
 export type ProjectUpdate = components['schemas']['ProjectUpdate'];
+export type ProviderBaseUrlUpdate = components['schemas']['ProviderBaseUrlUpdate'];
 export type ProviderCapabilitiesRead = components['schemas']['ProviderCapabilitiesRead'];
 export type ProviderKeyUpdate = components['schemas']['ProviderKeyUpdate'];
 export type ProviderKind = components['schemas']['ProviderKind'];
@@ -4687,6 +4722,90 @@ export interface operations {
         };
     };
     delete_api_key_api_v1_providers__key__api_key_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_base_url_api_v1_providers__key__base_url_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderBaseUrlUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_base_url_api_v1_providers__key__base_url_delete: {
         parameters: {
             query?: never;
             header?: never;

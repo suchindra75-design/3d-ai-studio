@@ -21,20 +21,18 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-import numpy as np
-import trimesh
 from PIL import Image
 
 from ai3d.models import Image as ImageRow
 from ai3d.models.enums import JobEventType, JobStatus
 from ai3d.processing.mesh import validate_mesh_file
-from ai3d.processing.refine import RefineSettings, ViewPhoto, refine
 from ai3d.providers.base import ProviderResult
 from ai3d.providers.local_ai import LocalAIProvider
 from ai3d.services import resources
 from ai3d.services.models import save_generated_model
 from ai3d.workers import heavy
 from ai3d.workers.generation import JobFailedError, _load, _prepare_inputs
+from ai3d.workers.refining import RefineInputs, refine_model
 from ai3d.workers.runner import JobContext
 from ai3d_engine.local_ai import (
     LocalAICancelledError,
@@ -190,31 +188,6 @@ def _run(ctx: JobContext, workdir: Path) -> None:
         )
 
 
-def _views_part(views: list[dict[str, Any]], depth: dict[str, Any] | None) -> str:
-    """What the other views did, for the job log ("" without other views)."""
-    if not views and not depth:
-        return ""
-    parts = []
-    if depth and depth.get("applied"):
-        parts.append(
-            f"The side photos corrected the depth ({depth['depth_before']:.2f} → "
-            f"{depth['depth_after']:.2f} model units front to back)"
-        )
-    elif depth:
-        notes = [v.get("note") for v in depth.get("views", []) if v.get("note")]
-        reason = notes[0] if notes else depth.get("note", "")
-        parts.append(f"The depth was not corrected: {reason}".rstrip(": "))
-    used = [v["role"] for v in views if v.get("used")]
-    unused = [v["role"] for v in views if not v.get("used")]
-    if used:
-        plural = "s" if len(used) > 1 else ""
-        parts.append(f"the {', '.join(used)} photo{plural} coloured those sides")
-    if unused:
-        plural, verb = ("s", "were") if len(unused) > 1 else ("", "was")
-        parts.append(f"the {', '.join(unused)} photo{plural} did not line up and {verb} not used")
-    return " " + "; ".join(parts) + "."
-
-
 def _pixel_scales(ctx: JobContext, job: Any, paths: list[Path]) -> list[float]:
     """Per input: pixels of the photo as taken per pixel of its working copy."""
     scales = []
@@ -228,81 +201,29 @@ def _pixel_scales(ctx: JobContext, job: Any, paths: list[Path]) -> list[float]:
     return scales
 
 
-def _keep_alive(ctx: JobContext) -> None:
-    ctx.heartbeat()  # raises when the runner stops or the lease is lost
-
-
 def _refine(
     ctx: JobContext, result: dict[str, Any], options: Any
 ) -> tuple[Path, dict[str, Any] | None]:
-    """The refined model's path and report; TripoSR's own model if refining is not
-    planned (jobs planned before it existed) or fails."""
-    glb = Path(result["glb"])
-    if not isinstance(options, dict):
-        return glb, None
-    ctx.stage("refining", "Cleaning up the surface and baking its texture.", 0.87)
-    try:
-        mesh = trimesh.load(glb, force="mesh")
-        if not isinstance(mesh, trimesh.Trimesh):
-            raise TypeError("TripoSR's file did not open as one mesh")
-        photo = None
-        cutout = result.get("cutout_image")
-        if cutout and Path(cutout).is_file():
-            with Image.open(cutout) as opened:
-                photo = np.asarray(opened.convert("RGBA"))
-        views = []
-        for view in result.get("views", []):
-            if view.get("ok") and Path(view["cutout"]).is_file():
-                with Image.open(view["cutout"]) as opened:
-                    picture = np.asarray(opened.convert("RGBA"))
-                side = float(view["crop_side"]) * float(view.get("pixel_scale", 1.0))
-                views.append(ViewPhoto(view["role"], picture, side))
-        crop_side = result.get("crop_side")
-        refined, report = refine(
-            mesh,
-            RefineSettings(
-                triangles=int(options["triangles"]), texture_size=int(options["texture_size"])
-            ),
-            photo,
-            on_step=lambda _: _keep_alive(ctx),
-            views=views,
-            photo_crop_side=(
-                float(crop_side) * float(result.get("front_pixel_scale", 1.0))
-                if crop_side
-                else None
-            ),
+    """TripoSR's model refined with the engine's framed photos (front and others)."""
+    views = [
+        (
+            str(view["role"]),
+            Path(view["cutout"]),
+            float(view["crop_side"]) * float(view.get("pixel_scale", 1.0)),
         )
-        output = glb.with_name("refined.glb")
-        refined.export(output, file_type="glb", include_normals=True)
-    except Exception as exc:  # the unrefined model is still a usable result
-        log.warning("refining failed", exc_info=True, extra={"job_id": str(ctx.job_id)})
-        ctx.event(
-            JobEventType.LOG,
-            f"Refining the model did not work ({type(exc).__name__}: {exc}); "
-            "it is kept as TripoSR made it.",
-            stage="refining",
-        )
-        return glb, {"error": f"{type(exc).__name__}: {exc}"}
-    details = report.to_dict()
-    pieces = report.fragments_removed
-    removed = f", {pieces} loose fragment{'s' if pieces != 1 else ''} removed" if pieces else ""
-    if report.photo_projected:
-        photo_part = (
-            f"the photo was projected onto {report.photo_share:.0%} of the surface "
-            f"(outline overlap {report.photo_fit_iou:.0%})"
-        )
-    else:
-        photo_part = report.note or "no photo was available to project"
-    size = report.texture_size
-    ctx.event(
-        JobEventType.LOG,
-        f"Refined in {sum(report.seconds.values()):.0f} s: {report.triangles_before:,} → "
-        f"{report.triangles_after:,} triangles{removed}; colours baked into a "
-        f"{size}×{size} px texture, and {photo_part}.{_views_part(report.views, report.depth)}",
-        stage="refining",
-        data={"refine": details},
+        for view in result.get("views", [])
+        if view.get("ok")
+    ]
+    crop_side = result.get("crop_side")
+    inputs = RefineInputs(
+        source="TripoSR",
+        photo=Path(result["cutout_image"]) if result.get("cutout_image") else None,
+        photo_crop_side=(
+            float(crop_side) * float(result.get("front_pixel_scale", 1.0)) if crop_side else None
+        ),
+        views=views,
     )
-    return output, details
+    return refine_model(ctx, Path(result["glb"]), options, inputs, progress=0.87)
 
 
 def run_local_generation(ctx: JobContext) -> None:
