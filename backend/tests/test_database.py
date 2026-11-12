@@ -43,6 +43,7 @@ EXPECTED_TABLES = {
     "exports",
     "local_devices",
     "app_settings",
+    "scenes",
 }
 
 

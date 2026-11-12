@@ -1,5 +1,6 @@
 import type {
   InputMode,
+  SceneRead,
   JobStatus,
   ModelVersionSource,
   ProcessingMode,
@@ -9,9 +10,16 @@ import type {
   SurfaceProvenance,
 } from '@ai3d/shared-types';
 
+type SceneShot = SceneRead['shot'];
+type SceneLighting = SceneRead['lighting'];
+type SceneGround = SceneRead['ground'];
+type SceneStyle = SceneRead['style'];
+type SceneAngle = SceneRead['angle'];
+
 export const inputModeLabel: Record<InputMode, string> = {
   single_image: 'Single photo',
   multi_view: 'Multiple photos',
+  prompt: 'From a prompt',
 };
 
 export const qualityModeLabel: Record<QualityMode, string> = {
@@ -74,7 +82,57 @@ export const jobStageLabel: Record<string, string> = {
   downloading: 'Downloading result',
   validating: 'Checking the 3D file',
   saving: 'Saving',
+  planning: 'Planning the scene',
+  painting: 'Painting a reference picture',
+  shaping: 'Shaping an object',
+  arranging: 'Setting the stage',
+  rendering: 'Rendering',
   done: 'Done',
+};
+
+// Scene choices (D76): what the renderer can do; "auto" leaves it to the scene planner.
+export const sceneShotLabel: Record<SceneShot, string> = {
+  orbit: 'Orbit around',
+  push_in: 'Push in',
+  pull_out: 'Pull out',
+  pan: 'Pan across',
+  crane_up: 'Crane up',
+  fly_by: 'Fly by',
+  static: 'Locked off',
+};
+
+export const sceneLightingLabel: Record<SceneLighting, string> = {
+  studio: 'Studio',
+  daylight: 'Daylight',
+  golden_hour: 'Golden hour',
+  overcast: 'Overcast',
+  night: 'Night',
+  neon: 'Neon',
+  space: 'Space',
+};
+
+export const sceneGroundLabel: Record<SceneGround, string> = {
+  studio: 'Studio backdrop',
+  grass: 'Grass',
+  sand: 'Sand',
+  concrete: 'Concrete',
+  water: 'Water',
+  snow: 'Snow',
+  none: 'None',
+};
+
+export const sceneStyleLabel: Record<SceneStyle, string> = {
+  cinematic: 'Cinematic',
+  realistic: 'Realistic',
+  stylised: 'Stylised',
+  miniature: 'Miniature',
+};
+
+export const sceneAngleLabel: Record<SceneAngle, string> = {
+  eye: 'Eye level',
+  low: 'Low angle',
+  high: 'High angle',
+  top: 'From above',
 };
 
 export const viewRoleLabel: Record<string, string> = {

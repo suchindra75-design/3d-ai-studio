@@ -5,6 +5,11 @@ TRELLIS model (MIT licence) running on an NVIDIA GPU machine **you** run. The ap
 sends the photos to that machine, gets back a 3D shape, and then cleans it up and
 textures it on your computer, as it does for local AI models.
 
+The same server also makes **whole CGI scenes from a prompt** ([section 5](#5-scenes-from-a-prompt)):
+a language model plans the shot, an image model paints each object, TRELLIS shapes
+it, and Blender on your computer builds the set, light and camera move and renders
+the video.
+
 | | Local AI (TripoSR, this computer) | Your GPU server (TRELLIS) | Tripo / Meshy |
 |---|---|---|---|
 | Model | small, 2024 | large, much sharper shapes and backs | their own |
@@ -13,10 +18,11 @@ textures it on your computer, as it does for local AI models.
 | Cost | free | the server's hourly rental | credits per model |
 | Several photos | front shapes, others correct depth and colour | all views shape the model together | multi-view mode |
 
-**Status:** the server, the app's side and the whole job flow are tested on every
-change with a stand-in model (no GPU). The TRELLIS part (`gpu-server/ai3d_gpu/backends/trellis.py`)
-and the Docker image are written against TRELLIS's published code and model files but
-have **not yet run on a GPU**: the first deployment is also its first real test. If a step
+**Status:** the server, the app's side and the whole job flow (for scenes too, with
+Blender really rendering) are tested on every change with stand-in models (no GPU).
+The model parts (`gpu-server/ai3d_gpu/backends/trellis.py`, `qwen.py`, `flux.py`) and
+the Docker image are written against the models' published code and files but have
+**not yet run on a GPU**: the first deployment is also their first real test. If a step
 below fails, the error is in the server's log (`docker logs`), and the
 [troubleshooting](#troubleshooting) list covers the likely ones.
 
@@ -24,9 +30,13 @@ below fails, the error is in the server's log (`docker logs`), and the
 
 You need a Linux machine with:
 
-- an NVIDIA GPU with **at least 16 GB** of memory (TRELLIS-image-large; 24 GB gives room),
+- an NVIDIA GPU with **at least 16 GB** of memory for 3D models (TRELLIS-image-large);
+  for scenes from a prompt **24 GB** works and **40 GB or more** is much faster (the
+  image model's 12-billion-parameter core needs about 24 GB on its own; below 40 GB
+  its layers are streamed from memory),
+- for scenes, about **64 GB** of computer memory (the models not in use wait there),
 - Docker with the NVIDIA container toolkit (most GPU rental images have both),
-- about 40 GB of disk (image, model weights, work files).
+- about 40 GB of disk for 3D models only, about 90 GB with the scene models.
 
 Any GPU rental service or cloud provider with such machines works; they bill by the
 hour, so stop the machine when you are not generating. Prices change often, so check
@@ -44,8 +54,9 @@ docker build -t ai3d-gpu-server gpu-server
 
 ```bash
 export AI3D_GPU_TOKEN=$(openssl rand -hex 32)   # keep this; the app needs it
+export HF_TOKEN=hf_...   # your Hugging Face read token, only for scenes (see below)
 docker run -d --name ai3d-gpu --gpus all -p 127.0.0.1:8800:8800 \
-  -e AI3D_GPU_TOKEN -v ai3d-models:/root/.cache ai3d-gpu-server
+  -e AI3D_GPU_TOKEN -e HF_TOKEN -v ai3d-models:/root/.cache ai3d-gpu-server
 ```
 
 The first start downloads the model weights (about 4 GB, MIT licence, pinned to a
@@ -54,6 +65,14 @@ known revision) into the `ai3d-models` volume; later starts reuse them. Watch it
 
 `-p 127.0.0.1:8800:8800` keeps the server reachable only from the machine itself; step
 3 connects to it safely.
+
+**For scenes:** the image model, FLUX.1-schnell (Apache-2.0), is *gated* on Hugging
+Face: sign in at huggingface.co, open `black-forest-labs/FLUX.1-schnell` and accept its
+access terms once, then create a read token (Settings → Access Tokens) and pass it as
+`HF_TOKEN`. The token stays on the server and is never sent to the app. The scene
+models download on first use (about 8 GB for the planner, 34 GB for the image model),
+so the first scene takes longer. Without scenes, start with `-e AI3D_GPU_SCENES=off`
+and no `HF_TOKEN`.
 
 **Trying it without a GPU:** `-e AI3D_GPU_BACKEND=stand-in` (and no `--gpus`) runs the
 same server with a stand-in model that returns an ellipsoid. Useful to test the
@@ -104,6 +123,47 @@ On your computer the app then (job log, *Refined in …*):
 3. bakes a texture from the model's own colours and projects each photo onto the
    parts its camera saw.
 
+## 5. Scenes from a prompt
+
+Create a project with **From a prompt** as its input. In **Make a scene**, describe
+the shot (the objects, where they are, what they do), choose the length (4–15 s) and
+quality, and optionally the camera move, angle, light, set and look (or let the AI
+choose), then agree to send the prompt to your server and press **Make scene**.
+
+1. *Planning* (your server): Qwen3-4B-Instruct turns the prompt into a scene plan:
+   up to six objects with real sizes, places, facing and motion (spin, bob, hover,
+   drive, sway), plus the light, ground, camera move and look. The app checks the
+   plan and fixes what it can (unknown words, impossible sizes); a plan with no
+   usable object is asked for again, twice.
+2. *For each object* (your server): FLUX.1-schnell paints a reference picture of the
+   object alone, and TRELLIS shapes it in 3D. On your computer the object is cleaned
+   up and textured like any GPU-server model and **saved as a model of the project**,
+   so you can open, edit and export it on its own.
+3. *Setting the stage and rendering* (your computer, Blender 4.2 or newer): the
+   objects are placed from their real sizes without overlapping, and Blender builds
+   the set (a seamless studio backdrop or a procedural grass, sand, concrete, water or
+   snow ground), the light (studio lamps, a physical sky with the sun at day or golden
+   hour, overcast, night with stars, neon, space), the camera move (orbit, push in,
+   pull out, pan, crane up, fly by, locked off) with depth of field, and the motions.
+
+The result: an **MP4** (H.264), a **still** of the hero frame, the **Blender file**
+(textures packed, ready to adjust and render again in Blender) and an animated
+**GLB** (objects, lights and the camera move, for other 3D programs and engines).
+
+| Quality | Video | Still | Objects |
+|---|---|---|---|
+| Fast | 1280×720, EEVEE | EEVEE | 768 px pictures, TRELLIS 12 steps |
+| High quality | 1920×1080, EEVEE, motion blur | EEVEE | 1024 px pictures, 25 steps |
+| Professional | 1920×1080, EEVEE with ray tracing, motion blur | Cycles | 1024 px, 50 steps |
+
+**Render again** films the same objects with another camera move, light, set, look or
+length, on your computer only. If a scene stops (a failure, a cancel, the app
+closing), **Run again** keeps the objects already made and continues with the rest.
+
+On an Intel Mac, a 6-second Fast render takes a few minutes; High quality and
+Professional take longer (EEVEE uses the graphics card; Cycles stills use the CPU).
+The AI models invent every surface: scenes are for looks, not measurements.
+
 ## Licences (what is installed on the server)
 
 | Part | Licence |
@@ -111,6 +171,9 @@ On your computer the app then (job log, *Refined in …*):
 | TRELLIS code and TRELLIS-image-large weights | MIT |
 | FlexiCubes (builds the mesh) | Apache-2.0 |
 | DINOv2 (image encoder) | Apache-2.0 |
+| Qwen3-4B-Instruct-2507 (scene plans) | Apache-2.0 |
+| FLUX.1-schnell (pictures; gated download, terms accepted on Hugging Face) | Apache-2.0 |
+| transformers, diffusers, accelerate | Apache-2.0 |
 | rembg, U²-Net (background removal) | MIT, Apache-2.0 |
 | xformers, spconv, PyTorch | BSD, Apache-2.0, BSD |
 | This server (`gpu-server/`) | Apache-2.0, like the app |
@@ -135,3 +198,12 @@ versions in the Dockerfile.
 - A job fails with *"No object was found"*: background removal kept nothing; use a
   photo with one clear object (the app's **Check cut-out** helps).
 - *"The GPU queue is full"*: eight jobs are waiting; try again later.
+- Scenes: *"Your GPU server has no scene models"*: the server is an older version or
+  runs with `AI3D_GPU_SCENES=off`; rebuild it from this repository and start it
+  without that setting. *"… is gated"* in a failed scene: accept FLUX.1-schnell's
+  terms on Hugging Face and start the server with `HF_TOKEN`. *"The scene planner gave
+  no usable plan"*: describe the objects more plainly (what they are, not only the
+  mood). *"Scenes are rendered with Blender"*: install Blender 4.2 or newer
+  ([blender.org](https://www.blender.org)) on your computer.
+- When EEVEE cannot render on your computer, the app switches to Cycles on the CPU by
+  itself (slower); if Blender still fails, the job shows Blender's last message.

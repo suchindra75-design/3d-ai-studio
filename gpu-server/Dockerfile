@@ -1,13 +1,17 @@
-# AI 3D Studio GPU server: TRELLIS image-to-3D on an NVIDIA GPU (CUDA 12.1).
+# AI 3D Studio GPU server on an NVIDIA GPU (CUDA 12.1): TRELLIS image-to-3D, and for
+# scene prompts Qwen3-4B-Instruct (scene plans) and FLUX.1-schnell (pictures).
 #
 #   docker build -t ai3d-gpu-server gpu-server
-#   docker run --gpus all -p 8800:8800 -e AI3D_GPU_TOKEN=... \
+#   docker run --gpus all -p 127.0.0.1:8800:8800 -e AI3D_GPU_TOKEN=... -e HF_TOKEN=... \
 #       -v ai3d-models:/root/.cache ai3d-gpu-server
 #
-# Needs an NVIDIA GPU with at least 16 GB (TRELLIS-image-large). The model weights
-# (MIT, about 4 GB) download on first start into the /root/.cache volume.
-# See docs/GPU_SERVER.md. Only permissively licensed parts are installed:
-# no nvdiffrast, no Gaussian rasteriser, no kaolin, no plyfile (GPL).
+# Needs an NVIDIA GPU with at least 16 GB for 3D models (TRELLIS-image-large) and
+# 24 GB (40 GB or more is much faster) with 64 GB of memory for scene prompts. Model
+# weights download on first use into the /root/.cache volume: TRELLIS (MIT, about
+# 4 GB), Qwen3-4B (Apache-2.0, about 8 GB), FLUX.1-schnell (Apache-2.0, gated: accept
+# its terms on Hugging Face and pass HF_TOKEN; about 34 GB). See docs/GPU_SERVER.md.
+# Only permissively licensed parts are installed: no nvdiffrast, no Gaussian
+# rasteriser, no kaolin, no plyfile (GPL).
 FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-devel
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -34,7 +38,8 @@ RUN git clone https://github.com/microsoft/TRELLIS.git /opt/trellis \
 RUN pip install xformers==0.0.28 --index-url https://download.pytorch.org/whl/cu121 \
     && pip install spconv-cu120==2.3.6 \
     && pip install pillow imageio easydict opencv-python-headless scipy rembg==2.0.59 \
-        onnxruntime trimesh transformers huggingface_hub \
+        onnxruntime trimesh "transformers>=4.51,<5" huggingface_hub \
+        "diffusers>=0.30,<1" accelerate sentencepiece protobuf \
         git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
 # DINOv2 (Apache-2.0, TRELLIS's image encoder) and U²-Net for background removal,

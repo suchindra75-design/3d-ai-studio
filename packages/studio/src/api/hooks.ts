@@ -13,6 +13,8 @@ import type {
   ProjectCreate,
   ProjectUpdate,
   RepairRequest,
+  SceneCreate,
+  SceneRenderAgain,
 } from '@ai3d/shared-types';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
@@ -30,6 +32,8 @@ export const queryKeys = {
   capture: (projectId: string) => ['projects', 'detail', projectId, 'capture'] as const,
   jobs: (projectId: string) => ['projects', 'detail', projectId, 'jobs'] as const,
   models: (projectId: string) => ['projects', 'detail', projectId, 'models'] as const,
+  scenes: (projectId: string) => ['projects', 'detail', projectId, 'scenes'] as const,
+  sceneReadiness: ['scenes', 'readiness'] as const,
   plan: (projectId: string, body: GenerationCreate) =>
     ['projects', 'detail', projectId, 'plan', body] as const,
   jobEvents: (jobId: string) => ['jobs', jobId, 'events'] as const,
@@ -273,6 +277,7 @@ export function useJobs(projectId: string) {
     if (previous.current !== undefined && previous.current !== succeeded) {
       void client.invalidateQueries({ queryKey: queryKeys.models(projectId) });
       void client.invalidateQueries({ queryKey: queryKeys.project(projectId) });
+      void client.invalidateQueries({ queryKey: queryKeys.scenes(projectId) });
     }
     previous.current = succeeded;
   }, [client, projectId, succeeded]);
@@ -323,6 +328,7 @@ function useJobMutation<TArgs>(projectId: string, fn: (args: TArgs) => Promise<J
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.jobs(projectId) });
       void client.invalidateQueries({ queryKey: queryKeys.project(projectId) });
+      void client.invalidateQueries({ queryKey: queryKeys.scenes(projectId) });
     },
   });
 }
@@ -366,6 +372,66 @@ export function useRetryJob(projectId: string) {
 }
 
 // -- models ---------------------------------------------------------------------
+
+export function useSceneReadiness() {
+  const api = useApi();
+  return useQuery({ queryKey: queryKeys.sceneReadiness, queryFn: () => api.scenes.readiness() });
+}
+
+export function useScenes(projectId: string) {
+  const api = useApi();
+  return useQuery({
+    queryKey: queryKeys.scenes(projectId),
+    queryFn: () => api.scenes.list(projectId),
+    // While a scene is being made, its progress shows on its card.
+    refetchInterval: (query) =>
+      query.state.data?.items.some((scene) => scene.status === 'making') ? 3000 : false,
+  });
+}
+
+function useSceneMutation<TArgs, TResult>(
+  projectId: string,
+  fn: (args: TArgs) => Promise<TResult>,
+) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.scenes(projectId) });
+      void client.invalidateQueries({ queryKey: queryKeys.jobs(projectId) });
+    },
+  });
+}
+
+export function useCreateScene(projectId: string) {
+  const api = useApi();
+  return useSceneMutation(
+    projectId,
+    ({ body, idempotencyKey }: { body: SceneCreate; idempotencyKey: string }) =>
+      api.scenes.create(projectId, body, idempotencyKey),
+  );
+}
+
+export function useRenderSceneAgain(projectId: string) {
+  const api = useApi();
+  return useSceneMutation(
+    projectId,
+    ({
+      sceneId,
+      body,
+      idempotencyKey,
+    }: {
+      sceneId: string;
+      body: SceneRenderAgain;
+      idempotencyKey: string;
+    }) => api.scenes.renderAgain(sceneId, body, idempotencyKey),
+  );
+}
+
+export function useDeleteScene(projectId: string) {
+  const api = useApi();
+  return useSceneMutation(projectId, (sceneId: string) => api.scenes.delete(sceneId));
+}
 
 export function useModels(projectId: string) {
   const api = useApi();

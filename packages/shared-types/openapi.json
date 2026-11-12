@@ -1514,7 +1514,8 @@
         "description": "How the project's photos are meant to be used.",
         "enum": [
           "single_image",
-          "multi_view"
+          "multi_view",
+          "prompt"
         ],
         "title": "InputMode",
         "type": "string"
@@ -1903,6 +1904,7 @@
           "photogrammetry",
           "enhance",
           "retexture",
+          "scene",
           "quality_check",
           "export"
         ],
@@ -3878,6 +3880,674 @@
           "length_mm"
         ],
         "title": "ScaleReferenceIn",
+        "type": "object"
+      },
+      "SceneCreate": {
+        "properties": {
+          "angle": {
+            "anyOf": [
+              {
+                "enum": [
+                  "eye",
+                  "low",
+                  "high",
+                  "top"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Angle"
+          },
+          "ground": {
+            "anyOf": [
+              {
+                "enum": [
+                  "studio",
+                  "grass",
+                  "sand",
+                  "concrete",
+                  "water",
+                  "snow",
+                  "none"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Ground"
+          },
+          "lighting": {
+            "anyOf": [
+              {
+                "enum": [
+                  "studio",
+                  "daylight",
+                  "golden_hour",
+                  "overcast",
+                  "night",
+                  "neon",
+                  "space"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Lighting"
+          },
+          "prompt": {
+            "maxLength": 2000,
+            "minLength": 3,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "quality_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualityMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted = the project's default quality."
+          },
+          "seconds": {
+            "default": 6.0,
+            "maximum": 15.0,
+            "minimum": 2.0,
+            "title": "Seconds",
+            "type": "number"
+          },
+          "send_to_gpu_server": {
+            "default": false,
+            "description": "The user agreed to send the prompt to their GPU server, which plans the scene and makes its objects. Required.",
+            "title": "Send To Gpu Server",
+            "type": "boolean"
+          },
+          "shot": {
+            "anyOf": [
+              {
+                "enum": [
+                  "static",
+                  "orbit",
+                  "push_in",
+                  "pull_out",
+                  "pan",
+                  "crane_up",
+                  "fly_by"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Shot"
+          },
+          "style": {
+            "anyOf": [
+              {
+                "enum": [
+                  "realistic",
+                  "cinematic",
+                  "stylised",
+                  "miniature"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Style"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "SceneCreate",
+        "type": "object"
+      },
+      "SceneFileRead": {
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "name": {
+            "enum": [
+              "video",
+              "still",
+              "blend",
+              "glb"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "filename",
+          "mime_type",
+          "size_bytes",
+          "url"
+        ],
+        "title": "SceneFileRead",
+        "type": "object"
+      },
+      "SceneList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SceneRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SceneList",
+        "type": "object"
+      },
+      "SceneObjectRead": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "elevation_m": {
+            "title": "Elevation M",
+            "type": "number"
+          },
+          "facing_deg": {
+            "title": "Facing Deg",
+            "type": "number"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "model_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version Id"
+          },
+          "motion": {
+            "enum": [
+              "none",
+              "spin",
+              "bob",
+              "hover",
+              "drive",
+              "sway"
+            ],
+            "title": "Motion",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "position_m": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position M"
+          },
+          "size_m": {
+            "title": "Size M",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "size_m",
+          "position_m",
+          "elevation_m",
+          "facing_deg",
+          "motion",
+          "model_id",
+          "model_version_id"
+        ],
+        "title": "SceneObjectRead",
+        "type": "object"
+      },
+      "SceneRead": {
+        "properties": {
+          "angle": {
+            "enum": [
+              "eye",
+              "low",
+              "high",
+              "top"
+            ],
+            "title": "Angle",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SceneFileRead"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "ground": {
+            "enum": [
+              "studio",
+              "grass",
+              "sand",
+              "concrete",
+              "water",
+              "snow",
+              "none"
+            ],
+            "title": "Ground",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lens_mm": {
+            "title": "Lens Mm",
+            "type": "number"
+          },
+          "lighting": {
+            "enum": [
+              "studio",
+              "daylight",
+              "golden_hour",
+              "overcast",
+              "night",
+              "neon",
+              "space"
+            ],
+            "title": "Lighting",
+            "type": "string"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/SceneObjectRead"
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "quality_mode": {
+            "$ref": "#/components/schemas/QualityMode"
+          },
+          "render": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SceneRenderRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seconds": {
+            "title": "Seconds",
+            "type": "number"
+          },
+          "shot": {
+            "enum": [
+              "static",
+              "orbit",
+              "push_in",
+              "pull_out",
+              "pan",
+              "crane_up",
+              "fly_by"
+            ],
+            "title": "Shot",
+            "type": "string"
+          },
+          "source_scene_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Scene Id"
+          },
+          "status": {
+            "enum": [
+              "making",
+              "ready",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "style": {
+            "enum": [
+              "realistic",
+              "cinematic",
+              "stylised",
+              "miniature"
+            ],
+            "title": "Style",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "title",
+          "prompt",
+          "status",
+          "job",
+          "source_scene_id",
+          "style",
+          "lighting",
+          "ground",
+          "shot",
+          "angle",
+          "lens_mm",
+          "seconds",
+          "quality_mode",
+          "objects",
+          "files",
+          "render",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SceneRead",
+        "type": "object"
+      },
+      "SceneReadiness": {
+        "properties": {
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ready",
+          "problems"
+        ],
+        "title": "SceneReadiness",
+        "type": "object"
+      },
+      "SceneRenderAgain": {
+        "description": "Render the same objects again with another shot, light, set, look or length\n(on this computer only; nothing is sent to the GPU server).",
+        "properties": {
+          "angle": {
+            "anyOf": [
+              {
+                "enum": [
+                  "eye",
+                  "low",
+                  "high",
+                  "top"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Angle"
+          },
+          "ground": {
+            "anyOf": [
+              {
+                "enum": [
+                  "studio",
+                  "grass",
+                  "sand",
+                  "concrete",
+                  "water",
+                  "snow",
+                  "none"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Ground"
+          },
+          "lighting": {
+            "anyOf": [
+              {
+                "enum": [
+                  "studio",
+                  "daylight",
+                  "golden_hour",
+                  "overcast",
+                  "night",
+                  "neon",
+                  "space"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Lighting"
+          },
+          "quality_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualityMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted = the project's default quality."
+          },
+          "seconds": {
+            "default": 6.0,
+            "maximum": 15.0,
+            "minimum": 2.0,
+            "title": "Seconds",
+            "type": "number"
+          },
+          "shot": {
+            "anyOf": [
+              {
+                "enum": [
+                  "static",
+                  "orbit",
+                  "push_in",
+                  "pull_out",
+                  "pan",
+                  "crane_up",
+                  "fly_by"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Shot"
+          },
+          "style": {
+            "anyOf": [
+              {
+                "enum": [
+                  "realistic",
+                  "cinematic",
+                  "stylised",
+                  "miniature"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "auto",
+                "type": "string"
+              }
+            ],
+            "default": "auto",
+            "title": "Style"
+          }
+        },
+        "title": "SceneRenderAgain",
+        "type": "object"
+      },
+      "SceneRenderRead": {
+        "properties": {
+          "engines": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Engines",
+            "type": "object"
+          },
+          "fps": {
+            "title": "Fps",
+            "type": "integer"
+          },
+          "frames": {
+            "title": "Frames",
+            "type": "integer"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "seconds": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Seconds",
+            "type": "object"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "frames",
+          "fps",
+          "width",
+          "height",
+          "engines",
+          "seconds"
+        ],
+        "title": "SceneRenderRead",
         "type": "object"
       },
       "SkippedRead": {
@@ -7146,6 +7816,140 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/scenes": {
+      "get": {
+        "operationId": "list_scenes_api_v1_projects__project_id__scenes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "List a project's scenes",
+        "tags": [
+          "scenes"
+        ]
+      },
+      "post": {
+        "description": "Plans the scene and makes its objects on your GPU server (the prompt is sent there only with `send_to_gpu_server: true`), then renders a video, a still, a Blender file and an animated GLB with Blender on this computer.",
+        "operationId": "create_scene_api_v1_projects__project_id__scenes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Repeating a request with the same key returns the original job.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Repeating a request with the same key returns the original job.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SceneCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Make a CGI scene from a prompt",
+        "tags": [
+          "scenes"
+        ]
+      }
+    },
     "/api/v1/providers": {
       "get": {
         "operationId": "list_providers_api_v1_providers_get",
@@ -7460,6 +8264,297 @@
         "summary": "Verify the key with a free read-only call (account balance)",
         "tags": [
           "providers"
+        ]
+      }
+    },
+    "/api/v1/scenes/readiness": {
+      "get": {
+        "operationId": "readiness_api_v1_scenes_readiness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneReadiness"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Whether scenes can be made here (GPU server set up, Blender installed)",
+        "tags": [
+          "scenes"
+        ]
+      }
+    },
+    "/api/v1/scenes/{scene_id}": {
+      "delete": {
+        "operationId": "delete_scene_api_v1_scenes__scene_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scene_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scene Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Delete a scene and its rendered files (its objects stay as models)",
+        "tags": [
+          "scenes"
+        ]
+      },
+      "get": {
+        "operationId": "get_scene_api_v1_scenes__scene_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scene_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scene Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Get a scene",
+        "tags": [
+          "scenes"
+        ]
+      }
+    },
+    "/api/v1/scenes/{scene_id}/files/{name}": {
+      "get": {
+        "operationId": "get_file_api_v1_scenes__scene_id__files__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scene_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scene Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "enum": [
+                "video",
+                "still",
+                "blend",
+                "glb"
+              ],
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "download",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Download",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "A rendered file: the video (MP4), the still (PNG), the Blender file or the GLB",
+        "tags": [
+          "scenes"
+        ]
+      }
+    },
+    "/api/v1/scenes/{scene_id}/render": {
+      "post": {
+        "operationId": "render_again_api_v1_scenes__scene_id__render_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scene_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scene Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Repeating a request with the same key returns the original job.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Repeating a request with the same key returns the original job.",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SceneRenderAgain"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SceneRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Client error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Server error"
+          }
+        },
+        "summary": "Render the same objects again with other choices (on this computer)",
+        "tags": [
+          "scenes"
         ]
       }
     },

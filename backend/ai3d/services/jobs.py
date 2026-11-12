@@ -711,6 +711,10 @@ def retry_job(
         from ai3d.services.enhance import retry_enhance  # noqa: PLC0415 - avoids a cycle
 
         return retry_enhance(db, original, idempotency_key=idempotency_key), True
+    if original.kind == JobKind.SCENE:
+        from ai3d.services.scenes import retry_scene  # noqa: PLC0415 - avoids a cycle
+
+        return retry_scene(db, original, idempotency_key=idempotency_key), True
     if any(item.image_id is None for item in original.inputs):
         raise InvalidInputError("A photo used by this job was deleted; start a new generation.")
     processing_mode = original.processing_mode

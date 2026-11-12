@@ -33,8 +33,8 @@ allowed-confusables = ["×", "–", "’"]
 "backend/tests/**" = ["S", "PLR", "N802"]
 "local-engine/tests/**" = ["S", "PLR"]
 "gpu-server/tests/**" = ["S", "PLR"]
-# Imports torch and TRELLIS only when the GPU backend loads (they exist only in its image).
-"gpu-server/ai3d_gpu/backends/trellis.py" = ["PLC0415"]
+# Import torch, TRELLIS, transformers, diffusers only when a GPU model loads (they exist only in its image).
+"gpu-server/ai3d_gpu/backends/{trellis,qwen,flux}.py" = ["PLC0415"]
 # Runs in the local AI engine's environment; imports must follow the stand-in modules.
 "local-engine/ai3d_engine/local_ai_scripts/**" = ["PLC0415"]
 

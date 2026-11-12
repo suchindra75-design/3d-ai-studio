@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw
 
 from ai3d_gpu.app import create_app
 from ai3d_gpu.backends.base import CancelledError, Generated, GenerationSettings, ViewPhoto
-from ai3d_gpu.backends.stand_in import StandInBackend
+from ai3d_gpu.backends.stand_in import StandInBackend, StandInImage, StandInText
 from ai3d_gpu.config import ConfigError, ServerConfig
 from ai3d_gpu.framing import FRAME_RATIO, frame
 
@@ -35,9 +35,12 @@ def _photo(
     return buffer.getvalue()
 
 
-def _client(tmp_path: Path, backend: Any = None, **overrides: Any) -> TestClient:
+def _client(
+    tmp_path: Path, backend: Any = None, *, scenes: bool = True, **overrides: Any
+) -> TestClient:
     config = ServerConfig(token=TOKEN, backend="stand-in", work_dir=tmp_path / "work", **overrides)
-    return TestClient(create_app(config, backend or StandInBackend()))
+    extra = {"text": StandInText(), "image": StandInImage()} if scenes else {}
+    return TestClient(create_app(config, backend or StandInBackend(), **extra))
 
 
 @pytest.fixture
@@ -93,6 +96,8 @@ def test_health_names_the_backend_and_the_queue(client: TestClient) -> None:
     assert health["ok"] is True
     assert health["backend"] == "stand-in"
     assert health["queued"] == 0
+    assert health["kinds"] == ["model", "text", "image"]
+    assert health["text_model"] == "stand-in text (no AI model)"
 
 
 def test_one_photo_becomes_a_coloured_model_and_a_framed_cutout(client: TestClient) -> None:
@@ -231,3 +236,97 @@ def test_framing_matches_trellis() -> None:
     middle = np.asarray(framed.model_input)[259, 259]
     assert tuple(middle) == (255, 0, 0)
     assert tuple(np.asarray(framed.model_input)[5, 5]) == (0, 0, 0)  # on black, as TRELLIS
+
+
+def test_a_text_job_returns_the_models_reply(client: TestClient) -> None:
+    response = client.post(
+        "/v1/texts",
+        headers=AUTH,
+        json={
+            "system": "Answer with a JSON scene plan.",
+            "prompt": "A red car and a palm tree, with a dog",
+            "settings": {"seed": 5, "max_tokens": 500},
+        },
+    )
+    assert response.status_code == 202, response.text
+    assert response.json()["kind"] == "text"
+    job = _wait(client, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    assert job["files"] == ["text.json"]
+    reply = client.get(f"/v1/jobs/{job['id']}/files/text.json", headers=AUTH).json()["text"]
+    plan = json.loads(reply)
+    assert [o["name"] for o in plan["objects"]] == ["red car", "palm tree", "dog"]
+    result = client.get(f"/v1/jobs/{job['id']}/files/result.json", headers=AUTH).json()
+    assert result["model"] == "stand-in text (no AI model)"
+    assert client.delete(f"/v1/jobs/{job['id']}", headers=AUTH).status_code == 204
+
+
+def test_an_image_job_paints_one_picture_of_the_requested_size(client: TestClient) -> None:
+    response = client.post(
+        "/v1/images",
+        headers=AUTH,
+        json={"prompt": "a red car", "settings": {"seed": 2, "width": 512, "height": 384}},
+    )
+    assert response.status_code == 202, response.text
+    job = _wait(client, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    assert job["files"] == ["image.png"]
+    data = client.get(f"/v1/jobs/{job['id']}/files/image.png", headers=AUTH).content
+    with Image.open(io.BytesIO(data)) as image:
+        assert image.size == (512, 384)
+    assert client.get(f"/v1/jobs/{job['id']}/files/model.glb", headers=AUTH).status_code == 404
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"prompt": ""},
+        {"prompt": "x", "settings": {"width": 500}},  # not a multiple of 16
+        {"prompt": "x", "settings": {"steps": 0}},
+        {"prompt": "x" * 2001},
+    ],
+)
+def test_bad_image_requests_are_refused(client: TestClient, body: dict[str, Any]) -> None:
+    assert client.post("/v1/images", headers=AUTH, json=body).status_code == 422
+
+
+def test_text_and_image_jobs_need_the_token(client: TestClient) -> None:
+    assert client.post("/v1/texts", json={"prompt": "x"}).status_code == 401
+    assert client.post("/v1/images", json={"prompt": "x"}).status_code == 401
+
+
+def test_without_scene_models_only_3d_jobs_are_offered(tmp_path: Path) -> None:
+    with _client(tmp_path, scenes=False) as client:
+        assert client.get("/v1/health", headers=AUTH).json()["kinds"] == ["model"]
+        response = client.post("/v1/texts", headers=AUTH, json={"prompt": "a car"})
+        assert response.status_code == 501
+        assert "AI3D_GPU_SCENES" in response.json()["detail"]
+
+
+class _Parking(StandInBackend):
+    parked = 0
+
+    def park(self) -> None:
+        self.parked += 1
+
+
+def test_other_models_leave_the_gpu_before_a_job_runs(tmp_path: Path) -> None:
+    shape = _Parking()
+    with _client(tmp_path, backend=shape) as client:
+        text = client.post("/v1/texts", headers=AUTH, json={"prompt": "a car"}).json()
+        assert _wait(client, text["id"])["status"] == "succeeded"
+        assert shape.parked == 1
+        model = _submit(client, [_photo()]).json()
+        assert _wait(client, model["id"])["status"] == "succeeded"
+        assert shape.parked == 1  # its own job: it stays
+
+
+def test_scene_settings_come_from_the_environment() -> None:
+    env = {"AI3D_GPU_TOKEN": TOKEN}
+    config = ServerConfig.from_env(env)
+    assert config.scenes is True
+    assert config.text_model_id == "Qwen/Qwen3-4B-Instruct-2507"
+    assert config.image_model_id == "black-forest-labs/FLUX.1-schnell"
+    assert config.text_model_revision
+    assert config.image_model_revision
+    assert ServerConfig.from_env({**env, "AI3D_GPU_SCENES": "off"}).scenes is False

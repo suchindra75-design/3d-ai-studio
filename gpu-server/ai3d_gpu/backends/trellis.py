@@ -75,11 +75,21 @@ class TrellisBackend:
         path = snapshot_download(model_id, revision=revision)
         self.pipeline = TrellisImageTo3DPipeline.from_pretrained(path)
         self.pipeline.cuda()
+        self._on_gpu = True
         self.rembg_session = rembg.new_session("u2net")
         self._rembg = rembg
         self.model = f"{model_id}@{revision or 'latest'}"
         props = torch.cuda.get_device_properties(0)
         self.device = f"{props.name} ({props.total_memory / 2**30:.0f} GB)"
+
+    def park(self) -> None:
+        """Free the GPU for another model (the weights stay in memory)."""
+        if self._on_gpu:
+            import torch
+
+            self.pipeline.cpu()
+            self._on_gpu = False
+            torch.cuda.empty_cache()
 
     def _cut_out(self, image: Image.Image) -> tuple[Image.Image, float]:
         if image.mode == "RGBA" and np.asarray(image.getchannel("A")).min() < 250:
@@ -103,6 +113,9 @@ class TrellisBackend:
 
         timings: dict[str, float] = {}
         started = time.perf_counter()
+        if not self._on_gpu:
+            self.pipeline.cuda()
+            self._on_gpu = True
         progress("preparing", 0.0)
         framed = {}
         for index, view in enumerate(views):

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from ai3d.models.image import Image
     from ai3d.models.job import GenerationJob
     from ai3d.models.model3d import Model3D
+    from ai3d.models.scene import Scene
 
 
 class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -42,6 +43,9 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="project", cascade="all, delete-orphan", passive_deletes=True
     )
     models: Mapped[list["Model3D"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", passive_deletes=True
+    )
+    scenes: Mapped[list["Scene"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", passive_deletes=True
     )
 

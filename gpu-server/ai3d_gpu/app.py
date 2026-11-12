@@ -1,11 +1,17 @@
 """The HTTP API the app talks to (version 1). Every request needs the token.
 
-GET    /v1/health                  backend, model, GPU, queue
+GET    /v1/health                  backend, model, GPU, queue, kinds of job offered
 POST   /v1/jobs                    photos (multipart ``photos``), ``roles``, ``settings``
-GET    /v1/jobs/{id}               status, stage, progress, message, files
+POST   /v1/texts                   JSON ``{system, prompt, settings}``: text model's reply
+POST   /v1/images                  JSON ``{prompt, settings}``: one picture
+GET    /v1/jobs/{id}               kind, status, stage, progress, message, files
 POST   /v1/jobs/{id}/cancel
-GET    /v1/jobs/{id}/files/{name}  model.glb, cutout-<role>.png, result.json
+GET    /v1/jobs/{id}/files/{name}  model.glb, cutout-<role>.png, text.json, image.png,
+                                   result.json
 DELETE /v1/jobs/{id}               delete a finished job's files
+
+Text and image jobs (scene prompts) exist only when the server runs with scenes on
+(the default); they share the one queue with 3D jobs.
 """
 
 import hmac
@@ -13,7 +19,7 @@ import io
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -31,7 +37,15 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 from ai3d_gpu import API_VERSION
-from ai3d_gpu.backends.base import Backend, GenerationSettings
+from ai3d_gpu.backends import Engines
+from ai3d_gpu.backends.base import (
+    Backend,
+    GenerationSettings,
+    ImageBackend,
+    ImageRequest,
+    TextBackend,
+    TextRequest,
+)
 from ai3d_gpu.config import ServerConfig
 from ai3d_gpu.jobs import TERMINAL, Job, JobQueue, QueueFullError
 
@@ -62,13 +76,25 @@ def _job(request: Request, job_id: str) -> Job:
 
 @router.get("/health")
 def health(request: Request) -> dict[str, Any]:
-    backend: Backend = request.app.state.backend
+    engines: Engines = request.app.state.engines
+    backend = engines.shape
     return {
         "ok": True,
         "api_version": API_VERSION,
         "backend": backend.name,
         "model": backend.model,
         "device": backend.device,
+        "kinds": [
+            kind
+            for kind, engine in (
+                ("model", backend),
+                ("text", engines.text),
+                ("image", engines.image),
+            )
+            if engine is not None
+        ],
+        "text_model": engines.text.model if engines.text else None,
+        "image_model": engines.image.model if engines.image else None,
         **_queue(request).counts(),
     }
 
@@ -124,6 +150,29 @@ async def submit(
     return job.read()
 
 
+def _queued(request: Request, kind: Literal["text", "image"], body: Any) -> dict[str, Any]:
+    engines: Engines = request.app.state.engines
+    if (engines.text if kind == "text" else engines.image) is None:
+        raise HTTPException(
+            501, f"This server has no {kind} model (it was started with AI3D_GPU_SCENES=off)."
+        )
+    try:
+        job = _queue(request).submit_request(kind, body)
+    except QueueFullError as exc:
+        raise HTTPException(503, "The GPU queue is full; try again in a few minutes.") from exc
+    return job.read()
+
+
+@router.post("/texts", status_code=202)
+def submit_text(request: Request, body: TextRequest) -> dict[str, Any]:
+    return _queued(request, "text", body)
+
+
+@router.post("/images", status_code=202)
+def submit_image(request: Request, body: ImageRequest) -> dict[str, Any]:
+    return _queued(request, "image", body)
+
+
 @router.get("/jobs/{job_id}")
 def status(request: Request, job_id: str) -> dict[str, Any]:
     return _job(request, job_id).read()
@@ -154,9 +203,16 @@ def delete(request: Request, job_id: str) -> Response:
     return Response(status_code=204)
 
 
-def create_app(config: ServerConfig, backend: Backend) -> FastAPI:
+def create_app(
+    config: ServerConfig,
+    backend: Backend,
+    *,
+    text: TextBackend | None = None,
+    image: ImageBackend | None = None,
+) -> FastAPI:
+    engines = Engines(backend, text, image)
     queue = JobQueue(
-        backend, config.work_dir, max_queue=config.max_queue, keep_seconds=config.keep_seconds
+        engines, config.work_dir, max_queue=config.max_queue, keep_seconds=config.keep_seconds
     )
 
     @asynccontextmanager
@@ -173,7 +229,7 @@ def create_app(config: ServerConfig, backend: Backend) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.config = config
-    app.state.backend = backend
+    app.state.engines = engines
     app.state.queue = queue
     app.include_router(router)
     return app

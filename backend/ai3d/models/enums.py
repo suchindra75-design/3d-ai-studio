@@ -13,6 +13,7 @@ class InputMode(StrEnum):
 
     SINGLE_IMAGE = "single_image"  # one photo -> AI generation (unseen sides inferred)
     MULTI_VIEW = "multi_view"  # many photos -> AI multi-view or photogrammetry
+    PROMPT = "prompt"  # a text prompt -> a CGI scene (objects, set, camera, render)
 
 
 class QualityMode(StrEnum):
@@ -47,6 +48,8 @@ class JobKind(StrEnum):
     ENHANCE = "enhance"
     # A cloud service re-textures an existing version (the model is uploaded).
     RETEXTURE = "retexture"
+    # A prompt -> scene plan -> objects (on the GPU server) -> rendered shot (Blender here).
+    SCENE = "scene"
     QUALITY_CHECK = "quality_check"
     EXPORT = "export"
 

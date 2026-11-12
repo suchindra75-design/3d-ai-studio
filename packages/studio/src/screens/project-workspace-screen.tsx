@@ -32,6 +32,7 @@ import {
   useJobs,
   useModels,
   useProject,
+  useScenes,
   useSystemInfo,
   useUpdateProject,
 } from '../api/hooks';
@@ -45,6 +46,8 @@ import { JobList } from '../components/job-list';
 import { BackupButton, ImportModelButton } from '../components/transfer';
 import { ModelList } from '../components/model-list';
 import { ErrorState, PageContainer, PageHeader } from '../components/page';
+import { SceneList } from '../components/scene-list';
+import { ScenePanel } from '../components/scene-panel';
 import { UploadQueue } from '../components/upload-queue';
 import { useApi, useStudio } from '../context';
 import { inputModeLabel, processingModeLabel, qualityModeLabel } from '../labels';
@@ -178,6 +181,7 @@ export function ProjectWorkspaceScreen({ projectId }: { projectId: string }) {
   const deleteImage = useDeleteImage();
   const jobs = useJobs(projectId);
   const models = useModels(projectId);
+  const scenes = useScenes(projectId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const maxBytes = systemInfo.data?.limits.max_upload_bytes ?? DEFAULT_MAX_UPLOAD;
@@ -222,6 +226,7 @@ export function ProjectWorkspaceScreen({ projectId }: { projectId: string }) {
   }
 
   const p = project.data;
+  const prompt = p.input_mode === 'prompt';
   return (
     <PageContainer className="max-w-7xl">
       <PageHeader
@@ -234,7 +239,11 @@ export function ProjectWorkspaceScreen({ projectId }: { projectId: string }) {
             <span aria-hidden>·</span>
             <span>{processingModeLabel[p.default_processing_mode]} processing</span>
             <span aria-hidden>·</span>
-            <span>{p.allow_cloud_upload ? 'Cloud upload allowed' : 'Photos stay local'}</span>
+            {prompt ? (
+              <span>Made on your GPU server, rendered here</span>
+            ) : (
+              <span>{p.allow_cloud_upload ? 'Cloud upload allowed' : 'Photos stay local'}</span>
+            )}
             {p.status === 'archived' ? <Badge>Archived</Badge> : null}
           </span>
         }
@@ -244,68 +253,87 @@ export function ProjectWorkspaceScreen({ projectId }: { projectId: string }) {
         <p className="-mt-3 mb-6 max-w-3xl text-sm text-muted-foreground">{p.description}</p>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="flex min-w-0 flex-col gap-4">
-          <Dropzone onFiles={handleFiles} maxBytes={maxBytes} compact={imageItems.length > 0} />
-          <UploadQueue projectId={projectId} />
-
-          {images.isError ? (
-            <ErrorState error={images.error} onRetry={() => void images.refetch()} />
-          ) : images.isPending ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-              {Array.from({ length: 4 }, (_, i) => (
-                <Skeleton key={i} className="aspect-square" />
-              ))}
-            </div>
-          ) : imageItems.length > 0 ? (
-            <section aria-labelledby="photos-heading" className="flex flex-col gap-3">
-              <div className="flex items-baseline justify-between">
-                <h2 id="photos-heading" className="text-sm font-medium">
-                  Photos
-                </h2>
-                <span className="text-xs text-subtle-foreground">
-                  {pluralize(imageItems.length, 'photo')} · {formatBytes(p.total_image_bytes)}
-                </span>
-              </div>
-              <ImageGrid images={imageItems} selectedId={selectedId} onSelect={setSelectedId} />
-            </section>
-          ) : null}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <ImportModelButton projectId={projectId} />
-            <BackupButton projectId={projectId} projectName={p.name} />
+      {prompt ? (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-w-0 flex-col gap-4">
+            {scenes.isError ? (
+              <ErrorState error={scenes.error} onRetry={() => void scenes.refetch()} />
+            ) : scenes.isPending ? (
+              <Skeleton className="aspect-video w-full" />
+            ) : (
+              <SceneList scenes={scenes.data.items} />
+            )}
+            <ModelList models={models.data?.items ?? []} projectId={projectId} />
+            <JobList jobs={jobs.data?.items ?? []} projectId={projectId} />
           </div>
-          <ModelList models={models.data?.items ?? []} projectId={projectId} />
-          <JobList jobs={jobs.data?.items ?? []} projectId={projectId} />
+          <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
+            <ScenePanel project={p} />
+          </aside>
         </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-w-0 flex-col gap-4">
+            <Dropzone onFiles={handleFiles} maxBytes={maxBytes} compact={imageItems.length > 0} />
+            <UploadQueue projectId={projectId} />
 
-        <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
-          {selected ? (
-            <ImageDetails
-              key={selected.id}
-              image={selected}
-              deleting={deleteImage.isPending}
-              onClose={() => setSelectedId(null)}
-              onDelete={() =>
-                deleteImage.mutate(selected.id, { onSuccess: () => setSelectedId(null) })
-              }
+            {images.isError ? (
+              <ErrorState error={images.error} onRetry={() => void images.refetch()} />
+            ) : images.isPending ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 4 }, (_, i) => (
+                  <Skeleton key={i} className="aspect-square" />
+                ))}
+              </div>
+            ) : imageItems.length > 0 ? (
+              <section aria-labelledby="photos-heading" className="flex flex-col gap-3">
+                <div className="flex items-baseline justify-between">
+                  <h2 id="photos-heading" className="text-sm font-medium">
+                    Photos
+                  </h2>
+                  <span className="text-xs text-subtle-foreground">
+                    {pluralize(imageItems.length, 'photo')} · {formatBytes(p.total_image_bytes)}
+                  </span>
+                </div>
+                <ImageGrid images={imageItems} selectedId={selectedId} onSelect={setSelectedId} />
+              </section>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <ImportModelButton projectId={projectId} />
+              <BackupButton projectId={projectId} projectName={p.name} />
+            </div>
+            <ModelList models={models.data?.items ?? []} projectId={projectId} />
+            <JobList jobs={jobs.data?.items ?? []} projectId={projectId} />
+          </div>
+
+          <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
+            {selected ? (
+              <ImageDetails
+                key={selected.id}
+                image={selected}
+                deleting={deleteImage.isPending}
+                onClose={() => setSelectedId(null)}
+                onDelete={() =>
+                  deleteImage.mutate(selected.id, { onSuccess: () => setSelectedId(null) })
+                }
+              />
+            ) : null}
+            {images.data ? <GenerationPanel project={p} images={imageItems} /> : null}
+            <CapturePanel
+              assessment={capture.data}
+              loading={capture.isPending}
+              measuring={measureOverlap.isPending}
+              measureError={measureOverlap.error}
+              onMeasureOverlap={() => measureOverlap.mutate()}
+              checkingCutout={checkCutout.isPending}
+              cutoutError={checkCutout.error}
+              onCheckCutout={() => checkCutout.mutate()}
+              onSelectImage={setSelectedId}
             />
-          ) : null}
-          {images.data ? <GenerationPanel project={p} images={imageItems} /> : null}
-          <CapturePanel
-            assessment={capture.data}
-            loading={capture.isPending}
-            measuring={measureOverlap.isPending}
-            measureError={measureOverlap.error}
-            onMeasureOverlap={() => measureOverlap.mutate()}
-            checkingCutout={checkCutout.isPending}
-            cutoutError={checkCutout.error}
-            onCheckCutout={() => checkCutout.mutate()}
-            onSelectImage={setSelectedId}
-          />
-          <CaptureGuide mode={p.input_mode} />
-        </aside>
-      </div>
+            <CaptureGuide mode={p.input_mode} />
+          </aside>
+        </div>
+      )}
     </PageContainer>
   );
 }

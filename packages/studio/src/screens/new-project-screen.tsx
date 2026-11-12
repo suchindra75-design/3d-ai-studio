@@ -12,7 +12,7 @@ import {
   Switch,
   Textarea,
 } from '@ai3d/ui';
-import { Camera, Images } from 'lucide-react';
+import { Camera, Clapperboard, Images } from 'lucide-react';
 import { useId, useState, type FormEvent } from 'react';
 
 import { useCreateProject } from '../api/hooks';
@@ -34,6 +34,13 @@ const INPUT_MODES = [
     description:
       'Photogrammetry from 20+ overlapping photos for measured geometry, or AI multi-view from 2–4 angles.',
     icon: <Images />,
+  },
+  {
+    value: 'prompt' as const,
+    label: 'From a prompt',
+    description:
+      'Describe a shot: your GPU server makes the objects, and a video with set, light and camera move is rendered here.',
+    icon: <Clapperboard />,
   },
 ];
 
@@ -152,7 +159,7 @@ export function NewProjectScreen() {
             value={inputMode}
             onValueChange={setInputMode}
             options={INPUT_MODES}
-            className="sm:grid-cols-2"
+            className="sm:grid-cols-3"
           />
         </section>
 

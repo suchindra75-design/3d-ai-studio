@@ -14,6 +14,8 @@ API (version 1, every request with ``Authorization: Bearer <token>``):
   ``progress`` 0..1, ``message``, ``error``, ``files``
 * ``POST /v1/jobs/{id}/cancel``; ``DELETE /v1/jobs/{id}`` (finished jobs)
 * ``GET /v1/jobs/{id}/files/{name}``: ``model.glb``, ``cutout-<role>.png``, ``result.json``
+* for scene prompts (``workers/scenes.py``): ``POST /v1/texts`` (scene plan, file
+  ``text.json``) and ``POST /v1/images`` (an object's reference picture, ``image.png``)
 """
 
 import contextlib
@@ -350,6 +352,52 @@ class GpuServerProvider(Provider):
             mesh_format="glb",
             metadata={"gpu_server": info, "cutouts": views},
         )
+
+    # -- scene prompts (text and image jobs) -------------------------------------------
+
+    def health(self) -> dict[str, Any]:
+        try:
+            return self._json(self._client.get("/v1/health"), "answering")
+        except httpx2.HTTPError as exc:
+            raise network_error(NAME, exc) from exc
+
+    def _post_json(self, path: str, body: dict[str, Any], doing: str) -> str:
+        try:
+            response = self._client.post(path, json=body)
+        except httpx2.HTTPError as exc:
+            raise network_error(NAME, exc) from exc
+        if response.status_code == 501:
+            raise ProviderError(
+                ProviderErrorCode.PROVIDER_UNAVAILABLE,
+                "Your GPU server has no scene models: update it to this version of "
+                "gpu-server/ and start it without AI3D_GPU_SCENES=off (docs/GPU_SERVER.md).",
+            )
+        data = self._json(response, doing)
+        job_id = data.get("id")
+        if not isinstance(job_id, str) or not job_id.isalnum():
+            raise ProviderError(
+                ProviderErrorCode.INVALID_OUTPUT, "The GPU server returned no job id."
+            )
+        return job_id
+
+    def submit_text(self, system: str, prompt: str, settings: dict[str, Any]) -> str:
+        """A text job (the scene planner); its reply is ``text.json``."""
+        body = {"system": system, "prompt": prompt, "settings": settings}
+        return self._post_json("/v1/texts", body, "receiving the prompt")
+
+    def submit_image(self, prompt: str, settings: dict[str, Any]) -> str:
+        """An image job (an object's reference picture); the picture is ``image.png``."""
+        return self._post_json(
+            "/v1/images", {"prompt": prompt, "settings": settings}, "receiving the prompt"
+        )
+
+    def fetch_file(self, task_id: str, name: str, dest: Path, max_bytes: int) -> int:
+        return self._fetch(f"/v1/jobs/{task_id}/files/{name}", dest, max_bytes)
+
+    def forget(self, task_id: str) -> None:
+        """Delete a finished job's files on the server (it keeps nothing it need not)."""
+        with contextlib.suppress(httpx2.HTTPError):
+            self._client.delete(f"/v1/jobs/{task_id}")
 
     def check_credentials(self) -> CredentialCheck:
         try:

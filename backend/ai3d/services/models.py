@@ -79,6 +79,12 @@ def _generation_notes(provider: type[Provider], job: GenerationJob) -> str:
         return (
             "Placeholder sphere from the test provider. It is not a reconstruction of your photos."
         )
+    if job.kind == JobKind.SCENE:
+        return (
+            "Made for a scene from your prompt: an AI model painted a reference picture of "
+            f"it and {provider.display_name} shaped it. Every surface was invented by AI "
+            "models; shape and size are not measurements of a real object."
+        )
     count = len(job.inputs)
     if job.kind == JobKind.IMAGE_TO_3D:
         return (

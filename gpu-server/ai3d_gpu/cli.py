@@ -7,7 +7,7 @@ import sys
 import uvicorn
 
 from ai3d_gpu.app import create_app
-from ai3d_gpu.backends import load_backend
+from ai3d_gpu.backends import load_engines
 from ai3d_gpu.config import ConfigError, ServerConfig
 
 
@@ -22,9 +22,17 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(exc, file=sys.stderr)
         return 2
-    backend = load_backend(config)
+    engines = load_engines(config)
+    backend = engines.shape
     logging.info("backend %s, model %s on %s", backend.name, backend.model, backend.device)
-    uvicorn.run(create_app(config, backend), host=args.host, port=args.port, log_level="info")
+    if engines.text is not None and engines.image is not None:
+        logging.info(
+            "scene prompts: text %s, images %s (loaded on first use)",
+            engines.text.model,
+            engines.image.model,
+        )
+    app = create_app(config, backend, text=engines.text, image=engines.image)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 
 

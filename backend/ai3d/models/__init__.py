@@ -9,6 +9,7 @@ from ai3d.models.model3d import Model3D, ModelPart, ModelVersion
 from ai3d.models.project import Project
 from ai3d.models.provider import AIProvider, ProviderConfiguration
 from ai3d.models.quality import QualityReport
+from ai3d.models.scene import Scene
 from ai3d.models.setting import AppSetting
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "Project",
     "ProviderConfiguration",
     "QualityReport",
+    "Scene",
 ]

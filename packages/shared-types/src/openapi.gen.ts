@@ -780,6 +780,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/scenes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a project's scenes */
+        get: operations["list_scenes_api_v1_projects__project_id__scenes_get"];
+        put?: never;
+        /**
+         * Make a CGI scene from a prompt
+         * @description Plans the scene and makes its objects on your GPU server (the prompt is sent there only with `send_to_gpu_server: true`), then renders a video, a still, a Blender file and an animated GLB with Blender on this computer.
+         */
+        post: operations["create_scene_api_v1_projects__project_id__scenes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers": {
         parameters: {
             query?: never;
@@ -844,6 +865,75 @@ export interface paths {
         put?: never;
         /** Verify the key with a free read-only call (account balance) */
         post: operations["check_provider_api_v1_providers__key__check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenes/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether scenes can be made here (GPU server set up, Blender installed) */
+        get: operations["readiness_api_v1_scenes_readiness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenes/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a scene */
+        get: operations["get_scene_api_v1_scenes__scene_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete a scene and its rendered files (its objects stay as models) */
+        delete: operations["delete_scene_api_v1_scenes__scene_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenes/{scene_id}/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A rendered file: the video (MP4), the still (PNG), the Blender file or the GLB */
+        get: operations["get_file_api_v1_scenes__scene_id__files__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scenes/{scene_id}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Render the same objects again with other choices (on this computer) */
+        post: operations["render_again_api_v1_scenes__scene_id__render_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1419,7 +1509,7 @@ export interface components {
          * @description How the project's photos are meant to be used.
          * @enum {string}
          */
-        InputMode: "single_image" | "multi_view";
+        InputMode: "single_image" | "multi_view" | "prompt";
         /** InspectionRead */
         InspectionRead: {
             /** Created At */
@@ -1565,7 +1655,7 @@ export interface components {
          * JobKind
          * @enum {string}
          */
-        JobKind: "image_to_3d" | "multi_view_to_3d" | "photogrammetry" | "enhance" | "retexture" | "quality_check" | "export";
+        JobKind: "image_to_3d" | "multi_view_to_3d" | "photogrammetry" | "enhance" | "retexture" | "scene" | "quality_check" | "export";
         /** JobList */
         JobList: {
             /** Items */
@@ -2268,6 +2358,232 @@ export interface components {
              */
             length_mm: number;
         };
+        /** SceneCreate */
+        SceneCreate: {
+            /**
+             * Angle
+             * @default auto
+             */
+            angle?: ("eye" | "low" | "high" | "top") | "auto";
+            /**
+             * Ground
+             * @default auto
+             */
+            ground?: ("studio" | "grass" | "sand" | "concrete" | "water" | "snow" | "none") | "auto";
+            /**
+             * Lighting
+             * @default auto
+             */
+            lighting?: ("studio" | "daylight" | "golden_hour" | "overcast" | "night" | "neon" | "space") | "auto";
+            /** Prompt */
+            prompt: string;
+            /** @description Omitted = the project's default quality. */
+            quality_mode?: components["schemas"]["QualityMode"] | null;
+            /**
+             * Seconds
+             * @default 6
+             */
+            seconds?: number;
+            /**
+             * Send To Gpu Server
+             * @description The user agreed to send the prompt to their GPU server, which plans the scene and makes its objects. Required.
+             * @default false
+             */
+            send_to_gpu_server?: boolean;
+            /**
+             * Shot
+             * @default auto
+             */
+            shot?: ("static" | "orbit" | "push_in" | "pull_out" | "pan" | "crane_up" | "fly_by") | "auto";
+            /**
+             * Style
+             * @default auto
+             */
+            style?: ("realistic" | "cinematic" | "stylised" | "miniature") | "auto";
+        };
+        /** SceneFileRead */
+        SceneFileRead: {
+            /** Filename */
+            filename: string;
+            /** Mime Type */
+            mime_type: string;
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "video" | "still" | "blend" | "glb";
+            /** Size Bytes */
+            size_bytes: number;
+            /** Url */
+            url: string;
+        };
+        /** SceneList */
+        SceneList: {
+            /** Items */
+            items: components["schemas"]["SceneRead"][];
+        };
+        /** SceneObjectRead */
+        SceneObjectRead: {
+            /** Description */
+            description: string;
+            /** Elevation M */
+            elevation_m: number;
+            /** Facing Deg */
+            facing_deg: number;
+            /** Model Id */
+            model_id: string | null;
+            /** Model Version Id */
+            model_version_id: string | null;
+            /**
+             * Motion
+             * @enum {string}
+             */
+            motion: "none" | "spin" | "bob" | "hover" | "drive" | "sway";
+            /** Name */
+            name: string;
+            /** Position M */
+            position_m: [
+                number,
+                number
+            ] | null;
+            /** Size M */
+            size_m: number;
+        };
+        /** SceneRead */
+        SceneRead: {
+            /**
+             * Angle
+             * @enum {string}
+             */
+            angle: "eye" | "low" | "high" | "top";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Files */
+            files: components["schemas"]["SceneFileRead"][];
+            /**
+             * Ground
+             * @enum {string}
+             */
+            ground: "studio" | "grass" | "sand" | "concrete" | "water" | "snow" | "none";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            job: components["schemas"]["JobRead"] | null;
+            /** Lens Mm */
+            lens_mm: number;
+            /**
+             * Lighting
+             * @enum {string}
+             */
+            lighting: "studio" | "daylight" | "golden_hour" | "overcast" | "night" | "neon" | "space";
+            /** Objects */
+            objects: components["schemas"]["SceneObjectRead"][];
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Prompt */
+            prompt: string;
+            quality_mode: components["schemas"]["QualityMode"];
+            render: components["schemas"]["SceneRenderRead"] | null;
+            /** Seconds */
+            seconds: number;
+            /**
+             * Shot
+             * @enum {string}
+             */
+            shot: "static" | "orbit" | "push_in" | "pull_out" | "pan" | "crane_up" | "fly_by";
+            /** Source Scene Id */
+            source_scene_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "making" | "ready" | "failed" | "cancelled";
+            /**
+             * Style
+             * @enum {string}
+             */
+            style: "realistic" | "cinematic" | "stylised" | "miniature";
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** SceneReadiness */
+        SceneReadiness: {
+            /** Problems */
+            problems: string[];
+            /** Ready */
+            ready: boolean;
+        };
+        /**
+         * SceneRenderAgain
+         * @description Render the same objects again with another shot, light, set, look or length
+         *     (on this computer only; nothing is sent to the GPU server).
+         */
+        SceneRenderAgain: {
+            /**
+             * Angle
+             * @default auto
+             */
+            angle?: ("eye" | "low" | "high" | "top") | "auto";
+            /**
+             * Ground
+             * @default auto
+             */
+            ground?: ("studio" | "grass" | "sand" | "concrete" | "water" | "snow" | "none") | "auto";
+            /**
+             * Lighting
+             * @default auto
+             */
+            lighting?: ("studio" | "daylight" | "golden_hour" | "overcast" | "night" | "neon" | "space") | "auto";
+            /** @description Omitted = the project's default quality. */
+            quality_mode?: components["schemas"]["QualityMode"] | null;
+            /**
+             * Seconds
+             * @default 6
+             */
+            seconds?: number;
+            /**
+             * Shot
+             * @default auto
+             */
+            shot?: ("static" | "orbit" | "push_in" | "pull_out" | "pan" | "crane_up" | "fly_by") | "auto";
+            /**
+             * Style
+             * @default auto
+             */
+            style?: ("realistic" | "cinematic" | "stylised" | "miniature") | "auto";
+        };
+        /** SceneRenderRead */
+        SceneRenderRead: {
+            /** Engines */
+            engines: {
+                [key: string]: string;
+            };
+            /** Fps */
+            fps: number;
+            /** Frames */
+            frames: number;
+            /** Height */
+            height: number;
+            /** Seconds */
+            seconds: {
+                [key: string]: number;
+            };
+            /** Width */
+            width: number;
+        };
         /** SkippedRead */
         SkippedRead: {
             /**
@@ -2437,6 +2753,14 @@ export type ReportStatus = components['schemas']['ReportStatus'];
 export type RetextureRequest = components['schemas']['RetextureRequest'];
 export type RetryRequest = components['schemas']['RetryRequest'];
 export type ScaleReferenceIn = components['schemas']['ScaleReferenceIn'];
+export type SceneCreate = components['schemas']['SceneCreate'];
+export type SceneFileRead = components['schemas']['SceneFileRead'];
+export type SceneList = components['schemas']['SceneList'];
+export type SceneObjectRead = components['schemas']['SceneObjectRead'];
+export type SceneRead = components['schemas']['SceneRead'];
+export type SceneReadiness = components['schemas']['SceneReadiness'];
+export type SceneRenderAgain = components['schemas']['SceneRenderAgain'];
+export type SceneRenderRead = components['schemas']['SceneRenderRead'];
 export type SkippedRead = components['schemas']['SkippedRead'];
 export type SurfaceProvenance = components['schemas']['SurfaceProvenance'];
 export type SystemInfo = components['schemas']['SystemInfo'];
@@ -4639,6 +4963,93 @@ export interface operations {
             };
         };
     };
+    list_scenes_api_v1_projects__project_id__scenes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneList"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_scene_api_v1_projects__project_id__scenes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Repeating a request with the same key returns the original job. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_providers_api_v1_providers_get: {
         parameters: {
             query?: never;
@@ -4863,6 +5274,210 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialCheckRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    readiness_api_v1_scenes_readiness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneReadiness"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_scene_api_v1_scenes__scene_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneRead"];
+                };
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_scene_api_v1_scenes__scene_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_file_api_v1_scenes__scene_id__files__name__get: {
+        parameters: {
+            query?: {
+                download?: boolean;
+            };
+            header?: never;
+            path: {
+                scene_id: string;
+                name: "video" | "still" | "blend" | "glb";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Client error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Server error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    render_again_api_v1_scenes__scene_id__render_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Repeating a request with the same key returns the original job. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                scene_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SceneRenderAgain"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SceneRead"];
                 };
             };
             /** @description Client error */

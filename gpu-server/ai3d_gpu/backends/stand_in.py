@@ -1,21 +1,28 @@
-"""A backend for trying the server without a GPU (and for tests).
+"""Backends for trying the server without a GPU (and for tests).
 
-It makes no real 3D model: it returns an ellipsoid with the front photo's
-proportions and its average colour. Everything around it (upload, queue, framing,
-results, the app's provider and refinement) runs for real.
+They run no AI model. The 3D stand-in returns an ellipsoid with the front photo's
+proportions and its average colour; the text stand-in answers a request for a JSON
+scene plan with one object per phrase of the prompt; the image stand-in paints a
+plain coloured shape. Everything around them (upload, queue, framing, results, and
+the app's provider, refinement, scene layout and rendering) runs for real.
 """
 
+import hashlib
+import json
+import re
 from collections.abc import Callable
 
 import numpy as np
 import trimesh
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from ai3d_gpu.backends.base import (
     CancelledError,
     Generated,
     GenerationSettings,
+    ImageRequest,
     Progress,
+    TextRequest,
     ViewPhoto,
 )
 from ai3d_gpu.framing import Framed, frame
@@ -69,3 +76,56 @@ class StandInBackend:
             framed=framed,
             info={"seed": settings.seed},
         )
+
+
+_SPLIT = re.compile(r",|;|\band\b|\bwith\b|\bnext to\b|\bbeside\b|\bnear\b", re.IGNORECASE)
+_ARTICLE = re.compile(r"^(?:a|an|the|some|two|three)\s+", re.IGNORECASE)
+
+
+class StandInText:
+    """No language model: a JSON plan with one object per phrase (at most four)."""
+
+    name = "stand-in"
+    model = "stand-in text (no AI model)"
+    device = "cpu"
+
+    def write(self, request: TextRequest, cancelled: Callable[[], bool]) -> str:
+        if cancelled():
+            raise CancelledError
+        if "json" not in request.system.lower():
+            return request.prompt
+        phrases = [_ARTICLE.sub("", p.strip(" .")) for p in _SPLIT.split(request.prompt)]
+        names = [p for p in phrases if p][:4] or ["object"]
+        return json.dumps(
+            {
+                "title": request.prompt.strip()[:60],
+                "objects": [{"name": n[:60], "description": n} for n in names],
+            }
+        )
+
+
+class StandInImage:
+    """No image model: a coloured ellipse (colour and proportions from the prompt)
+    on a plain light background, which the 3D stand-in turns into a coloured shape."""
+
+    name = "stand-in"
+    model = "stand-in image (no AI model)"
+    device = "cpu"
+
+    def paint(
+        self, request: ImageRequest, progress: Progress, cancelled: Callable[[], bool]
+    ) -> Image.Image:
+        if cancelled():
+            raise CancelledError
+        progress("painting", 0.0)
+        digest = hashlib.sha256(request.prompt.encode()).digest()
+        colour = (40 + digest[0] % 180, 40 + digest[1] % 180, 40 + digest[2] % 180)
+        width, height = request.settings.width, request.settings.height
+        image = Image.new("RGB", (width, height), (236, 236, 236))
+        aspect = 0.5 + (digest[3] % 100) / 100  # width / height of the shape
+        box_h = height * 0.6
+        box_w = min(width * 0.8, box_h * aspect)
+        left, top = (width - box_w) / 2, (height - box_h) / 2
+        ImageDraw.Draw(image).ellipse((left, top, left + box_w, top + box_h), fill=colour)
+        progress("painting", 1.0)
+        return image

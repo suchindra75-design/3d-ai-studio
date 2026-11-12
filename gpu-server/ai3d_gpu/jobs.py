@@ -1,8 +1,15 @@
 """The job queue: one GPU, one job at a time, results on disk until fetched or old.
 
-Each job has its own folder: the uploaded photos, then ``model.glb`` (glTF axes,
-linear vertex colours as glTF requires), ``cutout-<role>.png`` (each photo framed
-as the model saw it, with transparency) and ``result.json``.
+Each job has its own folder and a kind:
+
+* ``model``: the uploaded photos, then ``model.glb`` (glTF axes, linear vertex
+  colours as glTF requires) and ``cutout-<role>.png`` (each photo framed as the
+  model saw it, with transparency);
+* ``text``: ``text.json`` (``{"text": ...}``), the text model's reply;
+* ``image``: ``image.png``.
+
+Every finished job also has ``result.json``. Before a job runs, the models of the
+other kinds are moved off the GPU (``park``), so one GPU can hold all three.
 """
 
 import json
@@ -20,12 +27,21 @@ import numpy as np
 import trimesh
 from PIL import Image
 
-from ai3d_gpu.backends.base import Backend, CancelledError, Generated, GenerationSettings, ViewPhoto
+from ai3d_gpu.backends import Engines
+from ai3d_gpu.backends.base import (
+    CancelledError,
+    Generated,
+    GenerationSettings,
+    ImageRequest,
+    TextRequest,
+    ViewPhoto,
+)
 from ai3d_gpu.framing import NoObjectError
 
 log = logging.getLogger(__name__)
 
 Status = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+Kind = Literal["model", "text", "image"]
 TERMINAL = {"succeeded", "failed", "cancelled"}
 
 
@@ -33,8 +49,10 @@ TERMINAL = {"succeeded", "failed", "cancelled"}
 class Job:
     id: str
     folder: Path
-    photos: list[tuple[str, Path]]  # (role, path)
-    settings: GenerationSettings
+    kind: Kind = "model"
+    photos: list[tuple[str, Path]] = field(default_factory=list)  # (role, path)
+    settings: GenerationSettings = field(default_factory=GenerationSettings)
+    request: TextRequest | ImageRequest | None = None
     status: Status = "queued"
     stage: str | None = None
     progress: float = 0.0
@@ -48,6 +66,7 @@ class Job:
     def read(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "kind": self.kind,
             "status": self.status,
             "stage": self.stage,
             "progress": round(self.progress, 3),
@@ -95,9 +114,9 @@ def write_result(generated: Generated, folder: Path) -> dict[str, Any]:
 
 class JobQueue:
     def __init__(
-        self, backend: Backend, work_dir: Path, *, max_queue: int, keep_seconds: int
+        self, engines: Engines, work_dir: Path, *, max_queue: int, keep_seconds: int
     ) -> None:
-        self.backend = backend
+        self.engines = engines
         self.work_dir = work_dir
         self.max_queue = max_queue
         self.keep_seconds = keep_seconds
@@ -111,24 +130,37 @@ class JobQueue:
 
     # -- API ---------------------------------------------------------------------
 
+    def _new_job(self) -> tuple[str, Path]:
+        """Call with the lock held."""
+        self._forget_old()
+        waiting = sum(1 for job in self._jobs.values() if job.status in {"queued", "running"})
+        if waiting >= self.max_queue:
+            raise QueueFullError
+        job_id = uuid.uuid4().hex
+        folder = self.work_dir / job_id
+        folder.mkdir(parents=True)
+        return job_id, folder
+
+    def _enqueue(self, job: Job) -> Job:
+        """Call with the lock held."""
+        self._jobs[job.id] = job
+        self._wake.notify_all()
+        return job
+
     def submit(self, photos: list[tuple[str, bytes]], settings: GenerationSettings) -> Job:
         with self._lock:
-            self._forget_old()
-            waiting = sum(1 for job in self._jobs.values() if job.status in {"queued", "running"})
-            if waiting >= self.max_queue:
-                raise QueueFullError
-            job_id = uuid.uuid4().hex
-            folder = self.work_dir / job_id
-            folder.mkdir(parents=True)
+            job_id, folder = self._new_job()
             stored = []
             for index, (role, data) in enumerate(photos):
                 path = folder / f"input-{index}-{role}"
                 path.write_bytes(data)
                 stored.append((role, path))
-            job = Job(id=job_id, folder=folder, photos=stored, settings=settings)
-            self._jobs[job_id] = job
-            self._wake.notify_all()
-            return job
+            return self._enqueue(Job(id=job_id, folder=folder, photos=stored, settings=settings))
+
+    def submit_request(self, kind: Kind, request: TextRequest | ImageRequest) -> Job:
+        with self._lock:
+            job_id, folder = self._new_job()
+            return self._enqueue(Job(id=job_id, folder=folder, kind=kind, request=request))
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -204,6 +236,55 @@ class JobQueue:
         while (job := self._next()) is not None:
             self._run(job)
 
+    def _engine(self, kind: Kind) -> Any:
+        engine = {
+            "model": self.engines.shape,
+            "text": self.engines.text,
+            "image": self.engines.image,
+        }[kind]
+        if engine is None:
+            raise RuntimeError(f"This server has no {kind} model.")
+        return engine
+
+    def _make_room(self, kind: Kind) -> None:
+        """Move the other kinds' models off the GPU before this one runs."""
+        using = self._engine(kind)
+        for other in (self.engines.shape, self.engines.text, self.engines.image):
+            if other is not None and other is not using:
+                park = getattr(other, "park", None)
+                if park is not None:
+                    park()
+
+    def _produce(self, job: Job, progress: Any) -> dict[str, Any]:
+        """Run the job's model and write its files; returns what ``result.json`` holds."""
+
+        def cancelled() -> bool:
+            return job.cancel_requested
+
+        if job.kind == "text":
+            assert isinstance(job.request, TextRequest)
+            progress("writing", 0.0)
+            text = self.engines.text.write(job.request, cancelled)  # type: ignore[union-attr]
+            (job.folder / "text.json").write_text(json.dumps({"text": text}), encoding="utf-8")
+            return {"files": ["text.json"], "characters": len(text)}
+        if job.kind == "image":
+            assert isinstance(job.request, ImageRequest)
+            image = self.engines.image.paint(job.request, progress, cancelled)  # type: ignore[union-attr]
+            image.save(job.folder / "image.png")
+            return {
+                "files": ["image.png"],
+                "width": image.width,
+                "height": image.height,
+                "seed": job.request.settings.seed,
+            }
+        views = []
+        for role, path in job.photos:
+            with Image.open(path) as opened:
+                opened.load()
+                views.append(ViewPhoto(role, opened.copy()))  # type: ignore[arg-type]
+        generated = self.engines.shape.generate(views, job.settings, progress, cancelled)
+        return write_result(generated, job.folder)
+
     def _run(self, job: Job) -> None:
         def progress(stage: str, fraction: float) -> None:
             job.stage = stage
@@ -212,22 +293,18 @@ class JobQueue:
                 "preparing": "Removing the background and framing the photos.",
                 "generating": "Generating the 3D shape.",
                 "meshing": "Building the surface.",
+                "writing": "Writing the scene plan.",
+                "painting": "Painting the picture.",
             }.get(stage, stage)
 
         started = time.perf_counter()
         try:
-            views = []
-            for role, path in job.photos:
-                with Image.open(path) as opened:
-                    opened.load()
-                    views.append(ViewPhoto(role, opened.copy()))  # type: ignore[arg-type]
-            generated = self.backend.generate(
-                views, job.settings, progress, lambda: job.cancel_requested
-            )
-            result = write_result(generated, job.folder)
+            engine = self._engine(job.kind)
+            self._make_room(job.kind)
+            result = self._produce(job, progress)
             result["seconds"] = round(time.perf_counter() - started, 1)
-            result["model"] = self.backend.model
-            result["device"] = self.backend.device
+            result["model"] = engine.model
+            result["device"] = engine.device
             (job.folder / "result.json").write_text(json.dumps(result), encoding="utf-8")
             with self._lock:
                 job.result = result

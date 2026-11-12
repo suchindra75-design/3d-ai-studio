@@ -35,6 +35,11 @@ import type {
   ProviderRead,
   RetextureRequest,
   RetryRequest,
+  SceneCreate,
+  SceneList,
+  SceneRead,
+  SceneReadiness,
+  SceneRenderAgain,
   SystemInfo,
   UploadResponse,
 } from '@ai3d/shared-types';
@@ -208,6 +213,24 @@ export function createApiClient({ baseUrl, token, fetch: fetchImpl }: ApiClientO
         request<ProviderRead>('DELETE', `/api/v1/providers/${key}/base-url`),
       check: (key: string) =>
         request<CredentialCheckRead>('POST', `/api/v1/providers/${key}/check`),
+    },
+    /** CGI scenes from a prompt: planned and made on your GPU server, rendered here. */
+    scenes: {
+      readiness: () => request<SceneReadiness>('GET', '/api/v1/scenes/readiness'),
+      list: (projectId: string) =>
+        request<SceneList>('GET', `/api/v1/projects/${projectId}/scenes`),
+      get: (id: string) => request<SceneRead>('GET', `/api/v1/scenes/${id}`),
+      create: (projectId: string, body: SceneCreate, idempotencyKey?: string) =>
+        request<SceneRead>('POST', `/api/v1/projects/${projectId}/scenes`, {
+          body,
+          headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+        }),
+      renderAgain: (id: string, body: SceneRenderAgain, idempotencyKey?: string) =>
+        request<SceneRead>('POST', `/api/v1/scenes/${id}/render`, {
+          body,
+          headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+        }),
+      delete: (id: string) => request<void>('DELETE', `/api/v1/scenes/${id}`),
     },
     generations: {
       plan: (projectId: string, body: GenerationCreate) =>

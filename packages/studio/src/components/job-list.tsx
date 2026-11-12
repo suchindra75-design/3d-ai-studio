@@ -120,11 +120,16 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
   const retryKey = useRef(newIdempotencyKey());
   // Repairs (D70) run as enhance jobs that do only the operations asked for.
   const isRepair = job.kind === 'enhance' && job.provider_summary[0]?.startsWith('Repair:');
+  const scene = job.kind === 'scene';
   const name = isRepair
     ? 'Repair (on this computer)'
     : job.kind === 'enhance'
       ? 'Enhance (on this computer)'
-      : (job.provider?.display_name ?? 'Unknown provider');
+      : scene
+        ? job.provider
+          ? 'Scene from your prompt'
+          : 'Scene render (on this computer)'
+        : (job.provider?.display_name ?? 'Unknown provider');
   const uploads = job.provider?.uploads_images ?? false;
   const photos = pluralize(job.inputs.length, 'photo');
 
@@ -151,7 +156,11 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
           <span className="text-xs text-subtle-foreground">
             {job.kind === 'enhance' || job.kind === 'retexture'
               ? 'Model version'
-              : pluralize(job.inputs.length, 'photo')}{' '}
+              : scene
+                ? job.provider
+                  ? 'Your GPU server, then Blender here'
+                  : 'Blender on this computer'
+                : pluralize(job.inputs.length, 'photo')}{' '}
             · {formatRelativeTime(job.created_at)}
           </span>
         </div>
@@ -259,11 +268,15 @@ function JobCard({ job, projectId }: { job: JobRead; projectId: string }) {
       <ConfirmDialog
         open={confirmRetry}
         onOpenChange={setConfirmRetry}
-        title="Run this generation again?"
+        title={scene ? 'Make this scene again?' : 'Run this generation again?'}
         description={
-          uploads
-            ? `This sends ${photos} to ${name} again as a new job, which ${name} may charge for.`
-            : 'This starts a new job with the same photos and settings.'
+          scene
+            ? uploads
+              ? 'This sends the prompt to your GPU server again to make the objects still missing; objects already made are kept. Then the shot is rendered here.'
+              : 'This renders the shot again on this computer.'
+            : uploads
+              ? `This sends ${photos} to ${name} again as a new job, which ${name} may charge for.`
+              : 'This starts a new job with the same photos and settings.'
         }
         confirmLabel="Run again"
         onConfirm={() => runRetry()}

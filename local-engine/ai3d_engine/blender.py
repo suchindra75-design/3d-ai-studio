@@ -3,13 +3,14 @@
 Blender is only ever started as::
 
     <blender found by find_tool("blender")> --background --factory-startup
-        --python-exit-code 1 --python <the repo's blender_scripts/ai3d_blender.py>
+        --python-exit-code 1 --python <the repo's blender_scripts/<script>.py>
         -- <command> <request.json> <result.json>
 
-``command`` is one of :data:`COMMANDS`; the request is JSON written here from
-typed values (file paths and numbers). No user-provided script text or shell
-is involved, ``shell=True`` is never used, runs have a timeout, and a caller
-can cancel a run.
+``command`` is one of :data:`COMMANDS`; the script is ``ai3d_blender.py``, or
+``ai3d_scene.py`` for ``render_scene`` (CGI shots made from a prompt). The request
+is JSON written here from typed values (file paths, names from fixed sets and
+numbers). No user-provided script text or shell is involved, ``shell=True`` is
+never used, runs have a timeout, and a caller can cancel a run.
 """
 
 import functools
@@ -28,7 +29,8 @@ from ai3d_engine.runtime import find_tool, run_tool
 log = logging.getLogger(__name__)
 
 SCRIPT = Path(__file__).resolve().parent / "blender_scripts" / "ai3d_blender.py"
-COMMANDS = frozenset({"inspect", "export_fbx", "import_fbx", "bake", "remesh"})
+SCENE_SCRIPT = SCRIPT.with_name("ai3d_scene.py")
+COMMANDS = frozenset({"inspect", "export_fbx", "import_fbx", "bake", "remesh", "render_scene"})
 # The script uses the Blender 4.x Python API (Principled BSDF socket names, EMIT bake).
 MIN_VERSION = (4, 2)
 TAIL_LINES = 30
@@ -100,7 +102,7 @@ def build_args(command: str, request_path: Path, result_path: Path) -> list[str]
         "--python-exit-code",
         "1",
         "--python",
-        str(SCRIPT),
+        str(SCENE_SCRIPT if command == "render_scene" else SCRIPT),
         "--",
         command,
         str(request_path),
@@ -110,7 +112,7 @@ def build_args(command: str, request_path: Path, result_path: Path) -> list[str]
 
 def run_blender(
     command: str,
-    request: Mapping[str, str | int | float],
+    request: Mapping[str, Any],
     *,
     workdir: Path,
     timeout: float = 600.0,

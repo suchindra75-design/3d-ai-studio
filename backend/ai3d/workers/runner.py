@@ -336,6 +336,10 @@ class JobRunner:
                     )
                 elif job.kind == JobKind.ENHANCE:
                     message = "Restarting the enhancement after an interruption."
+                elif job.kind == JobKind.SCENE:
+                    message = (
+                        "Continuing the scene after an interruption; objects already made are kept."
+                    )
                 elif job.provider_key == LocalAIProvider.key:
                     message = (
                         "Restarting the local AI generation after an interruption "
@@ -385,6 +389,7 @@ class JobRunner:
         from ai3d.workers.generation import run_generation  # noqa: PLC0415 - avoids a cycle
         from ai3d.workers.local_generation import run_local_generation  # noqa: PLC0415
         from ai3d.workers.reconstruction import run_reconstruction  # noqa: PLC0415
+        from ai3d.workers.scenes import run_scene  # noqa: PLC0415
 
         context = JobContext(self, job_id)
         with self.database.session() as db:
@@ -394,7 +399,11 @@ class JobRunner:
                 )
             ).first()
         kind, provider_key = (row.kind, row.provider_key) if row else (None, None)
-        handlers = {JobKind.PHOTOGRAMMETRY: run_reconstruction, JobKind.ENHANCE: run_enhance}
+        handlers = {
+            JobKind.PHOTOGRAMMETRY: run_reconstruction,
+            JobKind.ENHANCE: run_enhance,
+            JobKind.SCENE: run_scene,
+        }
         handler = handlers.get(kind, run_generation) if kind else run_generation
         if provider_key == LocalAIProvider.key:
             handler = run_local_generation

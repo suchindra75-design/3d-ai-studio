@@ -26,6 +26,14 @@ export function fakeApi(overrides: DeepPartial<ApiClient> = {}): ApiClient {
       checkCutout: vi.fn(),
     },
     images: { list: vi.fn(), get: vi.fn(), delete: vi.fn(), upload: vi.fn() },
+    scenes: {
+      readiness: vi.fn(),
+      list: vi.fn(),
+      get: vi.fn(),
+      create: vi.fn(),
+      renderAgain: vi.fn(),
+      delete: vi.fn(),
+    },
     devices: { local: vi.fn() },
     providers: {
       list: vi.fn(),
@@ -71,6 +79,7 @@ export function fakeApi(overrides: DeepPartial<ApiClient> = {}): ApiClient {
     ...overrides,
     projects: { ...base.projects, ...overrides.projects },
     images: { ...base.images, ...overrides.images },
+    scenes: { ...base.scenes, ...overrides.scenes },
     devices: { ...base.devices, ...overrides.devices },
     providers: { ...base.providers, ...overrides.providers },
     generations: { ...base.generations, ...overrides.generations },
